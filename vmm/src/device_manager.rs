@@ -12,6 +12,7 @@
 use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
+use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig};
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::hypervisor::wrapper::*;
@@ -561,7 +562,7 @@ impl DeviceRelocation for AddressManager {
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm_fd
-                        .register_ioevent(event, &io_addr, 0)
+                        .register_ioevent(event, &io_addr, None)
                         .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
             } else {
@@ -2396,7 +2397,7 @@ impl DeviceManager {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
                 .vm_fd
-                .register_ioevent(event, &io_addr, 0)
+                .register_ioevent(event, &io_addr, None)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 
@@ -2528,7 +2529,7 @@ impl DeviceManager {
             let io_addr = IoEventAddress::Mmio(*addr);
             self.address_manager
                 .vm_fd
-                .register_ioevent(event, &io_addr, i as u32)
+                .register_ioevent(event, &io_addr, Some(i as u64))
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 

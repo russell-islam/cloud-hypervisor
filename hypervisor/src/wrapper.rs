@@ -1,20 +1,19 @@
-
 extern crate kvm_ioctls;
-use std::sync::Arc;
-use kvm_ioctls::*;
 use kvm_bindings::*;
+use kvm_ioctls::*;
+use std::sync::Arc;
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 extern crate libc;
+use devices::ioapic;
 use std::io::{self};
 use std::{result, str};
-use devices::{ioapic};
+
 
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use vm_memory::{Address, GuestAddress};
 extern crate linux_loader;
 use crate::cpuidpatch::*;
-
 
 pub const WRAPPER_DEFAULT_MODULE: &str = "kvm";
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
@@ -50,7 +49,6 @@ pub enum Error {
 
     /// Cannot convert command line into CString
     CmdLineCString(std::ffi::NulError),
-
 
     PoisonedState,
 
@@ -105,8 +103,6 @@ pub enum Error {
 
     /// Cannot convert source URL from Path into &str
     RestoreSourceUrlPathToStr,
-
-
 }
 pub type Result<T> = result::Result<T, Error>;
 pub type ResultOps<T> = std::result::Result<T, errno::Error>;
@@ -115,12 +111,12 @@ pub trait VmFdOps: Send + Sync {
     fn create_irq_chip(&self) -> ResultOps<()>;
     fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()>;
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()>;
-    fn create_vcpu(&self, id: u8) -> ResultOps<Arc < dyn VcpuOps>>;
+    fn create_vcpu(&self, id: u8) -> ResultOps<Arc< dyn VcpuOps>>;
     fn register_ioevent(
         &self,
         fd: &EventFd,
         addr: &IoEventAddress,
-        datamatch: u64,
+        datamatch: Option<u64>,
     ) -> ResultOps<()>;
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> ResultOps<()>;
     fn set_gsi_routing(&self, irq_routing: &kvm_irq_routing) -> ResultOps<()>;
@@ -128,7 +124,7 @@ pub trait VmFdOps: Send + Sync {
         &self,
         user_memory_region: kvm_userspace_memory_region,
     ) -> ResultOps<()>;
-    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd> ;
+    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd>;
     fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8);
 }
 
@@ -149,21 +145,25 @@ impl VmFdOps for KvmVmFd {
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()> {
         self.fd.unregister_irqfd(fd, gsi)
     }
-    fn create_vcpu(&self, id: u8) -> ResultOps<Arc < dyn VcpuOps>> {
+    fn create_vcpu(&self, id: u8) -> ResultOps<Arc<dyn VcpuOps>> {
         let vc = self.fd.create_vcpu(id).expect("new VcpuFd failed");
-        let vcpu = KvmVcpuId{fd:vc,};
+        let vcpu = KvmVcpuId{ fd : vc };
         Ok(Arc::new(vcpu))
     }
     fn register_ioevent(
         &self,
         fd: &EventFd,
         addr: &IoEventAddress,
-        datamatch: u64,
+        datamatch: Option<u64>,
     ) -> ResultOps<()> {
-        self.fd.register_ioevent(fd, addr, datamatch)
+        if let Some(kvm_datamatch) = datamatch {
+            self.fd.register_ioevent(fd, addr, kvm_datamatch)
+        } else {
+            self.fd.register_ioevent(fd, addr, NoDatamatch)
+        }
     }
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> ResultOps<()> {
-        self.fd.unregister_ioevent(fd,addr)
+        self.fd.unregister_ioevent(fd, addr)
     }
     fn set_gsi_routing(&self, irq_routing: &kvm_irq_routing) -> ResultOps<()> {
         self.fd.set_gsi_routing(irq_routing)
@@ -174,24 +174,21 @@ impl VmFdOps for KvmVmFd {
     ) -> ResultOps<()> {
         unsafe { self.fd.set_user_memory_region(user_memory_region) }
     }
-    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd>{
+    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd> {
         self.fd.create_device(device)
     }
-    
     fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8) {
         let mut cpuid = self.cpuid.clone();
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
         vcpu.set_cpuid2(&cpuid).unwrap()
     }
-    
 }
 
 pub fn get_default_vmfd() -> Result<Arc<dyn VmFdOps>> {
     KvmVmFd::new()
 }
 impl KvmVmFd {
-    fn new()-> Result<Arc <dyn VmFdOps>> {
-        
+    fn new()-> Result<Arc<dyn VmFdOps>> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
 
         // Check required capabilities:
@@ -228,7 +225,7 @@ impl KvmVmFd {
 
         // Set TSS
         fd.set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
-           .map_err(Error::VmSetup)?;
+            .map_err(Error::VmSetup)?;
 
         // Create split irqchip
         // Only the local APIC is emulated in kernel, both PICs and IOAPIC
@@ -239,14 +236,17 @@ impl KvmVmFd {
         fd.enable_cap(&cap).map_err(Error::VmSetup)?;
         let cpuid: CpuId = patch_cpuid(&kvm).unwrap();
 
-        Ok(Arc::new(KvmVmFd{fd: fd,  cpuid:cpuid}))
+        Ok(Arc::new(KvmVmFd {
+            fd: fd,
+            cpuid: cpuid,
+        }))
     }
 }
 
-pub trait VcpuOps:Send + Sync {
+pub trait VcpuOps: Send + Sync {
     fn get_regs(&self) -> ResultOps<kvm_regs>;
     fn set_regs(&self, regs: &kvm_regs) -> ResultOps<()>;
-    fn get_sregs(&self) -> ResultOps<kvm_sregs> ;
+    fn get_sregs(&self) -> ResultOps<kvm_sregs>;
     fn set_sregs(&self, sregs: &kvm_sregs) -> ResultOps<()>;
     fn get_fpu(&self) -> ResultOps<kvm_fpu>;
     fn set_fpu(&self, fpu: &kvm_fpu) -> ResultOps<()>;
@@ -269,10 +269,10 @@ pub struct KvmVcpuId {
     fd: VcpuFd,
 }
 impl VcpuOps for KvmVcpuId {
-    fn get_regs(&self) -> ResultOps<kvm_regs>{
+    fn get_regs(&self) -> ResultOps<kvm_regs> {
         self.fd.get_regs()
     }
-    fn set_regs(&self, regs: &kvm_regs) -> ResultOps<()>{
+    fn set_regs(&self, regs: &kvm_regs) -> ResultOps<()> {
         self.fd.set_regs(regs)
     }
     fn get_sregs(&self) -> ResultOps<kvm_sregs> {
@@ -299,31 +299,31 @@ impl VcpuOps for KvmVcpuId {
     fn set_lapic(&self, klapic: &kvm_lapic_state) -> ResultOps<()> {
         self.fd.set_lapic(klapic)
     }
-    fn get_msrs(&self, msrs: &mut Msrs) -> ResultOps<usize>{
+    fn get_msrs(&self, msrs: &mut Msrs) -> ResultOps<usize> {
         self.fd.get_msrs(msrs)
     }
-    fn set_msrs(&self, msrs: &Msrs) -> ResultOps<usize>{
+    fn set_msrs(&self, msrs: &Msrs) -> ResultOps<usize> {
         self.fd.set_msrs(msrs)
     }
-    fn get_mp_state(&self) -> ResultOps<kvm_mp_state>{
+    fn get_mp_state(&self) -> ResultOps<kvm_mp_state> {
         self.fd.get_mp_state()
     }
-    fn set_mp_state(&self, mp_state: kvm_mp_state) -> ResultOps<()>{
+    fn set_mp_state(&self, mp_state: kvm_mp_state) -> ResultOps<()> {
         self.fd.set_mp_state(mp_state)
     }
-    fn get_xsave(&self) -> ResultOps<kvm_xsave>{
+    fn get_xsave(&self) -> ResultOps<kvm_xsave> {
         self.fd.get_xsave()
     }
     fn set_xsave(&self, xsave: &kvm_xsave) -> ResultOps<()>{
         self.fd.set_xsave(xsave)
     }
-    fn get_xcrs(&self) -> ResultOps<kvm_xcrs>{
+    fn get_xcrs(&self) -> ResultOps<kvm_xcrs> {
         self.fd.get_xcrs()
     }
     fn set_xcrs(&self, xcrs: &kvm_xcrs) -> ResultOps<()>{
         self.fd.set_xcrs(xcrs)
     }
-    fn run(&self) -> ResultOps<VcpuExit>{
+    fn run(&self) -> ResultOps<VcpuExit> {
         self.fd.run()
     }
     fn get_vcpu_events(&self) -> ResultOps<kvm_vcpu_events> {
