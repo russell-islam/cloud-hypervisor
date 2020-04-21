@@ -24,7 +24,7 @@ use devices::{interrupt_controller::InterruptController, BusDevice};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
-    kvm_xsave, CpuId, Msrs,
+    kvm_xsave, Msrs,
 };
 use kvm_ioctls::*;
 #[cfg(target_arch = "x86_64")]
@@ -53,6 +53,9 @@ use vmm_sys_util::signal::SIGRTMIN;
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 #[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
+use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
+use crate::hypervisor::{VmFdOps, VcpuOps};
+
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -210,6 +213,7 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
+<<<<<<< HEAD
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -289,6 +293,8 @@ impl CpuidPatch {
     }
 }
 
+=======
+>>>>>>> First try untangle
 #[cfg(feature = "acpi")]
 #[repr(packed)]
 struct LocalAPIC {
@@ -323,7 +329,7 @@ struct InterruptSourceOverride {
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    fd: VcpuFd,
+    fd: Arc< dyn VcpuOps>,
     id: u8,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     io_bus: Arc<devices::Bus>,
@@ -361,13 +367,14 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        fd: &Arc<VmFd>,
+        fd: &Arc<dyn VmFdOps>,
         io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
         let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
+        
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {
             fd: kvm_vcpu,
@@ -391,14 +398,10 @@ impl Vcpu {
         &mut self,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-        cpuid: CpuId,
+        vmfd: Arc< dyn VmFdOps>,
     ) -> Result<()> {
-        let mut cpuid = cpuid;
-        CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(self.id));
-        self.fd
-            .set_cpuid2(&cpuid)
-            .map_err(Error::SetSupportedCpusFailed)?;
 
+        vmfd.patch_cpuid(self.fd.clone(), self.id);
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
         if let Some(kernel_entry_point) = kernel_entry_point {
             // Safe to unwrap because this method is called after the VM is configured
@@ -627,7 +630,7 @@ pub struct CpuManager {
     #[cfg(target_arch = "x86_64")]
     cpuid: CpuId,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    fd: Arc<VmFd>,
+    fd: Arc<dyn VmFdOps>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -758,7 +761,7 @@ impl CpuManager {
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] kvm: &Kvm,
-        fd: Arc<VmFd>,
+        fd: Arc<dyn VmFdOps>,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
@@ -875,7 +878,6 @@ impl CpuManager {
             interrupt_controller,
             creation_ts,
         )?;
-
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
         let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
@@ -886,15 +888,8 @@ impl CpuManager {
             .clone();
 
         if let Some(snapshot) = snapshot {
-            let mut cpuid = self.cpuid.clone();
-            CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(cpu_id));
-
-            vcpu.lock()
-                .unwrap()
-                .fd
-                .set_cpuid2(&cpuid)
-                .map_err(Error::SetSupportedCpusFailed)?;
-
+            self.fd.patch_cpuid(vcpu.lock().unwrap().fd.clone(), cpu_id);
+            
             vcpu.lock()
                 .unwrap()
                 .restore(snapshot)
@@ -904,7 +899,7 @@ impl CpuManager {
 
             vcpu.lock()
                 .unwrap()
-                .configure(entry_point, &vm_memory, self.cpuid.clone())
+                .configure(entry_point, &vm_memory, self.fd.clone())
                 .expect("Failed to configure vCPU");
         }
 

@@ -18,11 +18,10 @@ extern crate libc;
 #[cfg(feature = "acpi")]
 extern crate acpi_tables;
 extern crate arch_gen;
+extern crate hypervisor;
 extern crate kvm_ioctls;
 extern crate linux_loader;
 extern crate vm_memory;
-
-use kvm_ioctls::*;
 use std::result;
 
 #[derive(Debug)]

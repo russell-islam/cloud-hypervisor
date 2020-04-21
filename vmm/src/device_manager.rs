@@ -14,6 +14,7 @@ use crate::config::ConsoleOutputMode;
 use crate::config::DeviceConfig;
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
+use crate::hypervisor::wrapper::*;
 use crate::interrupt::{
     KvmLegacyUserspaceInterruptManager, KvmMsiInterruptManager, KvmRoutingEntry,
 };
@@ -422,7 +423,7 @@ struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
-    vm_fd: Arc<VmFd>,
+    vm_fd: Arc<dyn VmFdOps>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
 }
@@ -560,7 +561,7 @@ impl DeviceRelocation for AddressManager {
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm_fd
-                        .register_ioevent(event, &io_addr, NoDatamatch)
+                        .register_ioevent(event, &io_addr, 0)
                         .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
                 }
             } else {
@@ -718,7 +719,7 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new(
-        vm_fd: Arc<VmFd>,
+        vm_fd: Arc<dyn VmFdOps>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
@@ -2114,7 +2115,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    fn create_kvm_device(vm: &Arc<VmFd>) -> DeviceManagerResult<DeviceFd> {
+    fn create_kvm_device(vm: &Arc<dyn VmFdOps>) -> DeviceManagerResult<DeviceFd> {
         let mut vfio_dev = kvm_bindings::kvm_create_device {
             type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,
@@ -2395,7 +2396,7 @@ impl DeviceManager {
             let io_addr = IoEventAddress::Mmio(addr);
             self.address_manager
                 .vm_fd
-                .register_ioevent(event, &io_addr, NoDatamatch)
+                .register_ioevent(event, &io_addr, 0)
                 .map_err(DeviceManagerError::RegisterIoevent)?;
         }
 

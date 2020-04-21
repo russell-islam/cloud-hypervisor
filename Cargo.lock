@@ -53,6 +53,7 @@ dependencies = [
  "acpi_tables",
  "arch_gen",
  "byteorder",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -445,6 +446,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91780f809e750b0a89f5544be56617ff6b1227ee485bcb06ebe10cdf89bd3b71"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "hypervisor"
+version = "0.1.0"
+dependencies = [
+ "devices",
+ "kvm-bindings",
+ "kvm-ioctls",
+ "libc",
+ "linux-loader",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -1346,6 +1360,7 @@ dependencies = [
  "arc-swap",
  "byteorder",
  "devices",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -1528,6 +1543,7 @@ dependencies = [
  "credibility",
  "devices",
  "epoll",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "lazy_static",

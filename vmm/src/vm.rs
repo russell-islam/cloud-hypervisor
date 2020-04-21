@@ -31,6 +31,7 @@ use crate::config::{
 };
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
+use crate::hypervisor::wrapper::*;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
@@ -39,12 +40,16 @@ use anyhow::anyhow;
 use arch::BootProtocol;
 use arch::{check_required_kvm_extensions, EntryPoint};
 #[cfg(target_arch = "x86_64")]
+use arch::{BootProtocol, EntryPoint};
+#[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::HotPlugNotificationFlags;
+use devices::HotPlugNotificationFlags;
+use kvm_bindings::kvm_userspace_memory_region;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::*;
-#[cfg(target_arch = "x86_64")]
+use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
@@ -272,54 +277,10 @@ pub struct Vm {
 }
 
 impl Vm {
-    fn kvm_new() -> Result<(Kvm, Arc<VmFd>)> {
-        let kvm = Kvm::new().map_err(Error::KvmNew)?;
-
-        check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
-
-        let fd: VmFd;
-        loop {
-            match kvm.create_vm() {
-                Ok(res) => fd = res,
-                Err(e) => {
-                    if e.errno() == libc::EINTR {
-                        // If the error returned is EINTR, which means the
-                        // ioctl has been interrupted, we have to retry as
-                        // this can't be considered as a regular error.
-                        continue;
-                    } else {
-                        return Err(Error::VmCreate(e));
-                    }
-                }
-            }
-            break;
-        }
-        let fd = Arc::new(fd);
-
-        // Set TSS
-        #[cfg(target_arch = "x86_64")]
-        fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(Error::VmSetup)?;
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Create split irqchip
-            // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-            // are not.
-            let mut cap: kvm_enable_cap = Default::default();
-            cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-            cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-            fd.enable_cap(&cap).map_err(Error::VmSetup)?;
-        }
-
-        Ok((kvm, fd))
-    }
-
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<VmFd>,
-        kvm: Kvm,
+        fd: Arc<dyn VmFdOps>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
@@ -344,7 +305,6 @@ impl Vm {
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
             memory_manager.lock().unwrap().guest_memory(),
-            &kvm,
             fd,
             reset_evt,
         )
@@ -362,7 +322,6 @@ impl Vm {
             .map(|i| File::open(&i.path))
             .transpose()
             .map_err(Error::InitramfsFile)?;
-
         Ok(Vm {
             kernel,
             initramfs,
@@ -383,7 +342,8 @@ impl Vm {
         reset_evt: EventFd,
         vmm_path: PathBuf,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        let fd = get_default_vmfd().unwrap();
+
         let memory_manager = MemoryManager::new(
             fd.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -392,15 +352,8 @@ impl Vm {
         )
         .map_err(Error::MemoryManager)?;
 
-        let vm = Vm::new_from_memory_manager(
-            config,
-            memory_manager,
-            fd,
-            kvm,
-            exit_evt,
-            reset_evt,
-            vmm_path,
-        )?;
+        let vm =
+            Vm::new_from_memory_manager(config, memory_manager, fd, exit_evt, reset_evt, vmm_path)?;
 
         // The device manager must create the devices from here as it is part
         // of the regular code path creating everything from scratch.
@@ -421,7 +374,10 @@ impl Vm {
         source_url: &str,
         prefault: bool,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        //let  (kvm, fd) = Vm::kvm_new()?;
+        let fd = get_default_vmfd().unwrap();
+        //set tss address
+        //fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize).unwrap();
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
@@ -441,15 +397,7 @@ impl Vm {
             ))));
         };
 
-        Vm::new_from_memory_manager(
-            config,
-            memory_manager,
-            fd,
-            kvm,
-            exit_evt,
-            reset_evt,
-            vmm_path,
-        )
+        Vm::new_from_memory_manager(config, memory_manager, fd, exit_evt, reset_evt, vmm_path)
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -471,7 +419,6 @@ impl Vm {
         guest_mem
             .read_from(address, &mut initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
-
         Ok(arch::InitramfsConfig { address, size })
     }
 
@@ -541,7 +488,6 @@ impl Vm {
                 &self.memory_manager,
             ));
         }
-
         match entry_addr.setup_header {
             Some(hdr) => {
                 arch::configure_system(

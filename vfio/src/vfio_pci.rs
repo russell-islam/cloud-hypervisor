@@ -6,12 +6,12 @@
 extern crate devices;
 extern crate pci;
 extern crate vm_allocator;
+extern crate hypervisor;
 
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
 use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::*;
 use pci::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
@@ -29,6 +29,7 @@ use vm_device::interrupt::{
 };
 use vm_memory::{Address, GuestAddress, GuestRegionMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
+use hypervisor::VmFdOps;
 
 #[derive(Debug)]
 pub enum VfioPciError {
@@ -278,7 +279,7 @@ impl VfioPciConfig {
 /// The VMM creates a VfioDevice, then assigns it to a VfioPciDevice,
 /// which then gets added to the PCI bus.
 pub struct VfioPciDevice {
-    vm_fd: Arc<VmFd>,
+    vm_fd: Arc<dyn VmFdOps>,
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
@@ -289,7 +290,7 @@ pub struct VfioPciDevice {
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
-        vm_fd: &Arc<VmFd>,
+        vm_fd: &Arc<dyn VmFdOps>,
         device: VfioDevice,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Self> {
@@ -506,7 +507,7 @@ impl VfioPciDevice {
     /// # Return value
     ///
     /// This function returns the updated KVM memory slot id.
-    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<VmFd>, mem_slot: F) -> Result<()>
+    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<dyn VmFdOps>, mem_slot: F) -> Result<()>
     where
         F: Fn() -> u32,
     {
@@ -563,11 +564,10 @@ impl VfioPciDevice {
                     flags: 0,
                 };
 
-                // Safe because the guest regions are guaranteed not to overlap.
-                unsafe {
-                    vm.set_user_memory_region(mem_region)
-                        .map_err(VfioPciError::MapRegionGuest)?;
-                }
+                
+                vm.set_user_memory_region(mem_region)
+                    .map_err(VfioPciError::MapRegionGuest)?;
+                
 
                 // Update the region with memory mapped info.
                 region.mem_slot = Some(slot);
@@ -595,7 +595,7 @@ impl VfioPciDevice {
                     flags: 0,
                 };
                 // Safe because the guest regions are guaranteed not to overlap.
-                if let Err(e) = unsafe { self.vm_fd.set_user_memory_region(kvm_region) } {
+                if let Err(e) = self.vm_fd.set_user_memory_region(kvm_region) {
                     error!(
                         "Could not remove the userspace memory region from KVM: {}",
                         e
@@ -1006,12 +1006,11 @@ impl PciDevice for VfioPciDevice {
                             userspace_addr: host_addr,
                             flags: 0,
                         };
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(old_mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                      
+                        self.vm_fd
+                            .set_user_memory_region(old_mem_region)
+                            .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                        
 
                         // Insert new region to KVM
                         let new_mem_region = kvm_userspace_memory_region {
@@ -1021,12 +1020,11 @@ impl PciDevice for VfioPciDevice {
                             userspace_addr: host_addr,
                             flags: 0,
                         };
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(new_mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                        
+                        self.vm_fd
+                            .set_user_memory_region(new_mem_region)
+                            .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
+                        
                     }
                 }
             }

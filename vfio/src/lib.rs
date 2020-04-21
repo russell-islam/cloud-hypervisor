@@ -17,6 +17,7 @@ extern crate vfio_bindings;
 extern crate vm_allocator;
 extern crate vm_device;
 extern crate vm_memory;
+extern crate hypervisor;
 #[macro_use]
 extern crate vmm_sys_util;
 

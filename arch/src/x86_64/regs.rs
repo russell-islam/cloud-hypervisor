@@ -6,17 +6,17 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-
+extern crate hypervisor;
 use std::{mem, result};
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
 use arch_gen::x86::msr_index;
+use std::sync::Arc;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
-use kvm_ioctls::VcpuFd;
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
-
+use crate::hypervisor::VcpuOps;
 // MTRR constants
 const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
 const MTRR_MEM_TYPE_WB: u64 = 0x6;
@@ -54,7 +54,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_fpu(vcpu: &VcpuFd) -> Result<()> {
+pub fn setup_fpu(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
     let fpu: kvm_fpu = kvm_fpu {
         fcw: 0x37f,
         mxcsr: 0x1f80,
@@ -69,7 +69,7 @@ pub fn setup_fpu(vcpu: &VcpuFd) -> Result<()> {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
+pub fn setup_msrs(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
     vcpu.set_msrs(&boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
@@ -85,7 +85,7 @@ pub fn setup_msrs(vcpu: &VcpuFd) -> Result<()> {
 /// * `boot_sp` - Starting stack pointer.
 /// * `boot_si` - Must point to zero page address per Linux ABI.
 pub fn setup_regs(
-    vcpu: &VcpuFd,
+    vcpu: &Arc<dyn VcpuOps>,
     boot_ip: u64,
     boot_sp: u64,
     boot_si: u64,
@@ -118,7 +118,7 @@ pub fn setup_regs(
 ///
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &VcpuFd, boot_prot: BootProtocol) -> Result<()> {
+pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &Arc<dyn VcpuOps>, boot_prot: BootProtocol) -> Result<()> {
     let mut sregs: kvm_sregs = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
 
     configure_segments_and_sregs(mem, &mut sregs, boot_prot)?;

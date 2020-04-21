@@ -19,6 +19,7 @@ extern crate vmm_sys_util;
 #[cfg(test)]
 #[macro_use]
 extern crate credibility;
+extern crate hypervisor;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{
@@ -40,6 +41,7 @@ use vm_migration::{Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 pub mod api;
+
 pub mod config;
 pub mod cpu;
 pub mod device_manager;

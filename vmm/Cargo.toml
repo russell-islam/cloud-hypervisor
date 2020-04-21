@@ -43,6 +43,7 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
 signal-hook = "0.1.15"
 tempfile = "3.1.0"
+hypervisor = { path = "../hypervisor" }
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"

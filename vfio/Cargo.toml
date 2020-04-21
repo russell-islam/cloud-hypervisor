@@ -16,6 +16,7 @@ vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.2.0", features = ["backend-mmap"] }
 vmm-sys-util = ">=0.3.1"
+hypervisor = { path = "../hypervisor" }
 
 [dependencies.vfio-bindings]
 git = "https://github.com/rust-vmm/vfio-bindings"
