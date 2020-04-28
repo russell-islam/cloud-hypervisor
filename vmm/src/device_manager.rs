@@ -579,23 +579,17 @@ impl DeviceRelocation for AddressManager {
                             flags: 0,
                         };
 
-                        // Safe because removing an existing guest region.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                        self.vm_fd
+                            .set_user_memory_region(mem_region)
+                            .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
 
                         // Create new mapping by inserting new region to KVM.
                         mem_region.guest_phys_addr = new_base;
                         mem_region.memory_size = shm_regions.len;
 
-                        // Safe because the guest regions are guaranteed not to overlap.
-                        unsafe {
-                            self.vm_fd
-                                .set_user_memory_region(mem_region)
-                                .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        }
+                        self.vm_fd
+                            .set_user_memory_region(mem_region)
+                            .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
 
                         // Update shared memory regions to reflect the new mapping.
                         shm_regions.addr = GuestAddress(new_base);

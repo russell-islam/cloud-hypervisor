@@ -37,7 +37,6 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
     Transportable,
 };
-use hypervisor::VmFdOps;
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -693,7 +692,8 @@ impl MemoryManager {
         };
 
         // Safe because the guest regions are guaranteed not to overlap.
-        self.fd.set_user_memory_region(mem_region)
+        self.fd
+            .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as mergeable if explicitly asked for.
@@ -745,8 +745,8 @@ impl MemoryManager {
             flags: 0,
         };
 
-        // Safe to remove because we know the region exist.
-        unsafe { self.fd.set_user_memory_region(mem_region) }
+        self.fd
+            .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as unmergeable if there were previously marked as
