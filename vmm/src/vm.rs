@@ -376,6 +376,10 @@ impl Vm {
     ) -> Result<Self> {
         //let  (kvm, fd) = Vm::kvm_new()?;
         let fd = get_default_vmfd().unwrap();
+<<<<<<< HEAD
+=======
+
+>>>>>>> Add first part of payload abstraction
         //set tss address
         //fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize).unwrap();
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
@@ -419,6 +423,10 @@ impl Vm {
         guest_mem
             .read_from(address, &mut initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
+<<<<<<< HEAD
+=======
+
+>>>>>>> Add first part of payload abstraction
         Ok(arch::InitramfsConfig { address, size })
     }
 
@@ -579,7 +587,6 @@ impl Vm {
             .unwrap()
             .shutdown()
             .map_err(Error::CpuManager)?;
-
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
             thread.join().map_err(Error::ThreadCleanup)?

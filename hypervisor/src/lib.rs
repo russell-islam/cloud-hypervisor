@@ -1,3 +1,3 @@
-pub mod wrapper;
 pub mod cpuidpatch;
-pub use self::wrapper::{VmFdOps, VcpuOps, get_default_vmfd};
+pub mod wrapper;
+pub use self::wrapper::{get_default_vmfd, HypervisorRegs, HypervisorStates, VcpuOps, VmFdOps};

@@ -11,12 +11,12 @@ use std::{mem, result};
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
+use crate::hypervisor::{HypervisorRegs, VcpuOps};
 use arch_gen::x86::msr_index;
-use std::sync::Arc;
 use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
+use std::sync::Arc;
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
-use crate::hypervisor::VcpuOps;
 // MTRR constants
 const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
 const MTRR_MEM_TYPE_WB: u64 = 0x6;
@@ -55,13 +55,14 @@ pub type Result<T> = result::Result<T, Error>;
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_fpu(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
+    let mut hregs = HypervisorRegs::default();
     let fpu: kvm_fpu = kvm_fpu {
         fcw: 0x37f,
         mxcsr: 0x1f80,
         ..Default::default()
     };
-
-    vcpu.set_fpu(&fpu).map_err(Error::SetFPURegisters)
+    hregs.kvm_fpu = Some(fpu);
+    vcpu.set_fpu(hregs).map_err(Error::SetFPURegisters)
 }
 
 /// Configure Model Specific Registers (MSRs) for a given CPU.
@@ -91,6 +92,8 @@ pub fn setup_regs(
     boot_si: u64,
     boot_prot: BootProtocol,
 ) -> Result<()> {
+    let mut hregs: HypervisorRegs = HypervisorRegs::default();
+    //KVM
     let regs: kvm_regs = match boot_prot {
         // Configure regs as required by PVH boot protocol.
         BootProtocol::PvhBoot => kvm_regs {
@@ -109,7 +112,9 @@ pub fn setup_regs(
             ..Default::default()
         },
     };
-    vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
+    hregs.kvm_regs = Some(regs);
+    //HyperV
+    vcpu.set_regs(hregs).map_err(Error::SetBaseRegisters)
 }
 
 /// Configures the segment registers and system page tables for a given CPU.
@@ -118,16 +123,21 @@ pub fn setup_regs(
 ///
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &Arc<dyn VcpuOps>, boot_prot: BootProtocol) -> Result<()> {
-    let mut sregs: kvm_sregs = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
+pub fn setup_sregs(
+    mem: &GuestMemoryMmap,
+    vcpu: &Arc<dyn VcpuOps>,
+    boot_prot: BootProtocol,
+) -> Result<()> {
+    let mut hsregs = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
+    let mut sregs: kvm_sregs = hsregs.kvm_sregs.unwrap();
 
     configure_segments_and_sregs(mem, &mut sregs, boot_prot)?;
 
     if let BootProtocol::LinuxBoot = boot_prot {
         setup_page_tables(mem, &mut sregs)?; // TODO(dgreid) - Can this be done once per system instead?
     }
-
-    vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
+    hsregs.kvm_sregs = Some(sregs);
+    vcpu.set_sregs(hsregs).map_err(Error::SetStatusRegisters)
 }
 
 const BOOT_GDT_MAX: usize = 4;

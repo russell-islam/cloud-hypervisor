@@ -13,6 +13,7 @@
 
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
+use crate::hypervisor::{HypervisorRegs, HypervisorStates, VcpuOps, VmFdOps};
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
@@ -54,8 +55,6 @@ const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 #[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
-use crate::hypervisor::{VmFdOps, VcpuOps};
-
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -329,7 +328,7 @@ struct InterruptSourceOverride {
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    fd: Arc< dyn VcpuOps>,
+    fd: Arc<dyn VcpuOps>,
     id: u8,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     io_bus: Arc<devices::Bus>,
@@ -374,7 +373,6 @@ impl Vcpu {
         creation_ts: std::time::Instant,
     ) -> Result<Arc<Mutex<Self>>> {
         let kvm_vcpu = fd.create_vcpu(id).map_err(Error::VcpuFd)?;
-        
         // Initially the cpuid per vCPU is the one supported by this VM.
         Ok(Arc::new(Mutex::new(Vcpu {
             fd: kvm_vcpu,
@@ -398,9 +396,8 @@ impl Vcpu {
         &mut self,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-        vmfd: Arc< dyn VmFdOps>,
+        vmfd: Arc<dyn VmFdOps>,
     ) -> Result<()> {
-
         vmfd.patch_cpuid(self.fd.clone(), self.id);
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
         if let Some(kernel_entry_point) = kernel_entry_point {
@@ -501,18 +498,24 @@ impl Vcpu {
     fn kvm_state(&self) -> Result<VcpuKvmState> {
         let mut msrs = arch::x86_64::regs::boot_msr_entries();
         self.fd.get_msrs(&mut msrs).map_err(Error::VcpuGetMsrs)?;
-
-        let vcpu_events = self
+        let hstate: HypervisorStates = self
             .fd
             .get_vcpu_events()
             .map_err(Error::VcpuGetVcpuEvents)?;
-        let regs = self.fd.get_regs().map_err(Error::VcpuGetRegs)?;
-        let sregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
+        let vcpu_events = hstate.kvm_vcpu_events.unwrap();
+        let mut hregs: HypervisorRegs = self.fd.get_regs().map_err(Error::VcpuGetRegs)?;
+        let regs: kvm_regs = hregs.kvm_regs.unwrap();
+        hregs = self.fd.get_sregs().map_err(Error::VcpuGetSregs)?;
+        let sregs = hregs.kvm_sregs.unwrap();
         let lapic_state = self.fd.get_lapic().map_err(Error::VcpuGetLapic)?;
-        let fpu = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
-        let xsave = self.fd.get_xsave().map_err(Error::VcpuGetXsave)?;
-        let xcrs = self.fd.get_xcrs().map_err(Error::VcpuGetXsave)?;
-        let mp_state = self.fd.get_mp_state().map_err(Error::VcpuGetMpState)?;
+        hregs = self.fd.get_fpu().map_err(Error::VcpuGetFpu)?;
+        let fpu = hregs.kvm_fpu.unwrap();
+        let mut hstate: HypervisorStates = self.fd.get_xsave().map_err(Error::VcpuGetXsave)?;
+        let xsave = hstate.kvm_xsave.unwrap();
+        hregs = self.fd.get_xcrs().map_err(Error::VcpuGetXsave)?;
+        let xcrs: kvm_xcrs = hregs.kvm_xcrs.unwrap();
+        hstate = self.fd.get_mp_state().map_err(Error::VcpuGetMpState)?;
+        let mp_state = hstate.kvm_mp_state.unwrap();
 
         Ok(VcpuKvmState {
             msrs,
@@ -529,28 +532,27 @@ impl Vcpu {
 
     #[cfg(target_arch = "x86_64")]
     fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
-        self.fd.set_regs(&state.regs).map_err(Error::VcpuSetRegs)?;
-
-        self.fd.set_fpu(&state.fpu).map_err(Error::VcpuSetFpu)?;
-
-        self.fd
-            .set_xsave(&state.xsave)
-            .map_err(Error::VcpuSetXsave)?;
-
-        self.fd
-            .set_sregs(&state.sregs)
-            .map_err(Error::VcpuSetSregs)?;
-
-        self.fd.set_xcrs(&state.xcrs).map_err(Error::VcpuSetXcrs)?;
+        let mut hregs: HypervisorRegs = HypervisorRegs::default();
+        let mut hstate: HypervisorStates = HypervisorStates::default();
+        hregs.kvm_regs = Some(state.regs);
+        self.fd.set_regs(hregs).map_err(Error::VcpuSetRegs)?;
+        hregs.kvm_fpu = Some(state.fpu);
+        self.fd.set_fpu(hregs).map_err(Error::VcpuSetFpu)?;
+        hstate.kvm_xsave = Some(state.xsave);
+        self.fd.set_xsave(hstate).map_err(Error::VcpuSetXsave)?;
+        hregs.kvm_sregs = Some(state.sregs);
+        self.fd.set_sregs(hregs).map_err(Error::VcpuSetSregs)?;
+        hregs.kvm_xcrs = Some(state.xcrs);
+        self.fd.set_xcrs(hregs).map_err(Error::VcpuSetXcrs)?;
 
         self.fd.set_msrs(&state.msrs).map_err(Error::VcpuSetMsrs)?;
 
         self.fd
             .set_lapic(&state.lapic_state)
             .map_err(Error::VcpuSetLapic)?;
-
+        hstate.kvm_mp_state = Some(state.mp_state);
         self.fd
-            .set_mp_state(state.mp_state)
+            .set_mp_state(hstate)
             .map_err(Error::VcpuSetMpState)?;
 
         Ok(())
@@ -889,7 +891,6 @@ impl CpuManager {
 
         if let Some(snapshot) = snapshot {
             self.fd.patch_cpuid(vcpu.lock().unwrap().fd.clone(), cpu_id);
-            
             vcpu.lock()
                 .unwrap()
                 .restore(snapshot)
