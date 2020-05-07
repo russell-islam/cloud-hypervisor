@@ -342,7 +342,8 @@ impl Vm {
         reset_evt: EventFd,
         vmm_path: PathBuf,
     ) -> Result<Self> {
-        let fd = get_default_vmfd().unwrap();
+        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+        let fd = hypervisor.create_vm().unwrap();
 
         let memory_manager = MemoryManager::new(
             fd.clone(),
@@ -375,9 +376,14 @@ impl Vm {
         prefault: bool,
     ) -> Result<Self> {
         //let  (kvm, fd) = Vm::kvm_new()?;
+<<<<<<< HEAD
         let fd = get_default_vmfd().unwrap();
 <<<<<<< HEAD
 =======
+=======
+        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+        let fd = hypervisor.create_vm().unwrap();
+>>>>>>> Add hypervisor crate
 
 >>>>>>> Add first part of payload abstraction
         //set tss address

@@ -27,10 +27,16 @@ pub enum Error {
     /// Failed to create a new KVM instance
     KvmNew(kvm_ioctls::Error),
 
+    HyperVisorTypeMismatch,
+
     /// Capability missing
     CapabilityMissing(Cap),
 }
-
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HyperVisorType {
+    KVM,
+    HyperV,
+}
 pub type Result<T> = result::Result<T, Error>;
 pub type ResultOps<T> = std::result::Result<T, errno::Error>;
 pub trait VmFdOps: Send + Sync {
@@ -110,30 +116,49 @@ impl VmFdOps for KvmVmFd {
         vcpu.set_cpuid2(&cpuid).unwrap()
     }
 }
-
-pub fn get_default_vmfd() -> Result<Arc<dyn VmFdOps>> {
-    KvmVmFd::new()
+pub trait Hypervisor: Send + Sync {
+    fn create_vm(&self) -> Result<Arc<dyn VmFdOps>>;
+    fn get_api_version(&self) -> i32;
 }
-impl KvmVmFd {
-    fn new() -> Result<Arc<dyn VmFdOps>> {
+struct KvmHyperVisor {
+    kvm: Kvm,
+}
+impl KvmHyperVisor {
+    fn new() -> Result<KvmHyperVisor> {
         let kvm = Kvm::new().map_err(Error::KvmNew)?;
-
+        Ok(KvmHyperVisor { kvm: kvm })
+    }
+}
+/*
+pub struct HyperVHyperVisor {
+    name: String,
+}
+impl HyperVHyperVisor {
+    fn new() -> Result<HyperVHyperVisor> {
+        Ok(HyperVHyperVisor {
+            name: "HyperV".to_string(),
+        })
+    }
+}
+*/
+impl Hypervisor for KvmHyperVisor {
+    fn create_vm(&self) -> Result<Arc<dyn VmFdOps>> {
         // Check required capabilities:
-        if !kvm.check_extension(Cap::SignalMsi) {
+        if !self.kvm.check_extension(Cap::SignalMsi) {
             return Err(Error::CapabilityMissing(Cap::SignalMsi));
         }
 
-        if !kvm.check_extension(Cap::TscDeadlineTimer) {
+        if !self.kvm.check_extension(Cap::TscDeadlineTimer) {
             return Err(Error::CapabilityMissing(Cap::SignalMsi));
         }
 
-        if !kvm.check_extension(Cap::SplitIrqchip) {
+        if !self.kvm.check_extension(Cap::SplitIrqchip) {
             return Err(Error::CapabilityMissing(Cap::SplitIrqchip));
         }
 
         let fd: VmFd;
         loop {
-            match kvm.create_vm() {
+            match self.kvm.create_vm() {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -161,12 +186,27 @@ impl KvmVmFd {
         cap.cap = KVM_CAP_SPLIT_IRQCHIP;
         cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
         fd.enable_cap(&cap).map_err(Error::VmSetup)?;
-        let cpuid: CpuId = patch_cpuid(&kvm).unwrap();
+        let cpuid: CpuId = patch_cpuid(&self.kvm).unwrap();
 
         Ok(Arc::new(KvmVmFd {
             fd: fd,
             cpuid: cpuid,
         }))
+    }
+    fn get_api_version(&self) -> i32 {
+        let v: i32 = 1;
+        v
+    }
+}
+pub fn get_hypervisor(t: HyperVisorType) -> Result<Arc<dyn Hypervisor>> {
+    if t == HyperVisorType::KVM {
+        Ok(Arc::new(KvmHyperVisor::new().unwrap()))
+    }
+    /*else if (t == HyperVisorType::HyperV) {
+        Ok(Arc::new(HyperVHyperVisor::new().unwrap()))
+    } */
+    else {
+        Err(Error::HyperVisorTypeMismatch)
     }
 }
 #[derive(Copy, Clone)]
