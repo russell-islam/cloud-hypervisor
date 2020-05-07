@@ -119,7 +119,11 @@ impl VmFdOps for KvmVmFd {
 pub trait Hypervisor: Send + Sync {
     fn create_vm(&self) -> Result<Arc<dyn VmFdOps>>;
     fn get_api_version(&self) -> i32;
+    fn get_vcpu_mmap_size(&self) -> ResultOps<usize>;
+    fn get_max_vcpus(&self) -> ResultOps<usize>;
+    fn get_nr_vcpus(&self) -> ResultOps<usize>;
 }
+
 struct KvmHyperVisor {
     kvm: Kvm,
 }
@@ -196,6 +200,15 @@ impl Hypervisor for KvmHyperVisor {
     fn get_api_version(&self) -> i32 {
         let v: i32 = 1;
         v
+    }
+    fn get_vcpu_mmap_size(&self) -> ResultOps<usize> {
+        self.kvm.get_vcpu_mmap_size()
+    }
+    fn get_max_vcpus(&self) -> ResultOps<usize> {
+        Ok(self.kvm.get_max_vcpus())
+    }
+    fn get_nr_vcpus(&self) -> ResultOps<usize> {
+        Ok(self.kvm.get_nr_vcpus())
     }
 }
 pub fn get_hypervisor(t: HyperVisorType) -> Result<Arc<dyn Hypervisor>> {

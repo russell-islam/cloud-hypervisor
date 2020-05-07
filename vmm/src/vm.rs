@@ -341,8 +341,8 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        hypervisor: Arc<dyn Hypervisor>,
     ) -> Result<Self> {
-        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
         let fd = hypervisor.create_vm().unwrap();
 
         let memory_manager = MemoryManager::new(
@@ -374,14 +374,19 @@ impl Vm {
         vmm_path: PathBuf,
         source_url: &str,
         prefault: bool,
+        hypervisor: Arc<dyn Hypervisor>,
     ) -> Result<Self> {
         //let  (kvm, fd) = Vm::kvm_new()?;
+<<<<<<< HEAD
 <<<<<<< HEAD
         let fd = get_default_vmfd().unwrap();
 <<<<<<< HEAD
 =======
 =======
         let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+=======
+        //let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+>>>>>>> Add reference to hypservisor trait
         let fd = hypervisor.create_vm().unwrap();
 >>>>>>> Add hypervisor crate
 

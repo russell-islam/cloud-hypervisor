@@ -181,6 +181,7 @@ dependencies = [
  "dirs",
  "epoll",
  "futures",
+ "hypervisor",
  "lazy_static",
  "libc",
  "log 0.4.8",

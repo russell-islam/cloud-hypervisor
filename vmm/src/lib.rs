@@ -12,6 +12,7 @@ extern crate log;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate hypervisor;
 extern crate serde_json;
 extern crate tempfile;
 extern crate url;
@@ -28,6 +29,7 @@ use crate::config::{
 use crate::migration::{recv_vm_snapshot, vm_config_from_snapshot};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
+use hypervisor::Hypervisor;
 use libc::EFD_NONBLOCK;
 use seccomp::{SeccompFilter, SeccompLevel};
 use std::fs::File;
@@ -186,6 +188,7 @@ pub fn start_vmm_thread(
     api_sender: Sender<ApiRequest>,
     api_receiver: Receiver<ApiRequest>,
     seccomp_level: &SeccompLevel,
+    hypervisor: Arc<dyn Hypervisor>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     let http_api_event = api_event.try_clone().map_err(Error::EventFdClone)?;
 
@@ -205,7 +208,7 @@ pub fn start_vmm_thread(
             // Apply seccomp filter for VMM thread.
             SeccompFilter::apply(vmm_seccomp_filter).map_err(Error::ApplySeccompFilter)?;
 
-            let mut vmm = Vmm::new(vmm_version.to_string(), api_event, vmm_path)?;
+            let mut vmm = Vmm::new(vmm_version.to_string(), api_event, vmm_path, hypervisor)?;
 
             vmm.control_loop(Arc::new(api_receiver))
         })
@@ -226,10 +229,16 @@ pub struct Vmm {
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     vmm_path: PathBuf,
+    hypervisor: Arc<dyn Hypervisor>,
 }
 
 impl Vmm {
-    fn new(vmm_version: String, api_evt: EventFd, vmm_path: PathBuf) -> Result<Self> {
+    fn new(
+        vmm_version: String,
+        api_evt: EventFd,
+        vmm_path: PathBuf,
+        hypervisor: Arc<dyn Hypervisor>,
+    ) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -259,6 +268,7 @@ impl Vmm {
             vm: None,
             vm_config: None,
             vmm_path,
+            hypervisor,
         })
     }
 
@@ -274,6 +284,7 @@ impl Vmm {
                     exit_evt,
                     reset_evt,
                     self.vmm_path.clone(),
+                    Arc::clone(&self.hypervisor),
                 )?;
                 self.vm = Some(vm);
             }
@@ -343,6 +354,7 @@ impl Vmm {
             self.vmm_path.clone(),
             source_url,
             restore_cfg.prefault,
+            Arc::clone(&self.hypervisor),
         )?;
         self.vm = Some(vm);
 
@@ -385,7 +397,13 @@ impl Vmm {
             if self.reset_evt.read().is_ok() {
                 warn!("Spurious second reset event received. Ignoring.");
             }
-            self.vm = Some(Vm::new(config, exit_evt, reset_evt, self.vmm_path.clone())?);
+            self.vm = Some(Vm::new(
+                config,
+                exit_evt,
+                reset_evt,
+                self.vmm_path.clone(),
+                Arc::clone(&self.hypervisor),
+            )?);
         }
 
         // Then we start the new VM.

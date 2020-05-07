@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+extern crate hypervisor;
 extern crate vmm;
 extern crate vmm_sys_util;
 
@@ -20,6 +21,8 @@ use vhost_user_block::start_block_backend;
 use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::hypervisor::wrapper::*;
 
 struct Logger {
     output: Mutex<Box<dyn std::io::Write + Send>>,
@@ -279,7 +282,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     } else {
         SeccompLevel::Advanced
     };
-
+    let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
     let vmm_thread = match vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,
@@ -287,6 +290,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
         http_sender,
         api_request_receiver,
         &seccomp_level,
+        hypervisor,
     ) {
         Ok(t) => t,
         Err(e) => {
