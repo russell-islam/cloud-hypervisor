@@ -6,11 +6,13 @@ use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 extern crate libc;
 use devices::ioapic;
+use std::fmt;
 use std::result;
 
 use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
 use vm_memory::{Address, GuestAddress};
 extern crate linux_loader;
+
 use crate::cpuidpatch::*;
 
 pub const WRAPPER_DEFAULT_MODULE: &str = "kvm";
@@ -36,6 +38,12 @@ pub enum Error {
 pub enum HyperVisorType {
     KVM,
     HyperV,
+    None,
+}
+impl fmt::Display for HyperVisorType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 pub type Result<T> = result::Result<T, Error>;
 pub type ResultOps<T> = std::result::Result<T, errno::Error>;
