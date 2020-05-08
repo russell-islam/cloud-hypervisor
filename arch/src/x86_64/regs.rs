@@ -11,9 +11,10 @@ use std::{mem, result};
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
-use crate::hypervisor::{HypervisorRegs, VcpuOps};
+use crate::hypervisor::regs::{FpuState, SpecialRegisters, StandardRegisters};
+use crate::hypervisor::VcpuOps;
 use arch_gen::x86::msr_index;
-use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
+use kvm_bindings::{kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
 use std::sync::Arc;
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
@@ -55,14 +56,13 @@ pub type Result<T> = result::Result<T, Error>;
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_fpu(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
-    let mut hregs = HypervisorRegs::default();
-    let fpu: kvm_fpu = kvm_fpu {
+    let fpu: FpuState = FpuState {
         fcw: 0x37f,
         mxcsr: 0x1f80,
         ..Default::default()
     };
-    hregs.kvm_fpu = Some(fpu);
-    vcpu.set_fpu(hregs).map_err(Error::SetFPURegisters)
+
+    vcpu.set_fpu(&fpu).map_err(Error::SetFPURegisters)
 }
 
 /// Configure Model Specific Registers (MSRs) for a given CPU.
@@ -92,9 +92,8 @@ pub fn setup_regs(
     boot_si: u64,
     boot_prot: BootProtocol,
 ) -> Result<()> {
-    let mut hregs: HypervisorRegs = HypervisorRegs::default();
     //KVM
-    let regs: kvm_regs = match boot_prot {
+    let regs: StandardRegisters = match boot_prot {
         // Configure regs as required by PVH boot protocol.
         BootProtocol::PvhBoot => kvm_regs {
             rflags: 0x0000000000000002u64,
@@ -112,9 +111,8 @@ pub fn setup_regs(
             ..Default::default()
         },
     };
-    hregs.kvm_regs = Some(regs);
     //HyperV
-    vcpu.set_regs(hregs).map_err(Error::SetBaseRegisters)
+    vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
 
 /// Configures the segment registers and system page tables for a given CPU.
@@ -128,16 +126,14 @@ pub fn setup_sregs(
     vcpu: &Arc<dyn VcpuOps>,
     boot_prot: BootProtocol,
 ) -> Result<()> {
-    let mut hsregs = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
-    let mut sregs: kvm_sregs = hsregs.kvm_sregs.unwrap();
+    let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
 
     configure_segments_and_sregs(mem, &mut sregs, boot_prot)?;
 
     if let BootProtocol::LinuxBoot = boot_prot {
         setup_page_tables(mem, &mut sregs)?; // TODO(dgreid) - Can this be done once per system instead?
     }
-    hsregs.kvm_sregs = Some(sregs);
-    vcpu.set_sregs(hsregs).map_err(Error::SetStatusRegisters)
+    vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
 const BOOT_GDT_MAX: usize = 4;
@@ -297,7 +293,7 @@ mod tests {
     extern crate vm_memory;
 
     use super::*;
-    use kvm_ioctls::Kvm;
+    use crate::hypervisor::get_hypervisor;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     fn create_guest_mem() -> GuestMemoryMmap {
@@ -394,17 +390,17 @@ mod tests {
 
     #[test]
     fn test_setup_fpu() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_fpu(&vcpu).unwrap();
 
-        let expected_fpu: kvm_fpu = kvm_fpu {
+        let expected_fpu: FpuState = FpuState {
             fcw: 0x37f,
             mxcsr: 0x1f80,
             ..Default::default()
         };
-        let actual_fpu: kvm_fpu = vcpu.get_fpu().unwrap();
+        let actual_fpu: FpuState = vcpu.get_fpu().unwrap();
         // TODO: auto-generate kvm related structures with PartialEq on.
         assert_eq!(expected_fpu.fcw, actual_fpu.fcw);
         // Setting the mxcsr register from kvm_fpu inside setup_fpu does not influence anything.
@@ -416,8 +412,8 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_msrs(&vcpu).unwrap();
 
@@ -442,11 +438,10 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
-
-        let expected_regs: kvm_regs = kvm_regs {
+        let expected_regs: StandardRegisters = StandardRegisters {
             rflags: 0x0000000000000002u64,
             rip: 1,
             rsp: 2,
@@ -470,11 +465,11 @@ mod tests {
 
     #[test]
     fn test_setup_sregs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
 
-        let mut expected_sregs: kvm_sregs = vcpu.get_sregs().unwrap();
+        let mut expected_sregs: SpecialRegisters = vcpu.get_sregs().unwrap();
         let gm = create_guest_mem();
         configure_segments_and_sregs(&gm, &mut expected_sregs, BootProtocol::LinuxBoot).unwrap();
         setup_page_tables(&gm, &mut expected_sregs).unwrap();

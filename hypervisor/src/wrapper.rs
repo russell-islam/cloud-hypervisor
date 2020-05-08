@@ -1,5 +1,5 @@
 extern crate kvm_ioctls;
-use kvm_bindings::*;
+
 use kvm_ioctls::*;
 use std::sync::Arc;
 use vmm_sys_util::errno;
@@ -9,14 +9,16 @@ use devices::ioapic;
 use std::fmt;
 use std::result;
 
-use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
 use vm_memory::{Address, GuestAddress};
 extern crate linux_loader;
 
 use crate::cpuidpatch::*;
+use crate::regs::*;
 
 pub const WRAPPER_DEFAULT_MODULE: &str = "kvm";
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
+
 /// Errors associated with VM management
 #[derive(Debug)]
 pub enum Error {
@@ -60,12 +62,9 @@ pub trait VmFdOps: Send + Sync {
         datamatch: Option<u64>,
     ) -> ResultOps<()>;
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> ResultOps<()>;
-    fn set_gsi_routing(&self, irq_routing: &kvm_irq_routing) -> ResultOps<()>;
-    fn set_user_memory_region(
-        &self,
-        user_memory_region: kvm_userspace_memory_region,
-    ) -> ResultOps<()>;
-    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd>;
+    fn set_gsi_routing(&self, irq_routing: &IrqRouting) -> ResultOps<()>;
+    fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> ResultOps<()>;
+    fn create_device(&self, device: &mut CreateDevice) -> ResultOps<DeviceFd>;
     fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8);
 }
 
@@ -106,16 +105,13 @@ impl VmFdOps for KvmVmFd {
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> ResultOps<()> {
         self.fd.unregister_ioevent(fd, addr)
     }
-    fn set_gsi_routing(&self, irq_routing: &kvm_irq_routing) -> ResultOps<()> {
+    fn set_gsi_routing(&self, irq_routing: &IrqRouting) -> ResultOps<()> {
         self.fd.set_gsi_routing(irq_routing)
     }
-    fn set_user_memory_region(
-        &self,
-        user_memory_region: kvm_userspace_memory_region,
-    ) -> ResultOps<()> {
+    fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> ResultOps<()> {
         unsafe { self.fd.set_user_memory_region(user_memory_region) }
     }
-    fn create_device(&self, device: &mut kvm_create_device) -> ResultOps<DeviceFd> {
+    fn create_device(&self, device: &mut CreateDevice) -> ResultOps<DeviceFd> {
         self.fd.create_device(device)
     }
     fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8) {
@@ -230,96 +226,55 @@ pub fn get_hypervisor(t: HyperVisorType) -> Result<Arc<dyn Hypervisor>> {
         Err(Error::HyperVisorTypeMismatch)
     }
 }
-#[derive(Copy, Clone)]
-pub struct HypervisorRegs {
-    pub kvm_regs: Option<kvm_regs>,
-    pub kvm_sregs: Option<kvm_sregs>,
-    pub kvm_xcrs: Option<kvm_xcrs>,
-    pub kvm_fpu: Option<kvm_fpu>,
-    // HyperV registers
-}
-impl Default for HypervisorRegs {
-    fn default() -> HypervisorRegs {
-        HypervisorRegs {
-            kvm_regs: None,
-            kvm_sregs: None,
-            kvm_xcrs: None,
-            kvm_fpu: None,
-        }
-    }
-}
-#[derive(Copy, Clone)]
-pub struct HypervisorStates {
-    pub kvm_xsave: Option<kvm_xsave>,
-    pub kvm_mp_state: Option<kvm_mp_state>,
-    pub kvm_vcpu_events: Option<kvm_vcpu_events>,
-    // Hyper States
-}
-impl Default for HypervisorStates {
-    fn default() -> HypervisorStates {
-        HypervisorStates {
-            kvm_xsave: None,
-            kvm_mp_state: None,
-            kvm_vcpu_events: None,
-        }
-    }
-}
+
 pub trait VcpuOps: Send + Sync {
-    fn get_regs(&self) -> ResultOps<HypervisorRegs>;
-    fn set_regs(&self, hregs: HypervisorRegs) -> ResultOps<()>;
-    fn get_sregs(&self) -> ResultOps<HypervisorRegs>;
-    fn set_sregs(&self, hregs: HypervisorRegs) -> ResultOps<()>;
-    fn get_fpu(&self) -> ResultOps<HypervisorRegs>;
-    fn set_fpu(&self, hregs: HypervisorRegs) -> ResultOps<()>;
+    fn get_regs(&self) -> ResultOps<StandardRegisters>;
+    fn set_regs(&self, regs: &StandardRegisters) -> ResultOps<()>;
+    fn get_sregs(&self) -> ResultOps<SpecialRegisters>;
+    fn set_sregs(&self, sregs: &SpecialRegisters) -> ResultOps<()>;
+    fn get_fpu(&self) -> ResultOps<FpuState>;
+    fn set_fpu(&self, fpu: &FpuState) -> ResultOps<()>;
     fn set_cpuid2(&self, cpuid: &CpuId) -> ResultOps<()>;
     fn get_cpuid2(&self, num_entries: usize) -> ResultOps<CpuId>;
-    fn get_lapic(&self) -> ResultOps<kvm_lapic_state>;
-    fn set_lapic(&self, klapic: &kvm_lapic_state) -> ResultOps<()>;
-    fn get_msrs(&self, msrs: &mut Msrs) -> ResultOps<usize>;
-    fn set_msrs(&self, msrs: &Msrs) -> ResultOps<usize>;
-    fn get_mp_state(&self) -> ResultOps<HypervisorStates>;
-    fn set_mp_state(&self, mp_state: HypervisorStates) -> ResultOps<()>;
-    fn get_xsave(&self) -> ResultOps<HypervisorStates>;
-    fn set_xsave(&self, hv_state: HypervisorStates) -> ResultOps<()>;
-    fn get_xcrs(&self) -> ResultOps<HypervisorRegs>;
-    fn set_xcrs(&self, hregs: HypervisorRegs) -> ResultOps<()>;
+    fn get_lapic(&self) -> ResultOps<LapicState>;
+    fn set_lapic(&self, lapic: &LapicState) -> ResultOps<()>;
+    fn get_msrs(&self, msrs: &mut MsrEntries) -> ResultOps<usize>;
+    fn set_msrs(&self, msrs: &MsrEntries) -> ResultOps<usize>;
+    fn get_mp_state(&self) -> ResultOps<MpState>;
+    fn set_mp_state(&self, mp_state: MpState) -> ResultOps<()>;
+    fn get_xsave(&self) -> ResultOps<Xsave>;
+    fn set_xsave(&self, xsave: &Xsave) -> ResultOps<()>;
+    fn get_xcrs(&self) -> ResultOps<ExtendedControlRegisters>;
+    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> ResultOps<()>;
     fn run(&self) -> ResultOps<VcpuExit>;
-    fn get_vcpu_events(&self) -> ResultOps<HypervisorStates>;
+    fn get_vcpu_events(&self) -> ResultOps<VcpuEvents>;
 }
 
 pub struct KvmVcpuId {
     fd: VcpuFd,
 }
 impl VcpuOps for KvmVcpuId {
-    fn get_regs(&self) -> ResultOps<HypervisorRegs> {
-        let kregs = self.fd.get_regs().unwrap();
-        let mut regs: HypervisorRegs = HypervisorRegs::default();
-        regs.kvm_regs = Some(kregs);
-        Ok(regs)
+    fn get_regs(&self) -> ResultOps<StandardRegisters> {
+        //let kregs = self.fd.get_regs().unwrap();
+        //let mut regs: HypervisorRegs = HypervisorRegs::default();
+        //regs.kvm_regs = Some(kregs);
+        //Ok(regs)
+        self.fd.get_regs()
     }
-    fn set_regs(&self, hregs: HypervisorRegs) -> ResultOps<()> {
-        let regs: kvm_regs = hregs.kvm_regs.unwrap();
-        self.fd.set_regs(&regs)
+    fn set_regs(&self, regs: &StandardRegisters) -> ResultOps<()> {
+        self.fd.set_regs(regs)
     }
-    fn get_sregs(&self) -> ResultOps<HypervisorRegs> {
-        let ksregs = self.fd.get_sregs().unwrap();
-        let mut sregs: HypervisorRegs = HypervisorRegs::default();
-        sregs.kvm_sregs = Some(ksregs);
-        Ok(sregs)
+    fn get_sregs(&self) -> ResultOps<SpecialRegisters> {
+        self.fd.get_sregs()
     }
-    fn set_sregs(&self, hsregs: HypervisorRegs) -> ResultOps<()> {
-        let sregs: kvm_sregs = hsregs.kvm_sregs.unwrap();
-        self.fd.set_sregs(&sregs)
+    fn set_sregs(&self, sregs: &SpecialRegisters) -> ResultOps<()> {
+        self.fd.set_sregs(sregs)
     }
-    fn get_fpu(&self) -> ResultOps<HypervisorRegs> {
-        let kfpu = self.fd.get_fpu().unwrap();
-        let mut regs: HypervisorRegs = HypervisorRegs::default();
-        regs.kvm_fpu = Some(kfpu);
-        Ok(regs)
+    fn get_fpu(&self) -> ResultOps<FpuState> {
+        self.fd.get_fpu()
     }
-    fn set_fpu(&self, hregs: HypervisorRegs) -> ResultOps<()> {
-        let fpu = hregs.kvm_fpu.unwrap();
-        self.fd.set_fpu(&fpu)
+    fn set_fpu(&self, fpu: &FpuState) -> ResultOps<()> {
+        self.fd.set_fpu(fpu)
     }
     fn set_cpuid2(&self, cpuid: &CpuId) -> ResultOps<()> {
         self.fd.set_cpuid2(cpuid)
@@ -327,55 +282,40 @@ impl VcpuOps for KvmVcpuId {
     fn get_cpuid2(&self, num_entries: usize) -> ResultOps<CpuId> {
         self.fd.get_cpuid2(num_entries)
     }
-    fn get_lapic(&self) -> ResultOps<kvm_lapic_state> {
+    fn get_lapic(&self) -> ResultOps<LapicState> {
         self.fd.get_lapic()
     }
-    fn set_lapic(&self, klapic: &kvm_lapic_state) -> ResultOps<()> {
+    fn set_lapic(&self, klapic: &LapicState) -> ResultOps<()> {
         self.fd.set_lapic(klapic)
     }
-    fn get_msrs(&self, msrs: &mut Msrs) -> ResultOps<usize> {
+    fn get_msrs(&self, msrs: &mut MsrEntries) -> ResultOps<usize> {
         self.fd.get_msrs(msrs)
     }
-    fn set_msrs(&self, msrs: &Msrs) -> ResultOps<usize> {
+    fn set_msrs(&self, msrs: &MsrEntries) -> ResultOps<usize> {
         self.fd.set_msrs(msrs)
     }
-    fn get_mp_state(&self) -> ResultOps<HypervisorStates> {
-        let kmp_state = self.fd.get_mp_state().unwrap();
-        let mut hstate = HypervisorStates::default();
-        hstate.kvm_mp_state = Some(kmp_state);
-        Ok(hstate)
+    fn get_mp_state(&self) -> ResultOps<MpState> {
+        self.fd.get_mp_state()
     }
-    fn set_mp_state(&self, hv_state: HypervisorStates) -> ResultOps<()> {
-        let mp_state = hv_state.kvm_mp_state.unwrap();
+    fn set_mp_state(&self, mp_state: MpState) -> ResultOps<()> {
         self.fd.set_mp_state(mp_state)
     }
-    fn get_xsave(&self) -> ResultOps<HypervisorStates> {
-        let k_xsave = self.fd.get_xsave().unwrap();
-        let mut hstate = HypervisorStates::default();
-        hstate.kvm_xsave = Some(k_xsave);
-        Ok(hstate)
+    fn get_xsave(&self) -> ResultOps<Xsave> {
+        self.fd.get_xsave()
     }
-    fn set_xsave(&self, hv_state: HypervisorStates) -> ResultOps<()> {
-        let xsave = hv_state.kvm_xsave.unwrap();
-        self.fd.set_xsave(&xsave)
+    fn set_xsave(&self, xsave: &Xsave) -> ResultOps<()> {
+        self.fd.set_xsave(xsave)
     }
-    fn get_xcrs(&self) -> ResultOps<HypervisorRegs> {
-        let kxcr = self.fd.get_xcrs().unwrap();
-        let mut hregs: HypervisorRegs = HypervisorRegs::default();
-        hregs.kvm_xcrs = Some(kxcr);
-        Ok(hregs)
+    fn get_xcrs(&self) -> ResultOps<ExtendedControlRegisters> {
+        self.fd.get_xcrs()
     }
-    fn set_xcrs(&self, hregs: HypervisorRegs) -> ResultOps<()> {
-        let xcrs: kvm_xcrs = hregs.kvm_xcrs.unwrap();
+    fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> ResultOps<()> {
         self.fd.set_xcrs(&xcrs)
     }
     fn run(&self) -> ResultOps<VcpuExit> {
         self.fd.run()
     }
-    fn get_vcpu_events(&self) -> ResultOps<HypervisorStates> {
-        let k_events = self.fd.get_vcpu_events().unwrap();
-        let mut hstate = HypervisorStates::default();
-        hstate.kvm_vcpu_events = Some(k_events);
-        Ok(hstate)
+    fn get_vcpu_events(&self) -> ResultOps<VcpuEvents> {
+        self.fd.get_vcpu_events()
     }
 }

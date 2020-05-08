@@ -1,5 +1,4 @@
 pub mod cpuidpatch;
+pub mod regs;
 pub mod wrapper;
-pub use self::wrapper::{
-    get_hypervisor, HyperVisorType, Hypervisor, HypervisorRegs, HypervisorStates, VcpuOps, VmFdOps,
-};
+pub use self::wrapper::{get_hypervisor, HyperVisorType, Hypervisor, VcpuOps, VmFdOps};
