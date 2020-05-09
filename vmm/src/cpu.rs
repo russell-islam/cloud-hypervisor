@@ -13,7 +13,7 @@
 
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
-use crate::hypervisor::regs::*;
+use crate::hypervisor::params::*;
 use crate::hypervisor::{VcpuOps, VmFdOps};
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]

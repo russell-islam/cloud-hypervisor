@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
+use crate::hypervisor::VcpuOps;
 use kvm_bindings::kvm_lapic_state;
 use kvm_ioctls;
-use crate::hypervisor::VcpuOps;
 
 #[derive(Debug)]
 pub enum Error {
@@ -82,15 +82,15 @@ pub fn set_lint(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
 
     vcpu.set_lapic(&klapic).map_err(Error::SetLapic)
 }
-
+#[cfg(feature = "kvm")]
 #[cfg(test)]
 mod tests {
     extern crate kvm_ioctls;
     extern crate rand;
     use self::rand::Rng;
+    use crate::hypervisor::get_hypervisor;
 
     use super::*;
-    use kvm_ioctls::Kvm;
 
     const KVM_APIC_REG_SIZE: usize = 0x400;
 
@@ -124,9 +124,10 @@ mod tests {
 
     #[test]
     fn test_setlint() {
-        let kvm = kvm_ioctls::Kvm::new().unwrap();
-        assert!(kvm.check_extension(kvm_ioctls::Cap::Irqchip));
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
+        assert!(hv.check_extension(kvm_ioctls::Cap::Irqchip));
+
         //the get_lapic ioctl will fail if there is no irqchip created beforehand.
         assert!(vm.create_irq_chip().is_ok());
         let vcpu = vm.create_vcpu(0).unwrap();
@@ -150,8 +151,8 @@ mod tests {
 
     #[test]
     fn test_setlint_fails() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         // 'get_lapic' ioctl triggered by the 'set_lint' function will fail if there is no
         // irqchip created beforehand.

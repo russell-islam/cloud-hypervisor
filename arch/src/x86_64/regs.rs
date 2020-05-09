@@ -11,7 +11,7 @@ use std::{mem, result};
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
-use crate::hypervisor::regs::{FpuState, SpecialRegisters, StandardRegisters};
+use crate::hypervisor::params::{FpuState, SpecialRegisters, StandardRegisters};
 use crate::hypervisor::VcpuOps;
 use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
@@ -286,7 +286,7 @@ pub fn boot_msr_entries() -> Msrs {
         kvm_msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
     ])
 }
-
+#[cfg(feature = "kvm")]
 #[cfg(test)]
 mod tests {
     extern crate kvm_ioctls;
