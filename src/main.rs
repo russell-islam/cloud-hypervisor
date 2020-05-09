@@ -22,7 +22,7 @@ use vhost_user_net::start_net_backend;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::hypervisor::{get_hypervisor, HyperVisorType};
+use crate::hypervisor::get_hypervisor;
 
 struct Logger {
     output: Mutex<Box<dyn std::io::Write + Send>>,
@@ -282,7 +282,7 @@ fn start_vmm(cmd_arguments: ArgMatches) {
     } else {
         SeccompLevel::Advanced
     };
-    let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+    let hypervisor = get_hypervisor().unwrap();
     let vmm_thread = match vmm::start_vmm_thread(
         env!("CARGO_PKG_VERSION").to_string(),
         api_socket_path,

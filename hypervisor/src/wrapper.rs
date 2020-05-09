@@ -1,3 +1,4 @@
+#[cfg(feature = "kvm")]
 use crate::kvm::KvmHyperVisor;
 use crate::params::*;
 use std::sync::Arc;
@@ -47,17 +48,13 @@ pub trait Hypervisor: Send + Sync {
     fn get_nr_vcpus(&self) -> ResultOps<usize>;
     fn check_extension(&self, c: Cap) -> bool;
 }
-
-pub fn get_hypervisor(t: HyperVisorType) -> Result<Arc<dyn Hypervisor>> {
-    if t == HyperVisorType::KVM {
-        Ok(Arc::new(KvmHyperVisor::new().unwrap()))
-    }
-    /*else if (t == HyperVisorType::HyperV) {
-        Ok(Arc::new(HyperVHyperVisor::new().unwrap()))
-    } */
-    else {
-        Err(Error::HyperVisorTypeMismatch)
-    }
+#[cfg(feature = "kvm")]
+pub fn get_hypervisor() -> Result<Arc<dyn Hypervisor>> {
+    Ok(Arc::new(KvmHyperVisor::new().unwrap()))
+}
+#[cfg(feature = "hyperv")]
+pub fn get_hypervisor() -> Result<Arc<dyn Hypervisor>> {
+    Err(Error::HyperVisorTypeMismatch)
 }
 
 pub trait VcpuOps: Send + Sync {

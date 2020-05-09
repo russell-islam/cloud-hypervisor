@@ -12,7 +12,6 @@
 use crate::config::ConsoleOutputMode;
 #[cfg(feature = "pci_support")]
 use crate::config::DeviceConfig;
-use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig};
 use crate::config::{DiskConfig, FsConfig, NetConfig, PmemConfig, VmConfig, VsockConfig};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::hypervisor::wrapper::*;

@@ -20,7 +20,6 @@ extern crate vmm_sys_util;
 #[cfg(test)]
 #[macro_use]
 extern crate credibility;
-extern crate hypervisor;
 
 use crate::api::{ApiError, ApiRequest, ApiResponse, ApiResponsePayload, VmInfo, VmmPingResponse};
 use crate::config::{
