@@ -2,15 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
+// Copyright © 2020, Microsft  Corporation
+//
 
 extern crate devices;
+extern crate hypervisor;
 extern crate pci;
 extern crate vm_allocator;
-extern crate hypervisor;
 
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
+use hypervisor::VmFdOps;
 use kvm_bindings::kvm_userspace_memory_region;
 use pci::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
@@ -29,7 +32,6 @@ use vm_device::interrupt::{
 };
 use vm_memory::{Address, GuestAddress, GuestRegionMmap, GuestUsize};
 use vmm_sys_util::eventfd::EventFd;
-use hypervisor::VmFdOps;
 
 #[derive(Debug)]
 pub enum VfioPciError {
@@ -564,10 +566,8 @@ impl VfioPciDevice {
                     flags: 0,
                 };
 
-                
                 vm.set_user_memory_region(mem_region)
                     .map_err(VfioPciError::MapRegionGuest)?;
-                
 
                 // Update the region with memory mapped info.
                 region.mem_slot = Some(slot);
@@ -1006,11 +1006,10 @@ impl PciDevice for VfioPciDevice {
                             userspace_addr: host_addr,
                             flags: 0,
                         };
-                      
+
                         self.vm_fd
                             .set_user_memory_region(old_mem_region)
                             .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        
 
                         // Insert new region to KVM
                         let new_mem_region = kvm_userspace_memory_region {
@@ -1020,11 +1019,10 @@ impl PciDevice for VfioPciDevice {
                             userspace_addr: host_addr,
                             flags: 0,
                         };
-                        
+
                         self.vm_fd
                             .set_user_memory_region(new_mem_region)
                             .map_err(|e| io::Error::from_raw_os_error(e.errno()))?;
-                        
                     }
                 }
             }

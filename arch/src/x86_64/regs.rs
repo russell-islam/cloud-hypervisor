@@ -6,6 +6,9 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
+//
+// Copyright © 2020, Microsft  Corporation
+//
 extern crate hypervisor;
 use std::{mem, result};
 

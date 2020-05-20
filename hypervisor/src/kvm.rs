@@ -1,3 +1,9 @@
+// Copyright © 2019 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copyright © 2020, Microsft  Corporation
+//
 use crate::cpuidpatch::{patch_cpuid, CpuidPatch, CpuidReg};
 
 use crate::params::*;

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Copyright © 2020, Microsft  Corporation
+//
 
 extern crate anyhow;
 extern crate arc_swap;

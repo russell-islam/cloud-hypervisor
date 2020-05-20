@@ -2,6 +2,9 @@
 //
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Copyright © 2020, Microsft  Corporation
+//
 
 #![allow(
     clippy::unreadable_literal,

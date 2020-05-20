@@ -1,4 +1,17 @@
-
+// Copyright © 2020, Oracle and/or its affiliates.
+//
+// Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+//
+// Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE-BSD-3-Clause file.
+//
+// Copyright © 2019 Intel Corporation
+//
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+//
+// Copyright © 2020, Microsft  Corporation
+//
 use kvm_bindings::CpuId;
 use kvm_ioctls::*;
 use std::result;
@@ -7,7 +20,6 @@ pub type Result<T> = result::Result<T, Error>;
 // CPUID feature bits
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
-
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -33,7 +45,7 @@ pub struct CpuidPatch {
 }
 pub fn patch_cpuid(kvm: &Kvm) -> Result<CpuId> {
     let mut cpuid_patches = Vec::new();
-    
+
     // Patch tsc deadline timer bit
     cpuid_patches.push(CpuidPatch {
         function: 1,

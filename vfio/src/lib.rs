@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
+// Copyright © 2020, Microsft  Corporation
+//
 
 //#![deny(missing_docs)]
 //! Virtual Function I/O (VFIO) API
@@ -12,12 +14,12 @@ extern crate kvm_bindings;
 extern crate kvm_ioctls;
 #[macro_use]
 extern crate log;
+extern crate hypervisor;
 extern crate pci;
 extern crate vfio_bindings;
 extern crate vm_allocator;
 extern crate vm_device;
 extern crate vm_memory;
-extern crate hypervisor;
 #[macro_use]
 extern crate vmm_sys_util;
 
