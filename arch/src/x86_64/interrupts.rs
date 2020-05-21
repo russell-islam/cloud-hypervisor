@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_setlint() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         assert!(hv.check_extension(kvm_ioctls::Cap::Irqchip));
 
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_setlint_fails() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         // 'get_lapic' ioctl triggered by the 'set_lint' function will fail if there is no

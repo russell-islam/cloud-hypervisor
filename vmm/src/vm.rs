@@ -378,23 +378,12 @@ impl Vm {
         prefault: bool,
         hypervisor: Arc<dyn Hypervisor>,
     ) -> Result<Self> {
-        //let  (kvm, fd) = Vm::kvm_new()?;
-<<<<<<< HEAD
-<<<<<<< HEAD
-        let fd = get_default_vmfd().unwrap();
-<<<<<<< HEAD
-=======
-=======
-        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
-=======
-        //let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
->>>>>>> Add reference to hypservisor trait
-        let fd = hypervisor.create_vm().unwrap();
->>>>>>> Add hypervisor crate
 
->>>>>>> Add first part of payload abstraction
-        //set tss address
-        //fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize).unwrap();
+        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
+
+
+        let fd = hypervisor.create_vm().unwrap();
+
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =

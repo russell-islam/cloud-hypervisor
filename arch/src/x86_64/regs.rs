@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_setup_fpu() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_fpu(&vcpu).unwrap();
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_msrs(&vcpu).unwrap();
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
         let expected_regs: StandardRegisters = StandardRegisters {
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_setup_sregs() {
-        let hv = get_hypervisor(hypervisor::HyperVisorType::KVM).unwrap();
+        let hv = get_hypervisor().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0).unwrap();
 
