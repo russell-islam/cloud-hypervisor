@@ -25,7 +25,6 @@ pub struct HypervisorError(i32);
 #[derive(Debug)]
 pub enum Error {
     HyperVisorTypeMismatch,
-    CapabilityMissing,
     VmCreate,
     VmSetup,
 }

@@ -14,6 +14,7 @@ use arch::{get_host_cpu_phys_bits, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::BusDevice;
+use hypervisor::VmFdOps;
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use std::convert::TryInto;
 use std::ffi;

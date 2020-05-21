@@ -15,7 +15,6 @@ mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use kvm_ioctls::*;
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -485,19 +484,6 @@ pub fn get_host_cpu_phys_bits() -> u8 {
             36
         }
     }
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    if !kvm.check_extension(Cap::TscDeadlineTimer) {
-        return Err(super::Error::CapabilityMissing(Cap::TscDeadlineTimer));
-    }
-    if !kvm.check_extension(Cap::SplitIrqchip) {
-        return Err(super::Error::CapabilityMissing(Cap::SplitIrqchip));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

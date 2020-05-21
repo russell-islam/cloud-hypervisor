@@ -39,18 +39,11 @@ use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
-use arch::BootProtocol;
-use arch::{check_required_kvm_extensions, EntryPoint};
-#[cfg(target_arch = "x86_64")]
 use arch::{BootProtocol, EntryPoint};
 #[cfg(target_arch = "x86_64")]
-use devices::ioapic;
-use devices::HotPlugNotificationFlags;
 use devices::HotPlugNotificationFlags;
 use kvm_bindings::kvm_userspace_memory_region;
-#[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
-use kvm_ioctls::*;
+
 use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
@@ -378,10 +371,6 @@ impl Vm {
         prefault: bool,
         hypervisor: Arc<dyn Hypervisor>,
     ) -> Result<Self> {
-
-        let hypervisor = get_hypervisor(HyperVisorType::KVM).unwrap();
-
-
         let fd = hypervisor.create_vm().unwrap();
 
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
@@ -425,10 +414,7 @@ impl Vm {
         guest_mem
             .read_from(address, &mut initramfs, size)
             .map_err(|_| Error::InitramfsLoad)?;
-<<<<<<< HEAD
-=======
 
->>>>>>> Add first part of payload abstraction
         Ok(arch::InitramfsConfig { address, size })
     }
 

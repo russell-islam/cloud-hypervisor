@@ -30,7 +30,7 @@ use kvm_bindings::{
     kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
     kvm_xsave, Msrs,
 };
-use kvm_ioctls::*;
+
 #[cfg(target_arch = "x86_64")]
 use libc::{c_void, siginfo_t};
 use serde_derive::{Deserialize, Serialize};
@@ -51,13 +51,6 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::signal::register_signal_handler;
 use vmm_sys_util::signal::SIGRTMIN;
-
-// CPUID feature bits
-#[cfg(target_arch = "x86_64")]
-const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
-#[cfg(target_arch = "x86_64")]
-const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
-use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 
 // Debug I/O port
 #[cfg(target_arch = "x86_64")]
@@ -215,7 +208,6 @@ pub enum Error {
 }
 pub type Result<T> = result::Result<T, Error>;
 
-<<<<<<< HEAD
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -226,77 +218,6 @@ enum CpuidReg {
     EDX,
 }
 
-#[cfg(target_arch = "x86_64")]
-pub struct CpuidPatch {
-    pub function: u32,
-    pub index: u32,
-    pub flags_bit: Option<u8>,
-    pub eax_bit: Option<u8>,
-    pub ebx_bit: Option<u8>,
-    pub ecx_bit: Option<u8>,
-    pub edx_bit: Option<u8>,
-}
-
-#[cfg(target_arch = "x86_64")]
-impl CpuidPatch {
-    fn set_cpuid_reg(
-        cpuid: &mut CpuId,
-        function: u32,
-        index: Option<u32>,
-        reg: CpuidReg,
-        value: u32,
-    ) {
-        let entries = cpuid.as_mut_slice();
-
-        for entry in entries.iter_mut() {
-            if entry.function == function && (index == None || index.unwrap() == entry.index) {
-                match reg {
-                    CpuidReg::EAX => {
-                        entry.eax = value;
-                    }
-                    CpuidReg::EBX => {
-                        entry.ebx = value;
-                    }
-                    CpuidReg::ECX => {
-                        entry.ecx = value;
-                    }
-                    CpuidReg::EDX => {
-                        entry.edx = value;
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
-        let entries = cpuid.as_mut_slice();
-
-        for entry in entries.iter_mut() {
-            for patch in patches.iter() {
-                if entry.function == patch.function && entry.index == patch.index {
-                    if let Some(flags_bit) = patch.flags_bit {
-                        entry.flags |= 1 << flags_bit;
-                    }
-                    if let Some(eax_bit) = patch.eax_bit {
-                        entry.eax |= 1 << eax_bit;
-                    }
-                    if let Some(ebx_bit) = patch.ebx_bit {
-                        entry.ebx |= 1 << ebx_bit;
-                    }
-                    if let Some(ecx_bit) = patch.ecx_bit {
-                        entry.ecx |= 1 << ecx_bit;
-                    }
-                    if let Some(edx_bit) = patch.edx_bit {
-                        entry.edx |= 1 << edx_bit;
-                    }
-                }
-            }
-        }
-    }
-}
-
-=======
->>>>>>> First try untangle
 #[cfg(feature = "acpi")]
 #[repr(packed)]
 struct LocalAPIC {
@@ -625,8 +546,6 @@ pub struct CpuManager {
     interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    #[cfg(target_arch = "x86_64")]
-    cpuid: CpuId,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     fd: Arc<dyn VmFdOps>,
     vcpus_kill_signalled: Arc<AtomicBool>,
@@ -758,7 +677,6 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-        #[cfg_attr(target_arch = "aarch64", allow(unused_variables))] kvm: &Kvm,
         fd: Arc<dyn VmFdOps>,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
@@ -766,8 +684,6 @@ impl CpuManager {
         vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
 
         let device_manager = device_manager.lock().unwrap();
-        #[cfg(target_arch = "x86_64")]
-        let cpuid = CpuManager::patch_cpuid(kvm)?;
         let cpu_manager = Arc::new(Mutex::new(CpuManager {
             boot_vcpus: config.boot_vcpus,
             max_vcpus: config.max_vcpus,
@@ -775,8 +691,6 @@ impl CpuManager {
             mmio_bus: device_manager.mmio_bus().clone(),
             interrupt_controller: device_manager.interrupt_controller().clone(),
             vm_memory: guest_memory,
-            #[cfg(target_arch = "x86_64")]
-            cpuid,
             fd,
             vcpus_kill_signalled: Arc::new(AtomicBool::new(false)),
             vcpus_pause_signalled: Arc::new(AtomicBool::new(false)),
@@ -801,42 +715,6 @@ impl CpuManager {
             .map_err(Error::BusError)?;
 
         Ok(cpu_manager)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn patch_cpuid(kvm: &Kvm) -> Result<CpuId> {
-        let mut cpuid_patches = Vec::new();
-
-        // Patch tsc deadline timer bit
-        cpuid_patches.push(CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Patch hypervisor bit
-        cpuid_patches.push(CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(HYPERVISOR_ECX_BIT),
-            edx_bit: None,
-        });
-
-        // Supported CPUID
-        let mut cpuid = kvm
-            .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(Error::PatchCpuId)?;
-
-        CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
-
-        Ok(cpuid)
     }
 
     #[cfg(target_arch = "aarch64")]

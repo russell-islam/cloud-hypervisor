@@ -18,7 +18,9 @@ use std::result;
 pub type Result<T> = result::Result<T, Error>;
 
 // CPUID feature bits
+#[cfg(target_arch = "x86_64")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
+#[cfg(target_arch = "x86_64")]
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 
 #[allow(dead_code)]

@@ -45,6 +45,7 @@ pub trait VmFdOps: Send + Sync {
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> ResultOps<()>;
     fn create_device(&self, device: &mut CreateDevice) -> ResultOps<DeviceFd>;
     fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8);
+    fn get_cpu_id(&self) -> ResultOps<CpuId>;
 }
 pub trait Hypervisor: Send + Sync {
     fn create_vm(&self) -> Result<Arc<dyn VmFdOps>>;

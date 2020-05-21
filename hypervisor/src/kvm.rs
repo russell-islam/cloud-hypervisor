@@ -11,6 +11,7 @@ use crate::wrapper::{Hypervisor, VcpuOps, VmFdOps};
 use devices::ioapic;
 use kvm_bindings::{kvm_enable_cap, CpuId, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::{Cap, DeviceFd, IoEventAddress, Kvm, NoDatamatch, VcpuFd, VmFd};
+use std::result;
 use std::sync::Arc;
 use vm_memory::{Address, GuestAddress};
 
@@ -69,6 +70,9 @@ impl VmFdOps for KvmVmFd {
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
         vcpu.set_cpuid2(&cpuid).unwrap()
     }
+    fn get_cpu_id(&self) -> ResultOps<CpuId> {
+        Ok(self.cpuid.clone())
+    }
 }
 pub struct KvmHyperVisor {
     kvm: Kvm,
@@ -81,11 +85,14 @@ pub enum KvmError {
 
     /// Failed to create a new KVM instance
     KvmNew(kvm_ioctls::Error),
+    CapabilityMissing(Cap),
 }
+
+pub type KvmResult<T> = result::Result<T, KvmError>;
 impl KvmHyperVisor {
     pub fn new() -> Result<KvmHyperVisor> {
-        let kvm = Kvm::new().map_err(KvmError::KvmNew).unwrap();
-        Ok(KvmHyperVisor { kvm: kvm })
+        let kvm_obj = Kvm::new().map_err(KvmError::KvmNew).unwrap();
+        Ok(KvmHyperVisor { kvm: kvm_obj })
     }
 }
 /*
@@ -100,21 +107,23 @@ impl HyperVHyperVisor {
     }
 }
 */
+pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
+    if !kvm.check_extension(Cap::SignalMsi) {
+        return Err(KvmError::CapabilityMissing(Cap::SignalMsi));
+    }
+    if !kvm.check_extension(Cap::TscDeadlineTimer) {
+        return Err(KvmError::CapabilityMissing(Cap::TscDeadlineTimer));
+    }
+    if !kvm.check_extension(Cap::SplitIrqchip) {
+        return Err(KvmError::CapabilityMissing(Cap::SplitIrqchip));
+    }
+    Ok(())
+}
+
 impl Hypervisor for KvmHyperVisor {
     fn create_vm(&self) -> Result<Arc<dyn VmFdOps>> {
         // Check required capabilities:
-        if !self.kvm.check_extension(Cap::SignalMsi) {
-            return Err(Error::CapabilityMissing);
-        }
-
-        if !self.kvm.check_extension(Cap::TscDeadlineTimer) {
-            return Err(Error::CapabilityMissing);
-        }
-
-        if !self.kvm.check_extension(Cap::SplitIrqchip) {
-            return Err(Error::CapabilityMissing);
-        }
-
+        check_required_kvm_extensions(&self.kvm).expect("Missing KVM capabilities");
         let fd: VmFd;
         loop {
             match self.kvm.create_vm() {
@@ -132,10 +141,11 @@ impl Hypervisor for KvmHyperVisor {
             }
             break;
         }
-        let fd = Arc::new(fd);
+        let vm_fd = Arc::new(fd);
 
         // Set TSS
-        fd.set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
+        vm_fd
+            .set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
             .map_err(KvmError::VmSetup)
             .unwrap();
 
@@ -145,12 +155,12 @@ impl Hypervisor for KvmHyperVisor {
         let mut cap: kvm_enable_cap = Default::default();
         cap.cap = KVM_CAP_SPLIT_IRQCHIP;
         cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-        fd.enable_cap(&cap).map_err(KvmError::VmSetup).unwrap();
-        let cpuid: CpuId = patch_cpuid(&self.kvm).unwrap();
+        vm_fd.enable_cap(&cap).map_err(KvmError::VmSetup).unwrap();
+        let kvm_cpuid: CpuId = patch_cpuid(&self.kvm).unwrap();
 
         Ok(Arc::new(KvmVmFd {
-            fd: fd,
-            cpuid: cpuid,
+            fd: vm_fd,
+            cpuid: kvm_cpuid,
         }))
     }
     fn get_api_version(&self) -> i32 {
