@@ -16,7 +16,7 @@
 use crate::config::CpusConfig;
 use crate::device_manager::DeviceManager;
 use crate::hypervisor::params::*;
-use crate::hypervisor::{VcpuOps, VmFdOps};
+use crate::hypervisor::{GenVcpu, GenVm};
 use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
 use acpi_tables::{aml, aml::Aml, sdt::SDT};
@@ -252,7 +252,7 @@ struct InterruptSourceOverride {
 
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
-    fd: Arc<dyn VcpuOps>,
+    fd: Arc<dyn GenVcpu>,
     id: u8,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     io_bus: Arc<devices::Bus>,
@@ -290,7 +290,7 @@ impl Vcpu {
     /// * `vm` - The virtual machine this vcpu will get attached to.
     pub fn new(
         id: u8,
-        fd: &Arc<dyn VmFdOps>,
+        fd: &Arc<dyn GenVm>,
         io_bus: Arc<devices::Bus>,
         mmio_bus: Arc<devices::Bus>,
         interrupt_controller: Option<Arc<Mutex<dyn InterruptController>>>,
@@ -320,7 +320,7 @@ impl Vcpu {
         &mut self,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-        vmfd: Arc<dyn VmFdOps>,
+        vmfd: Arc<dyn GenVm>,
     ) -> Result<()> {
         vmfd.patch_cpuid(self.fd.clone(), self.id);
         arch::x86_64::regs::setup_msrs(&self.fd).map_err(Error::MSRSConfiguration)?;
@@ -547,7 +547,7 @@ pub struct CpuManager {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
-    fd: Arc<dyn VmFdOps>,
+    fd: Arc<dyn GenVm>,
     vcpus_kill_signalled: Arc<AtomicBool>,
     vcpus_pause_signalled: Arc<AtomicBool>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -677,7 +677,7 @@ impl CpuManager {
         config: &CpusConfig,
         device_manager: &Arc<Mutex<DeviceManager>>,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-        fd: Arc<dyn VmFdOps>,
+        fd: Arc<dyn GenVm>,
         reset_evt: EventFd,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));

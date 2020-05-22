@@ -11,4 +11,4 @@ pub mod wrapper;
 
 pub use self::wrapper::get_hypervisor;
 
-pub use self::wrapper::{HyperVisorType, Hypervisor, VcpuOps, VmFdOps};
+pub use self::wrapper::{GenVcpu, GenVm, HyperVisorType, Hypervisor};

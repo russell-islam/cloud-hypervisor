@@ -15,7 +15,7 @@ use std::{mem, result};
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
 use crate::hypervisor::params::{FpuState, SpecialRegisters, StandardRegisters};
-use crate::hypervisor::VcpuOps;
+use crate::hypervisor::GenVcpu;
 use arch_gen::x86::msr_index;
 use kvm_bindings::{kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
@@ -58,7 +58,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_fpu(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
+pub fn setup_fpu(vcpu: &Arc<dyn GenVcpu>) -> Result<()> {
     let fpu: FpuState = FpuState {
         fcw: 0x37f,
         mxcsr: 0x1f80,
@@ -73,7 +73,7 @@ pub fn setup_fpu(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_msrs(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
+pub fn setup_msrs(vcpu: &Arc<dyn GenVcpu>) -> Result<()> {
     vcpu.set_msrs(&boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
@@ -89,7 +89,7 @@ pub fn setup_msrs(vcpu: &Arc<dyn VcpuOps>) -> Result<()> {
 /// * `boot_sp` - Starting stack pointer.
 /// * `boot_si` - Must point to zero page address per Linux ABI.
 pub fn setup_regs(
-    vcpu: &Arc<dyn VcpuOps>,
+    vcpu: &Arc<dyn GenVcpu>,
     boot_ip: u64,
     boot_sp: u64,
     boot_si: u64,
@@ -126,7 +126,7 @@ pub fn setup_regs(
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_sregs(
     mem: &GuestMemoryMmap,
-    vcpu: &Arc<dyn VcpuOps>,
+    vcpu: &Arc<dyn GenVcpu>,
     boot_prot: BootProtocol,
 ) -> Result<()> {
     let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;

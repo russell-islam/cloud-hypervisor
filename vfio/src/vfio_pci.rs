@@ -13,7 +13,7 @@ extern crate vm_allocator;
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use hypervisor::VmFdOps;
+use hypervisor::GenVm;
 use kvm_bindings::kvm_userspace_memory_region;
 use pci::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
@@ -281,7 +281,7 @@ impl VfioPciConfig {
 /// The VMM creates a VfioDevice, then assigns it to a VfioPciDevice,
 /// which then gets added to the PCI bus.
 pub struct VfioPciDevice {
-    vm_fd: Arc<dyn VmFdOps>,
+    vm_fd: Arc<dyn GenVm>,
     device: Arc<VfioDevice>,
     vfio_pci_configuration: VfioPciConfig,
     configuration: PciConfiguration,
@@ -292,7 +292,7 @@ pub struct VfioPciDevice {
 impl VfioPciDevice {
     /// Constructs a new Vfio Pci device for the given Vfio device
     pub fn new(
-        vm_fd: &Arc<dyn VmFdOps>,
+        vm_fd: &Arc<dyn GenVm>,
         device: VfioDevice,
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
     ) -> Result<Self> {
@@ -509,7 +509,7 @@ impl VfioPciDevice {
     /// # Return value
     ///
     /// This function returns the updated KVM memory slot id.
-    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<dyn VmFdOps>, mem_slot: F) -> Result<()>
+    pub fn map_mmio_regions<F>(&mut self, vm: &Arc<dyn GenVm>, mem_slot: F) -> Result<()>
     where
         F: Fn() -> u32,
     {

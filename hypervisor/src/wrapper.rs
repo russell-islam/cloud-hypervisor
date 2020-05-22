@@ -28,12 +28,12 @@ impl fmt::Display for HyperVisorType {
     }
 }
 
-pub trait VmFdOps: Send + Sync {
+pub trait GenVm: Send + Sync {
     fn set_tss_address(&self, offset: usize) -> ResultOps<()>;
     fn create_irq_chip(&self) -> ResultOps<()>;
     fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()>;
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()>;
-    fn create_vcpu(&self, id: u8) -> ResultOps<Arc<dyn VcpuOps>>;
+    fn create_vcpu(&self, id: u8) -> ResultOps<Arc<dyn GenVcpu>>;
     fn register_ioevent(
         &self,
         fd: &EventFd,
@@ -44,11 +44,11 @@ pub trait VmFdOps: Send + Sync {
     fn set_gsi_routing(&self, irq_routing: &IrqRouting) -> ResultOps<()>;
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> ResultOps<()>;
     fn create_device(&self, device: &mut CreateDevice) -> ResultOps<DeviceFd>;
-    fn patch_cpuid(&self, vcpu: Arc<dyn VcpuOps>, id: u8);
+    fn patch_cpuid(&self, vcpu: Arc<dyn GenVcpu>, id: u8);
     fn get_cpu_id(&self) -> ResultOps<CpuId>;
 }
 pub trait Hypervisor: Send + Sync {
-    fn create_vm(&self) -> Result<Arc<dyn VmFdOps>>;
+    fn create_vm(&self) -> Result<Arc<dyn GenVm>>;
     fn get_api_version(&self) -> i32;
     fn get_vcpu_mmap_size(&self) -> ResultOps<usize>;
     fn get_max_vcpus(&self) -> ResultOps<usize>;
@@ -64,7 +64,7 @@ pub fn get_hypervisor() -> Result<Arc<dyn Hypervisor>> {
     Err(Error::HyperVisorTypeMismatch)
 }
 
-pub trait VcpuOps: Send + Sync {
+pub trait GenVcpu: Send + Sync {
     fn get_regs(&self) -> ResultOps<StandardRegisters>;
     fn set_regs(&self, regs: &StandardRegisters) -> ResultOps<()>;
     fn get_sregs(&self) -> ResultOps<SpecialRegisters>;

@@ -423,7 +423,7 @@ struct AddressManager {
     allocator: Arc<Mutex<SystemAllocator>>,
     io_bus: Arc<devices::Bus>,
     mmio_bus: Arc<devices::Bus>,
-    vm_fd: Arc<dyn VmFdOps>,
+    vm_fd: Arc<dyn GenVm>,
     #[cfg(feature = "pci_support")]
     device_tree: Arc<Mutex<DeviceTree>>,
 }
@@ -713,7 +713,7 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new(
-        vm_fd: Arc<dyn VmFdOps>,
+        vm_fd: Arc<dyn GenVm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         _exit_evt: &EventFd,
@@ -2109,7 +2109,7 @@ impl DeviceManager {
     }
 
     #[cfg(feature = "pci_support")]
-    fn create_kvm_device(vm: &Arc<dyn VmFdOps>) -> DeviceManagerResult<DeviceFd> {
+    fn create_kvm_device(vm: &Arc<dyn GenVm>) -> DeviceManagerResult<DeviceFd> {
         let mut vfio_dev = kvm_bindings::kvm_create_device {
             type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,

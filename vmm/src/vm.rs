@@ -275,7 +275,7 @@ impl Vm {
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<dyn VmFdOps>,
+        fd: Arc<dyn GenVm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
