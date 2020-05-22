@@ -33,7 +33,7 @@ use crate::config::{
 };
 use crate::cpu;
 use crate::device_manager::{get_win_size, Console, DeviceManager, DeviceManagerError};
-use crate::hypervisor::wrapper::*;
+use crate::hypervisor::*;
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
@@ -275,7 +275,7 @@ impl Vm {
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<dyn GenVm>,
+        fd: Arc<dyn GenVmFd>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,

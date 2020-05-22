@@ -14,7 +14,7 @@ use arch::{get_host_cpu_phys_bits, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::BusDevice;
-use hypervisor::GenVm;
+use hypervisor::GenVmFd;
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 use std::convert::TryInto;
 use std::ffi;
@@ -58,7 +58,7 @@ pub struct MemoryManager {
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    fd: Arc<dyn GenVm>,
+    fd: Arc<dyn GenVmFd>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     backing_file: Option<PathBuf>,
@@ -209,7 +209,7 @@ impl BusDevice for MemoryManager {
 
 impl MemoryManager {
     pub fn new(
-        fd: Arc<dyn GenVm>,
+        fd: Arc<dyn GenVmFd>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
@@ -388,7 +388,7 @@ impl MemoryManager {
 
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
-        fd: Arc<dyn GenVm>,
+        fd: Arc<dyn GenVmFd>,
         config: &MemoryConfig,
         source_url: &str,
         prefault: bool,

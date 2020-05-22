@@ -4,10 +4,10 @@
 //
 // Copyright © 2020, Microsft  Corporation
 //
-use crate::cpuidpatch::{patch_cpuid, CpuidPatch, CpuidReg};
+use crate::cpuidpatch::{self, patch_cpuid, CpuidPatch, CpuidReg};
 
-use crate::params::*;
-use crate::wrapper::{GenVcpu, GenVm, Hypervisor};
+use crate::bindings::*;
+use crate::{GenVcpuFd, GenVmFd, Hypervisor};
 use devices::ioapic;
 use kvm_bindings::{kvm_enable_cap, CpuId, KVM_CAP_SPLIT_IRQCHIP};
 use kvm_ioctls::{Cap, DeviceFd, IoEventAddress, Kvm, NoDatamatch, VcpuFd, VmFd};
@@ -23,7 +23,7 @@ pub struct KvmVmFd {
     fd: Arc<VmFd>,
     cpuid: CpuId,
 }
-impl GenVm for KvmVmFd {
+impl GenVmFd for KvmVmFd {
     fn set_tss_address(&self, offset: usize) -> ResultOps<()> {
         self.fd.set_tss_address(offset)
     }
@@ -36,7 +36,7 @@ impl GenVm for KvmVmFd {
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> ResultOps<()> {
         self.fd.unregister_irqfd(fd, gsi)
     }
-    fn create_vcpu(&self, id: u8) -> ResultOps<Arc<dyn GenVcpu>> {
+    fn create_vcpu(&self, id: u8) -> ResultOps<Arc<dyn GenVcpuFd>> {
         let vc = self.fd.create_vcpu(id).expect("new VcpuFd failed");
         let vcpu = KvmVcpuId { fd: vc };
         Ok(Arc::new(vcpu))
@@ -65,7 +65,7 @@ impl GenVm for KvmVmFd {
     fn create_device(&self, device: &mut CreateDevice) -> ResultOps<DeviceFd> {
         self.fd.create_device(device)
     }
-    fn patch_cpuid(&self, vcpu: Arc<dyn GenVcpu>, id: u8) {
+    fn patch_cpuid(&self, vcpu: Arc<dyn GenVcpuFd>, id: u8) {
         let mut cpuid = self.cpuid.clone();
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
         vcpu.set_cpuid2(&cpuid).unwrap()
@@ -86,6 +86,7 @@ pub enum KvmError {
     /// Failed to create a new KVM instance
     KvmNew(kvm_ioctls::Error),
     CapabilityMissing(Cap),
+    PatchCpuID(cpuidpatch::Error),
 }
 
 pub type KvmResult<T> = result::Result<T, KvmError>;
@@ -95,18 +96,7 @@ impl KvmHyperVisor {
         Ok(KvmHyperVisor { kvm: kvm_obj })
     }
 }
-/*
-pub struct HyperVHyperVisor {
-    name: String,
-}
-impl HyperVHyperVisor {
-    fn new() -> Result<HyperVHyperVisor> {
-        Ok(HyperVHyperVisor {
-            name: "HyperV".to_string(),
-        })
-    }
-}
-*/
+
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     if !kvm.check_extension(Cap::SignalMsi) {
         return Err(KvmError::CapabilityMissing(Cap::SignalMsi));
@@ -121,7 +111,7 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
 }
 
 impl Hypervisor for KvmHyperVisor {
-    fn create_vm(&self) -> Result<Arc<dyn GenVm>> {
+    fn create_vm(&self) -> Result<Arc<dyn GenVmFd>> {
         // Check required capabilities:
         check_required_kvm_extensions(&self.kvm).expect("Missing KVM capabilities");
         let fd: VmFd;
@@ -156,7 +146,9 @@ impl Hypervisor for KvmHyperVisor {
         cap.cap = KVM_CAP_SPLIT_IRQCHIP;
         cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
         vm_fd.enable_cap(&cap).map_err(KvmError::VmSetup).unwrap();
-        let kvm_cpuid: CpuId = patch_cpuid(&self.kvm).unwrap();
+        let kvm_cpuid: CpuId = patch_cpuid(&self.kvm)
+            .map_err(KvmError::PatchCpuID)
+            .unwrap();
 
         Ok(Arc::new(KvmVmFd {
             fd: vm_fd,
@@ -184,7 +176,7 @@ impl Hypervisor for KvmHyperVisor {
 pub struct KvmVcpuId {
     fd: VcpuFd,
 }
-impl GenVcpu for KvmVcpuId {
+impl GenVcpuFd for KvmVcpuId {
     fn get_regs(&self) -> ResultOps<StandardRegisters> {
         self.fd.get_regs()
     }
