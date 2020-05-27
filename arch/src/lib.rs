@@ -25,6 +25,7 @@ extern crate hypervisor;
 extern crate kvm_ioctls;
 extern crate linux_loader;
 extern crate vm_memory;
+use kvm_ioctls::*;
 use std::result;
 
 #[derive(Debug)]
@@ -50,6 +51,8 @@ pub enum Error {
     ModlistSetup(vm_memory::GuestMemoryError),
     /// RSDP Beyond Guest Memory
     RSDPPastRamEnd,
+    /// Capability missing
+    CapabilityMissing(Cap),
 }
 pub type Result<T> = result::Result<T, Error>;
 

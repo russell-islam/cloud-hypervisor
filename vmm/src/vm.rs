@@ -39,8 +39,11 @@ use crate::migration::{url_to_path, vm_config_from_snapshot, VM_SNAPSHOT_FILE};
 use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
-use arch::{BootProtocol, EntryPoint};
+use arch::BootProtocol;
+use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
+use devices::ioapic;
+
 use devices::HotPlugNotificationFlags;
 use kvm_bindings::kvm_userspace_memory_region;
 

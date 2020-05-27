@@ -3,10 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::hypervisor::wrapper::*;
+use crate::hypervisor::*;
 use crate::hypervisor::*;
 use devices::interrupt_controller::InterruptController;
-use devices::ioapic;
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use std::collections::HashMap;
 use std::io;
