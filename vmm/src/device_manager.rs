@@ -169,7 +169,7 @@ pub enum DeviceManagerError {
     AllocateIrq,
 
     /// Cannot configure the IRQ.
-    Irq(kvm_ioctls::Error),
+    Irq(hypervisor::Error),
 
     /// Cannot allocate PCI BARs
     #[cfg(feature = "pci_support")]
@@ -180,10 +180,10 @@ pub enum DeviceManagerError {
     FreePciBars(pci::PciDeviceError),
 
     /// Cannot register ioevent.
-    RegisterIoevent(kvm_ioctls::Error),
+    RegisterIoevent(hypervisor::Error),
 
     /// Cannot unregister ioevent.
-    UnRegisterIoevent(kvm_ioctls::Error),
+    UnRegisterIoevent(hypervisor::Error),
 
     /// Cannot create virtio device
     VirtioDevice(vmm_sys_util::errno::Error),
@@ -223,7 +223,7 @@ pub enum DeviceManagerError {
     VfioMapRegion(VfioPciError),
 
     /// Failed to create the KVM device.
-    CreateKvmDevice(kvm_ioctls::Error),
+    CreateKvmDevice(hypervisor::Error),
 
     /// Failed to memory map.
     Mmap(io::Error),

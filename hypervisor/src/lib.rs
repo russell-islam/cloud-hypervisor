@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use vmm_sys_util::eventfd::EventFd;
 extern crate libc;
+pub use vmm_sys_util::errno::Error;
 
 use std::fmt;
 

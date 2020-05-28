@@ -28,15 +28,15 @@ const MTRR_MEM_TYPE_WB: u64 = 0x6;
 #[derive(Debug)]
 pub enum Error {
     /// Failed to get SREGs for this CPU.
-    GetStatusRegisters(kvm_ioctls::Error),
+    GetStatusRegisters(hypervisor::Error),
     /// Failed to set base registers for this CPU.
-    SetBaseRegisters(kvm_ioctls::Error),
+    SetBaseRegisters(hypervisor::Error),
     /// Failed to configure the FPU.
-    SetFPURegisters(kvm_ioctls::Error),
+    SetFPURegisters(hypervisor::Error),
     /// Setting up MSRs failed.
-    SetModelSpecificRegisters(kvm_ioctls::Error),
+    SetModelSpecificRegisters(hypervisor::Error),
     /// Failed to set SREGs for this CPU.
-    SetStatusRegisters(kvm_ioctls::Error),
+    SetStatusRegisters(hypervisor::Error),
     /// Checking the GDT address failed.
     CheckGDTAddr,
     /// Writing the GDT to RAM failed.

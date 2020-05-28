@@ -17,12 +17,11 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::hypervisor::GenVcpuFd;
 use kvm_bindings::kvm_lapic_state;
-use kvm_ioctls;
 
 #[derive(Debug)]
 pub enum Error {
-    GetLapic(kvm_ioctls::Error),
-    SetLapic(kvm_ioctls::Error),
+    GetLapic(hypervisor::Error),
+    SetLapic(hypervisor::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;

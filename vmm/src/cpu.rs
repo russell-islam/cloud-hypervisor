@@ -100,16 +100,16 @@ impl fmt::Display for DebugIoPortRange {
 #[derive(Debug)]
 pub enum Error {
     /// Cannot open the VCPU file descriptor.
-    VcpuFd(kvm_ioctls::Error),
+    VcpuFd(hypervisor::Error),
 
     /// Cannot run the VCPUs.
-    VcpuRun(kvm_ioctls::Error),
+    VcpuRun(hypervisor::Error),
 
     /// Cannot spawn a new vCPU thread.
     VcpuSpawn(io::Error),
 
     /// Cannot patch the CPU ID
-    PatchCpuId(kvm_ioctls::Error),
+    PatchCpuId(hypervisor::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Error configuring the general purpose registers
@@ -124,7 +124,7 @@ pub enum Error {
     FPUConfiguration(arch::x86_64::regs::Error),
 
     /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(kvm_ioctls::Error),
+    SetSupportedCpusFailed(hypervisor::Error),
 
     #[cfg(target_arch = "x86_64")]
     /// Cannot set the local interruption due to bad configuration.
@@ -150,58 +150,58 @@ pub enum Error {
     DesiredVCPUCountExceedsMax,
 
     /// Failed to get KVM vcpu lapic.
-    VcpuGetLapic(kvm_ioctls::Error),
+    VcpuGetLapic(hypervisor::Error),
 
     /// Failed to set KVM vcpu lapic.
-    VcpuSetLapic(kvm_ioctls::Error),
+    VcpuSetLapic(hypervisor::Error),
 
     /// Failed to get KVM vcpu MP state.
-    VcpuGetMpState(kvm_ioctls::Error),
+    VcpuGetMpState(hypervisor::Error),
 
     /// Failed to set KVM vcpu MP state.
-    VcpuSetMpState(kvm_ioctls::Error),
+    VcpuSetMpState(hypervisor::Error),
 
     /// Failed to get KVM vcpu msrs.
-    VcpuGetMsrs(kvm_ioctls::Error),
+    VcpuGetMsrs(hypervisor::Error),
 
     /// Failed to set KVM vcpu msrs.
-    VcpuSetMsrs(kvm_ioctls::Error),
+    VcpuSetMsrs(hypervisor::Error),
 
     /// Failed to get KVM vcpu regs.
-    VcpuGetRegs(kvm_ioctls::Error),
+    VcpuGetRegs(hypervisor::Error),
 
     /// Failed to set KVM vcpu regs.
-    VcpuSetRegs(kvm_ioctls::Error),
+    VcpuSetRegs(hypervisor::Error),
 
     /// Failed to get KVM vcpu sregs.
-    VcpuGetSregs(kvm_ioctls::Error),
+    VcpuGetSregs(hypervisor::Error),
 
     /// Failed to set KVM vcpu sregs.
-    VcpuSetSregs(kvm_ioctls::Error),
+    VcpuSetSregs(hypervisor::Error),
 
     /// Failed to get KVM vcpu events.
-    VcpuGetVcpuEvents(kvm_ioctls::Error),
+    VcpuGetVcpuEvents(hypervisor::Error),
 
     /// Failed to set KVM vcpu events.
-    VcpuSetVcpuEvents(kvm_ioctls::Error),
+    VcpuSetVcpuEvents(hypervisor::Error),
 
     /// Failed to get KVM vcpu FPU.
-    VcpuGetFpu(kvm_ioctls::Error),
+    VcpuGetFpu(hypervisor::Error),
 
     /// Failed to set KVM vcpu FPU.
-    VcpuSetFpu(kvm_ioctls::Error),
+    VcpuSetFpu(hypervisor::Error),
 
     /// Failed to get KVM vcpu XSAVE.
-    VcpuGetXsave(kvm_ioctls::Error),
+    VcpuGetXsave(hypervisor::Error),
 
     /// Failed to set KVM vcpu XSAVE.
-    VcpuSetXsave(kvm_ioctls::Error),
+    VcpuSetXsave(hypervisor::Error),
 
     /// Failed to get KVM vcpu XCRS.
-    VcpuGetXcrs(kvm_ioctls::Error),
+    VcpuGetXcrs(hypervisor::Error),
 
     /// Failed to set KVM vcpu XCRS.
-    VcpuSetXcrs(kvm_ioctls::Error),
+    VcpuSetXcrs(hypervisor::Error),
 
     /// Error resuming vCPU on shutdown
     ResumeOnShutdown(MigratableError),

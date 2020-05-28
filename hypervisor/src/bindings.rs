@@ -23,6 +23,7 @@ pub use {
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HypervisorError(i32);
 #[derive(Debug)]

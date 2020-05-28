@@ -42,12 +42,9 @@ use anyhow::anyhow;
 use arch::BootProtocol;
 use arch::EntryPoint;
 #[cfg(target_arch = "x86_64")]
-use devices::ioapic;
-
 use devices::HotPlugNotificationFlags;
-use kvm_bindings::kvm_userspace_memory_region;
+use hypervisor::bindings::{MemoryRegion, VcpuExit};
 
-use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
@@ -91,10 +88,10 @@ pub enum Error {
     VmFd(io::Error),
 
     /// Cannot create the KVM instance
-    VmCreate(kvm_ioctls::Error),
+    VmCreate(hypervisor::Error),
 
     /// Cannot set the VM up
-    VmSetup(kvm_ioctls::Error),
+    VmSetup(hypervisor::Error),
 
     /// Cannot open the kernel image
     KernelFile(io::Error),
@@ -150,7 +147,7 @@ pub enum Error {
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     /// Failed to create a new KVM instance
-    KvmNew(kvm_ioctls::Error),
+    KvmNew(hypervisor::Error),
 
     /// VM is not created
     VmNotCreated,
@@ -1309,12 +1306,13 @@ pub fn test_vm() {
     let mem_size = 0x1000;
     let load_addr = GuestAddress(0x1000);
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
-
-    let kvm = Kvm::new().expect("new KVM instance creation failed");
-    let vm_fd = kvm.create_vm().expect("new VM fd creation failed");
+    let hv = get_hypervisor().unwrap();
+    let vm_fd = hv.create_vm().unwrap();
+    //let kvm = Kvm::new().expect("new KVM instance creation failed");
+    //let  = kvm.create_vm().expect("new VM fd creation failed");
 
     mem.with_regions(|index, region| {
-        let mem_region = kvm_userspace_memory_region {
+        let mem_region = MemoryRegion {
             slot: index as u32,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len() as u64,

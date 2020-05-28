@@ -4,7 +4,6 @@
 //
 
 use crate::hypervisor::*;
-use crate::hypervisor::*;
 use devices::interrupt_controller::InterruptController;
 use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 use std::collections::HashMap;

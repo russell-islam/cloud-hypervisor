@@ -105,7 +105,7 @@ pub enum Error {
     InvalidSize,
 
     /// Failed to set the user memory region.
-    SetUserMemoryRegion(kvm_ioctls::Error),
+    SetUserMemoryRegion(hypervisor::Error),
 
     /// Failed to EventFd.
     EventFdFail(io::Error),

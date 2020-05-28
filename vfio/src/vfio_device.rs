@@ -45,7 +45,7 @@ pub enum VfioError {
     UnsetContainer,
     ContainerSetIOMMU,
     GroupGetDeviceFD,
-    KvmSetDeviceAttr(kvm_ioctls::Error),
+    KvmSetDeviceAttr(hypervisor::Error),
     VfioDeviceGetInfo,
     VfioDeviceGetRegionInfo,
     InvalidPath,
@@ -281,7 +281,7 @@ impl VfioGroup {
             .map_err(VfioError::KvmSetDeviceAttr)
     }
 
-    fn kvm_device_del_group(&self) -> std::result::Result<(), kvm_ioctls::Error> {
+    fn kvm_device_del_group(&self) -> std::result::Result<(), hypervisor::Error> {
         let group_fd = self.as_raw_fd();
         let group_fd_ptr = &group_fd as *const i32;
         let dev_attr = kvm_bindings::kvm_device_attr {
