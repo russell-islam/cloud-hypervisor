@@ -27,6 +27,7 @@ vm-memory = "0.2.1"
 vmm-sys-util = "0.6.0"
 vm-virtio = { path = "vm-virtio" }
 vhost_rs = { git = "https://github.com/cloud-hypervisor/vhost", branch = "dragonball", package = "vhost", features = ["vhost-user-slave"] }
+hypervisor = { path = "hypervisor" }
 
 [dev-dependencies]
 ssh2 = "0.8.1"
