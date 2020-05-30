@@ -7,18 +7,13 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{Cap, CpuId};
 use std::sync::Arc;
 extern crate thiserror;
 
 use thiserror::Error;
-///
-/// Trait to represent a VM
-///
-/// This crate provides a hypervisor-agnostic interfaces for Vm
-///
-pub trait Vm: Send + Sync {}
 
 #[derive(Error, Debug)]
 ///

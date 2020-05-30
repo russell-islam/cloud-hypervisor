@@ -8,4 +8,4 @@
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
-pub use {kvm_bindings::CpuId, kvm_ioctls::Cap};
+pub use {kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::CpuId, kvm_ioctls::Cap};
