@@ -21,6 +21,8 @@ pub mod hv;
 /// X86_64 related module
 pub mod x86_64;
 
+/// arm64 related module
+pub mod aarch64;
 /// Vm related module
 pub mod vm;
 
@@ -29,3 +31,6 @@ pub mod common;
 
 /// CPU related module
 mod cpu;
+
+/// KVM implementation module
+mod kvm;

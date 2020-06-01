@@ -21,7 +21,7 @@ pub enum HypervisorCpuError {
     /// Setting standard registers error
     ///
     #[error("Failed to set standard register: {0}")]
-    SetStandardRegs(#[source] vmm_sys_util::errno::Error),
+    SetStandardRegs(#[source] anyhow::Error),
     ///
     /// Setting standard registers error
     ///
@@ -31,7 +31,7 @@ pub enum HypervisorCpuError {
     /// Setting special register error
     ///
     #[error("Failed to set special registers: {0}")]
-    SetSpecialRegs(#[source] vmm_sys_util::errno::Error),
+    SetSpecialRegs(#[source] anyhow::Error),
     ///
     /// Getting standard register error
     ///
@@ -41,7 +41,7 @@ pub enum HypervisorCpuError {
     /// Setting floating point registers error
     ///
     #[error("Failed to set special register: {0}")]
-    SetFloatingPointRegs(#[source] vmm_sys_util::errno::Error),
+    SetFloatingPointRegs(#[source] anyhow::Error),
     ///
     /// Getting floating point register error
     ///
@@ -51,7 +51,7 @@ pub enum HypervisorCpuError {
     /// Setting Cpuid error
     ///
     #[error("Failed to set Cpuid: {0}")]
-    SetCpuid(#[source] vmm_sys_util::errno::Error),
+    SetCpuid(#[source] anyhow::Error),
     ///
     /// Getting Cpuid error
     ///
@@ -61,7 +61,7 @@ pub enum HypervisorCpuError {
     /// Setting lapic state error
     ///
     #[error("Failed to set Lapic state: {0}")]
-    SetLapicState(#[source] vmm_sys_util::errno::Error),
+    SetLapicState(#[source] anyhow::Error),
     ///
     /// Getting Lapic state error
     ///
@@ -71,7 +71,7 @@ pub enum HypervisorCpuError {
     /// Setting MSR entries error
     ///
     #[error("Failed to set Msr entries: {0}")]
-    SetMsrEntries(#[source] vmm_sys_util::errno::Error),
+    SetMsrEntries(#[source] anyhow::Error),
     ///
     /// Getting Msr entries error
     ///
@@ -81,7 +81,7 @@ pub enum HypervisorCpuError {
     /// Setting MSR entries error
     ///
     #[error("Failed to set MP state: {0}")]
-    SetMpState(#[source] vmm_sys_util::errno::Error),
+    SetMpState(#[source] anyhow::Error),
     ///
     /// Getting Msr entries error
     ///
@@ -91,7 +91,7 @@ pub enum HypervisorCpuError {
     /// Setting Saved Processor Extended States error
     ///
     #[error("Failed to set Saved Processor Extended States: {0}")]
-    SetXsaveState(#[source] vmm_sys_util::errno::Error),
+    SetXsaveState(#[source] anyhow::Error),
     ///
     /// Getting Saved Processor Extended States error
     ///
@@ -101,7 +101,7 @@ pub enum HypervisorCpuError {
     /// Setting Extended Control Registers error
     ///
     #[error("Failed to set Extended Control Registers: {0}")]
-    SetXcsr(#[source] vmm_sys_util::errno::Error),
+    SetXcsr(#[source] anyhow::Error),
     ///
     /// Getting Extended Control Registers error
     ///
@@ -111,7 +111,7 @@ pub enum HypervisorCpuError {
     /// Running Vcpu error
     ///
     #[error("Failed to run vcpu: {0}")]
-    RunVcpu(#[source] vmm_sys_util::errno::Error),
+    RunVcpu(#[source] anyhow::Error),
     ///
     /// Getting Vcpu events error
     ///

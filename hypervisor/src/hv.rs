@@ -22,8 +22,18 @@ pub enum HypervisorError {
     ///
     /// Vm creation failure
     ///
+    #[error("Failed to create kvm: {0}")]
+    KvmNew(#[source] anyhow::Error),
+    ///
+    /// Vm creation failure
+    ///
     #[error("Failed to create Vm: {0}")]
     VmCreate(#[source] anyhow::Error),
+    ///
+    /// Vm setup failure
+    ///
+    #[error("Failed to setup Vm: {0}")]
+    VmSetup(#[source] anyhow::Error),
     ///
     /// API version error
     ///
