@@ -11,6 +11,7 @@
 use std::sync::Arc;
 extern crate thiserror;
 use crate::common::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
+use crate::cpu::Vcpu;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -69,10 +70,6 @@ pub enum HypervisorVmError {
 ///
 pub type Result<T> = std::result::Result<T, HypervisorVmError>;
 
-///
-/// Trait to represent a Vcpu
-///
-pub trait Vcpu: Send + Sync {}
 ///
 /// Trait to represent a Vm
 ///

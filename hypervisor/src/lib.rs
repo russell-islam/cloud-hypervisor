@@ -26,3 +26,6 @@ pub mod vm;
 
 /// Common for both x86 and aarch64
 pub mod common;
+
+/// CPU related module
+mod cpu;
