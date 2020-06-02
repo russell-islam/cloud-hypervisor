@@ -33,4 +33,9 @@ pub mod common;
 mod cpu;
 
 /// KVM implementation module
-mod kvm;
+pub mod kvm;
+
+pub use cpu::{HypervisorCpuError, Vcpu};
+pub use hv::{Hypervisor, HypervisorError};
+pub use vm::{HypervisorVmError, Vm};
+extern crate thiserror;

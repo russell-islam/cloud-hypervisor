@@ -9,7 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use std::sync::Arc;
-extern crate thiserror;
+
 use crate::common::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
 use crate::cpu::Vcpu;
 use thiserror::Error;
@@ -19,6 +19,11 @@ use vmm_sys_util::eventfd::EventFd;
 ///
 /// Enum for VM error
 pub enum HypervisorVmError {
+    ///
+    /// Create Vcpu error
+    ///
+    #[error("Failed to create Vcpu: {0}")]
+    CreateVcpu(#[source] anyhow::Error),
     ///
     /// TSS address error
     ///

@@ -51,8 +51,10 @@ name = "arch"
 version = "0.1.0"
 dependencies = [
  "acpi_tables",
+ "anyhow",
  "arch_gen",
  "byteorder",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -1359,9 +1361,11 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 name = "vfio"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "byteorder",
  "devices",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -1544,6 +1548,7 @@ dependencies = [
  "credibility",
  "devices",
  "epoll",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "lazy_static",

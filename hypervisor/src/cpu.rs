@@ -8,10 +8,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-extern crate thiserror;
 use crate::common::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 use thiserror::Error;
+use vmm_sys_util::errno::Error as RunError;
 
 #[derive(Error, Debug)]
 ///
@@ -162,6 +162,6 @@ pub trait Vcpu: Send + Sync {
     fn get_xcrs(&self) -> Result<ExtendedControlRegisters>;
     #[cfg(target_arch = "x86_64")]
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> Result<()>;
-    fn run(&self) -> Result<VcpuExit>;
+    fn run(&self) -> std::result::Result<VcpuExit, RunError>;
     fn get_vcpu_events(&self) -> Result<VcpuEvents>;
 }

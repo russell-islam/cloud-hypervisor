@@ -12,6 +12,7 @@
 )]
 
 extern crate byteorder;
+extern crate hypervisor;
 extern crate kvm_bindings;
 extern crate libc;
 

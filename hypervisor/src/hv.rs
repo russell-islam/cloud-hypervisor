@@ -11,7 +11,6 @@ use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{Cap, CpuId};
 use std::sync::Arc;
-extern crate thiserror;
 
 use thiserror::Error;
 

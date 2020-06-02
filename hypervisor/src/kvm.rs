@@ -187,7 +187,10 @@ impl vm::Vm for KvmVm {
     /// ```
     ///
     fn create_vcpu(&self, id: u8) -> vm::Result<Arc<dyn cpu::Vcpu>> {
-        let vc = self.fd.create_vcpu(id).expect("new VcpuFd failed");
+        let vc = self
+            .fd
+            .create_vcpu(id)
+            .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
         let vcpu = KvmVcpu { fd: vc };
         Ok(Arc::new(vcpu))
     }
@@ -230,11 +233,11 @@ impl vm::Vm for KvmVm {
         if let Some(kvm_datamatch) = datamatch {
             self.fd
                 .register_ioevent(fd, addr, kvm_datamatch)
-                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))
+                .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
         } else {
             self.fd
                 .register_ioevent(fd, addr, NoDatamatch)
-                .map_err(|e| vm::HypervisorVmError::RegisterIrqFd(e.into()))
+                .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
         }
     }
     /// Unregisters an event from a certain address it has been previously registered to.
@@ -529,7 +532,7 @@ impl hv::Hypervisor for KvmHyperVisor {
     fn get_vcpu_mmap_size(&self) -> hv::Result<usize> {
         self.kvm
             .get_vcpu_mmap_size()
-            .map_err(|e| hv::HypervisorError::GetMaxVcpu(e.into()))
+            .map_err(|e| hv::HypervisorError::GetVcpuMmap(e.into()))
     }
     /// Gets the recommended maximum number of VCPUs per VM.
     ///
@@ -1229,10 +1232,8 @@ impl cpu::Vcpu for KvmVcpu {
     /// }
     /// ```
     ///
-    fn run(&self) -> cpu::Result<VcpuExit> {
-        self.fd
-            .run()
-            .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+    fn run(&self) -> std::result::Result<VcpuExit, vmm_sys_util::errno::Error> {
+        self.fd.run()
     }
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.
@@ -1250,6 +1251,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// # extern crate hypervisor;
     /// # use hypervisor::{KvmHypervisor, Cap};
     /// let hv = KvmHypervisor::new().unwrap();
+
     /// if kvm.check_extension(Cap::VcpuEvents) {
     ///     let vm = hv.create_vm().unwrap();
     ///     let vcpu = vm.create_vcpu(0).unwrap();
