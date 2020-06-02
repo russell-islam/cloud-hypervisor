@@ -6,7 +6,7 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-
+use std::sync::Arc;
 mod gdt;
 pub mod interrupts;
 pub mod layout;
@@ -111,10 +111,10 @@ pub enum Error {
     MSRSConfiguration(regs::Error),
 
     /// The call to KVM_SET_CPUID2 failed.
-    SetSupportedCpusFailed(kvm_ioctls::Error),
+    SetSupportedCpusFailed(anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
-    LocalIntConfiguration(interrupts::Error),
+    LocalIntConfiguration(anyhow::Error),
 }
 
 impl From<Error> for super::Error {
@@ -200,7 +200,7 @@ impl CpuidPatch {
 }
 
 pub fn configure_vcpu(
-    fd: &VcpuFd,
+    fd: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
@@ -209,7 +209,7 @@ pub fn configure_vcpu(
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
     fd.set_cpuid2(&cpuid)
-        .map_err(Error::SetSupportedCpusFailed)?;
+        .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
 
     regs::setup_msrs(fd).map_err(Error::MSRSConfiguration)?;
     if let Some(kernel_entry_point) = kernel_entry_point {
@@ -226,7 +226,7 @@ pub fn configure_vcpu(
         regs::setup_sregs(&vm_memory.memory(), fd, kernel_entry_point.protocol)
             .map_err(Error::SREGSConfiguration)?;
     }
-    interrupts::set_lint(fd).map_err(Error::LocalIntConfiguration)?;
+    interrupts::set_lint(fd).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
 }
 

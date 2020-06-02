@@ -24,6 +24,7 @@ use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsa
 use devices::ioapic;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
+pub use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 pub use kvm_ioctls::{Kvm, Cap};
 use std::result;
