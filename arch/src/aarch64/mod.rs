@@ -15,7 +15,6 @@ pub mod regs;
 
 use crate::RegionType;
 use aarch64::gic::GICDevice;
-use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
@@ -157,13 +156,6 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     // It will be replace once rust-vmm/kvm-ioctls is ready.
     //
     40
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

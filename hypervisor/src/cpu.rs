@@ -8,11 +8,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::common::{
-    CpuState, FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit,
-};
+use crate::common::{CpuState, MpState, VcpuExit};
+
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
+use crate::x86_64::{
+    CpuId, ExtendedControlRegisters, FpuState, LapicState, MsrEntries, SpecialRegisters,
+    StandardRegisters, VcpuEvents, Xsave,
+};
 use thiserror::Error;
 use vmm_sys_util::errno::Error as RunError;
 
@@ -223,6 +225,7 @@ pub trait Vcpu: Send + Sync {
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
     fn run(&self) -> std::result::Result<VcpuExit, RunError>;
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.

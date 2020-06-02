@@ -14,24 +14,35 @@ use crate::vm;
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::check_required_kvm_extensions;
-use crate::common::{CpuState, CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
-use crate::common::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
+use crate::common::{
+    CpuState, CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion, MpState,
+};
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{boot_msr_entries, check_required_kvm_extensions};
+use crate::x86_64::{
+    boot_msr_entries, check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters,
+    VcpuEvents,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-pub use kvm_bindings::kvm_userspace_memory_region;
+pub use kvm_bindings::{
+    kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
+    kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY,
+};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
+pub use kvm_ioctls;
+pub use kvm_ioctls::VcpuExit;
 pub use kvm_ioctls::{Cap, Kvm};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::result;
 use std::sync::Arc;
+#[cfg(target_arch = "x86_64")]
 use vm_memory::{Address, GuestAddress};
 
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(target_arch = "x86_64")]
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
 
 /// Wrapper over KVM VM ioctls.
@@ -453,6 +464,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn run(&self) -> std::result::Result<VcpuExit, vmm_sys_util::errno::Error> {
         self.fd.run()
     }
+    #[cfg(target_arch = "x86_64")]
     ///
     /// Returns currently pending exceptions, interrupts, and NMIs as well as related
     /// states of the vcpu.

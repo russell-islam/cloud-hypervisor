@@ -15,7 +15,7 @@ use arch::{get_host_cpu_phys_bits, RegionType};
 use devices::ioapic;
 use devices::BusDevice;
 
-use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
+use hypervisor::kvm::{kvm_userspace_memory_region, KVM_MEM_READONLY};
 
 use std::convert::TryInto;
 use std::ffi;
