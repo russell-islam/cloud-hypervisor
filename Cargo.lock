@@ -455,11 +455,15 @@ name = "hypervisor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arch_gen",
  "devices",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
  "linux-loader",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "thiserror",
  "vm-memory",
  "vmm-sys-util",

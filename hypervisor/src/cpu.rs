@@ -8,7 +8,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::common::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
+use crate::common::{
+    CpuState, FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit,
+};
+#[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 use thiserror::Error;
 use vmm_sys_util::errno::Error as RunError;
@@ -128,40 +131,110 @@ pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 ///
 pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the vCPU general purpose registers.
+    ///
     fn get_regs(&self) -> Result<StandardRegisters>;
 
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the vCPU general purpose registers.
+    ///
     fn set_regs(&self, regs: &StandardRegisters) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the vCPU special registers.
+    ///
     fn get_sregs(&self) -> Result<SpecialRegisters>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the vCPU special registers
+    ///
     fn set_sregs(&self, sregs: &SpecialRegisters) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the floating point state (FPU) from the vCPU.
+    ///
     fn get_fpu(&self) -> Result<FpuState>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Set the floating point state (FPU) of a vCPU
+    ///
     fn set_fpu(&self, fpu: &FpuState) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to setup the CPUID registers.
+    ///
     fn set_cpuid2(&self, cpuid: &CpuId) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call to retrieve the CPUID registers.
+    ///
     fn get_cpuid2(&self, num_entries: usize) -> Result<CpuId>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
+    ///
     fn get_lapic(&self) -> Result<LapicState>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Sets the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
+    ///
     fn set_lapic(&self, lapic: &LapicState) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns the model-specific registers (MSR) for this vCPU.
+    ///
     fn get_msrs(&self, msrs: &mut MsrEntries) -> Result<usize>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// Setup the model-specific registers (MSR) for this vCPU.
+    ///
     fn set_msrs(&self, msrs: &MsrEntries) -> Result<usize>;
+    ///
+    /// Returns the vcpu's current "multiprocessing state".
+    ///
     fn get_mp_state(&self) -> Result<MpState>;
+    ///
+    /// Sets the vcpu's current "multiprocessing state".
+    ///
     fn set_mp_state(&self, mp_state: MpState) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xsave struct".
+    ///
     fn get_xsave(&self) -> Result<Xsave>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xsave struct".
+    ///
     fn set_xsave(&self, xsave: &Xsave) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that returns the vcpu's current "xcrs".
+    ///
     fn get_xcrs(&self) -> Result<ExtendedControlRegisters>;
     #[cfg(target_arch = "x86_64")]
+    ///
+    /// X86 specific call that sets the vcpu's current "xcrs".
+    ///
     fn set_xcrs(&self, xcrs: &ExtendedControlRegisters) -> Result<()>;
+    ///
+    /// Triggers the running of the current virtual CPU returning an exit reason.
+    ///
     fn run(&self) -> std::result::Result<VcpuExit, RunError>;
+    ///
+    /// Returns currently pending exceptions, interrupts, and NMIs as well as related
+    /// states of the vcpu.
+    ///
     fn get_vcpu_events(&self) -> Result<VcpuEvents>;
+    ///
+    /// Retrieve the current cpu states. This function is necessary to snapshot the VM
+    ///
+    fn cpu_state(&self) -> Result<CpuState>;
+    ///
+    /// Setting the FPU state this.
+    /// This function is required when restoring the VM
+    ///
+    fn set_cpu_state(&self, state: &CpuState) -> Result<()>;
 }

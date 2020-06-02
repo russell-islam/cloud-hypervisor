@@ -1,4 +1,5 @@
 use crate::kvm::{KvmError, KvmResult};
+use serde_derive::{Deserialize, Serialize};
 pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
@@ -7,3 +8,6 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     }
     Ok(())
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcpuKvmState {}

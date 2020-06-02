@@ -16,3 +16,8 @@ pub use {
     kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
     kvm_ioctls::VcpuExit,
 };
+
+#[cfg(target_arch = "aarch64")]
+pub use crate::aarch64::VcpuKvmState as CpuState;
+#[cfg(target_arch = "x86_64")]
+pub use crate::x86_64::VcpuKvmState as CpuState;
