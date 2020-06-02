@@ -19,6 +19,7 @@ use kvm_ioctls::*;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
+use std::sync::Arc;
 use vm_memory::{
     Address, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize,
 };
@@ -32,7 +33,7 @@ pub struct EntryPoint {
 }
 
 pub fn configure_vcpu(
-    _fd: &VcpuFd,
+    _fd: &Arc<dyn hypervisor::Vcpu>,
     _id: u8,
     _kernel_entry_point: Option<EntryPoint>,
     _vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,

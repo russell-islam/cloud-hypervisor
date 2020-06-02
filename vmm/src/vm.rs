@@ -14,6 +14,7 @@
 extern crate arch;
 extern crate devices;
 extern crate epoll;
+extern crate hypervisor;
 extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
@@ -36,12 +37,10 @@ use crate::{CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::BootProtocol;
-use arch::{check_required_kvm_extensions, EntryPoint};
-#[cfg(target_arch = "x86_64")]
-use devices::ioapic;
+use arch::EntryPoint;
 use devices::HotPlugNotificationFlags;
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, kvm_userspace_memory_region, KVM_CAP_SPLIT_IRQCHIP};
+use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::*;
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
@@ -269,57 +268,14 @@ pub struct Vm {
 }
 
 impl Vm {
-    fn kvm_new() -> Result<(Kvm, Arc<VmFd>)> {
-        let kvm = Kvm::new().map_err(Error::KvmNew)?;
-
-        check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
-
-        let fd: VmFd;
-        loop {
-            match kvm.create_vm() {
-                Ok(res) => fd = res,
-                Err(e) => {
-                    if e.errno() == libc::EINTR {
-                        // If the error returned is EINTR, which means the
-                        // ioctl has been interrupted, we have to retry as
-                        // this can't be considered as a regular error.
-                        continue;
-                    } else {
-                        return Err(Error::VmCreate(e));
-                    }
-                }
-            }
-            break;
-        }
-        let fd = Arc::new(fd);
-
-        // Set TSS
-        #[cfg(target_arch = "x86_64")]
-        fd.set_tss_address(arch::x86_64::layout::KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(Error::VmSetup)?;
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Create split irqchip
-            // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-            // are not.
-            let mut cap: kvm_enable_cap = Default::default();
-            cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-            cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
-            fd.enable_cap(&cap).map_err(Error::VmSetup)?;
-        }
-
-        Ok((kvm, fd))
-    }
-
     fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        fd: Arc<VmFd>,
-        kvm: Kvm,
+        fd: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
         config
             .lock()
@@ -341,9 +297,9 @@ impl Vm {
             &config.lock().unwrap().cpus.clone(),
             &device_manager,
             memory_manager.lock().unwrap().guest_memory(),
-            &kvm,
             fd,
             reset_evt,
+            hypervisor,
         )
         .map_err(Error::CpuManager)?;
 
@@ -379,8 +335,9 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         vmm_path: PathBuf,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        let fd = hypervisor.create_vm().unwrap();
         let memory_manager = MemoryManager::new(
             fd.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -393,10 +350,10 @@ impl Vm {
             config,
             memory_manager,
             fd,
-            kvm,
             exit_evt,
             reset_evt,
             vmm_path,
+            hypervisor,
         )?;
 
         // The device manager must create the devices from here as it is part
@@ -417,8 +374,9 @@ impl Vm {
         vmm_path: PathBuf,
         source_url: &str,
         prefault: bool,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
-        let (kvm, fd) = Vm::kvm_new()?;
+        let fd = hypervisor.create_vm().unwrap();
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
@@ -442,10 +400,10 @@ impl Vm {
             config,
             memory_manager,
             fd,
-            kvm,
             exit_evt,
             reset_evt,
             vmm_path,
+            hypervisor,
         )
     }
 

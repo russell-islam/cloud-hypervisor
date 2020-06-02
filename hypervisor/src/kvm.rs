@@ -22,6 +22,7 @@ use crate::x86_64::check_required_kvm_extensions;
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+pub use kvm_bindings::kvm_userspace_memory_region;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
 pub use kvm_ioctls::{Cap, Kvm};

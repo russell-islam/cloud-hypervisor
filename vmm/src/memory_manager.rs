@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-
+extern crate hypervisor;
 use crate::config::{HotplugMethod, MemoryConfig};
 use crate::MEMORY_MANAGER_SNAPSHOT_ID;
 #[cfg(feature = "acpi")]
@@ -14,8 +14,9 @@ use arch::{get_host_cpu_phys_bits, RegionType};
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 use devices::BusDevice;
+
 use kvm_bindings::{kvm_userspace_memory_region, KVM_MEM_READONLY};
-use kvm_ioctls::*;
+
 use std::convert::TryInto;
 use std::ffi;
 use std::fs::{File, OpenOptions};
@@ -58,7 +59,7 @@ pub struct MemoryManager {
     next_kvm_memory_slot: u32,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
-    fd: Arc<VmFd>,
+    fd: Arc<dyn hypervisor::Vm>,
     hotplug_slots: Vec<HotPlugState>,
     selected_slot: usize,
     backing_file: Option<PathBuf>,
@@ -105,7 +106,7 @@ pub enum Error {
     InvalidSize,
 
     /// Failed to set the user memory region.
-    SetUserMemoryRegion(kvm_ioctls::Error),
+    SetUserMemoryRegion(hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
     EventFdFail(io::Error),
@@ -209,7 +210,7 @@ impl BusDevice for MemoryManager {
 
 impl MemoryManager {
     pub fn new(
-        fd: Arc<VmFd>,
+        fd: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         ext_regions: Option<Vec<MemoryRegion>>,
         prefault: bool,
@@ -388,7 +389,7 @@ impl MemoryManager {
 
     pub fn new_from_snapshot(
         snapshot: &Snapshot,
-        fd: Arc<VmFd>,
+        fd: Arc<dyn hypervisor::Vm>,
         config: &MemoryConfig,
         source_url: &str,
         prefault: bool,
@@ -692,8 +693,8 @@ impl MemoryManager {
             flags: if readonly { KVM_MEM_READONLY } else { 0 },
         };
 
-        // Safe because the guest regions are guaranteed not to overlap.
-        unsafe { self.fd.set_user_memory_region(mem_region) }
+        self.fd
+            .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as mergeable if explicitly asked for.
@@ -745,8 +746,8 @@ impl MemoryManager {
             flags: 0,
         };
 
-        // Safe to remove because we know the region exist.
-        unsafe { self.fd.set_user_memory_region(mem_region) }
+        self.fd
+            .set_user_memory_region(mem_region)
             .map_err(Error::SetUserMemoryRegion)?;
 
         // Mark the pages as unmergeable if there were previously marked as
