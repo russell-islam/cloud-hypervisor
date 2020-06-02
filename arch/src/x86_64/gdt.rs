@@ -8,8 +8,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 // For GDT details see arch/x86/include/asm/segment.h
-
-use kvm_bindings::kvm_segment;
+use hypervisor::x86_64::SegmentRegister;
 
 /// Constructor for a conventional segment GDT (or LDT) entry. Derived from the kernel's segment.h.
 pub fn gdt_entry(flags: u16, base: u32, limit: u32) -> u64 {
@@ -94,8 +93,8 @@ fn get_type(entry: u64) -> u8 {
 ///
 /// * `entry` - The gdt entry.
 /// * `table_index` - Index of the entry in the gdt table.
-pub fn kvm_segment_from_gdt(entry: u64, table_index: u8) -> kvm_segment {
-    kvm_segment {
+pub fn kvm_segment_from_gdt(entry: u64, table_index: u8) -> SegmentRegister {
+    SegmentRegister {
         base: get_base(entry),
         limit: get_limit(entry),
         selector: (table_index * 8) as u16,

@@ -15,7 +15,6 @@ extern crate arch;
 extern crate devices;
 extern crate epoll;
 extern crate hypervisor;
-extern crate kvm_ioctls;
 extern crate libc;
 extern crate linux_loader;
 extern crate net_util;
@@ -39,14 +38,13 @@ use anyhow::anyhow;
 use arch::BootProtocol;
 use arch::EntryPoint;
 use devices::HotPlugNotificationFlags;
-#[cfg(target_arch = "x86_64")]
-use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::*;
+
 use linux_loader::cmdline::Cmdline;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::Error::InvalidElfMagicNumber;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::KernelLoader;
+
 use signal_hook::{iterator::Signals, SIGINT, SIGTERM, SIGWINCH};
 #[cfg(target_arch = "x86_64")]
 use std::convert::TryInto;
@@ -82,12 +80,6 @@ const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
 pub enum Error {
     /// Cannot open the VM file descriptor.
     VmFd(io::Error),
-
-    /// Cannot create the KVM instance
-    VmCreate(kvm_ioctls::Error),
-
-    /// Cannot set the VM up
-    VmSetup(kvm_ioctls::Error),
 
     /// Cannot open the kernel image
     KernelFile(io::Error),
@@ -141,9 +133,6 @@ pub enum Error {
 
     /// Failed to join on vCPU threads
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-
-    /// Failed to create a new KVM instance
-    KvmNew(kvm_ioctls::Error),
 
     /// VM is not created
     VmNotCreated,
@@ -1338,6 +1327,7 @@ mod tests {
 #[cfg(target_arch = "x86_64")]
 #[allow(unused)]
 pub fn test_vm() {
+    use hypervisor::VcpuExit;
     // This example based on https://lwn.net/Articles/658511/
     let code = [
         0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -1353,11 +1343,12 @@ pub fn test_vm() {
     let load_addr = GuestAddress(0x1000);
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
-    let kvm = Kvm::new().expect("new KVM instance creation failed");
-    let vm_fd = kvm.create_vm().expect("new VM fd creation failed");
+    let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    let vm_fd = hv.create_vm().expect("new VM fd creation failed");
 
     mem.with_regions(|index, region| {
-        let mem_region = kvm_userspace_memory_region {
+        let mem_region = hypervisor::kvm_userspace_memory_region {
             slot: index as u32,
             guest_phys_addr: region.start_addr().raw_value(),
             memory_size: region.len() as u64,

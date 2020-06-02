@@ -296,7 +296,6 @@ mod tests {
     extern crate vm_memory;
 
     use super::*;
-    use kvm_ioctls::Kvm;
     use vm_memory::{GuestAddress, GuestMemoryMmap};
 
     fn create_guest_mem() -> GuestMemoryMmap {
@@ -393,8 +392,9 @@ mod tests {
 
     #[test]
     fn test_setup_fpu() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_fpu(&vcpu).unwrap();
 
@@ -415,8 +415,9 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
         setup_msrs(&vcpu).unwrap();
 
@@ -441,8 +442,9 @@ mod tests {
 
     #[test]
     fn test_setup_regs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
 
         let expected_regs: kvm_regs = kvm_regs {
@@ -469,8 +471,9 @@ mod tests {
 
     #[test]
     fn test_setup_sregs() {
-        let kvm = Kvm::new().unwrap();
-        let vm = kvm.create_vm().unwrap();
+        let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+        let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+        let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0).unwrap();
 
         let mut expected_sregs: kvm_sregs = vcpu.get_sregs().unwrap();
