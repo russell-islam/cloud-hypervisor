@@ -34,7 +34,9 @@ use devices::{
     interrupt_controller, interrupt_controller::InterruptController, BusDevice,
     HotPlugNotificationFlags,
 };
-use kvm_ioctls::*;
+use hypervisor::kvm_ioctls;
+use hypervisor::kvm_ioctls::*;
+
 use libc::TIOCGWINSZ;
 use libc::{MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE};
 #[cfg(feature = "pci_support")]
@@ -571,7 +573,7 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
                         // Remove old region from KVM by passing a size of 0.
-                        let mut mem_region = kvm_bindings::kvm_userspace_memory_region {
+                        let mut mem_region = hypervisor::kvm::kvm_userspace_memory_region {
                             slot: shm_regions.mem_slot,
                             guest_phys_addr: old_base,
                             memory_size: 0,
@@ -2117,8 +2119,8 @@ impl DeviceManager {
 
     #[cfg(feature = "pci_support")]
     fn create_kvm_device(vm: &Arc<dyn hypervisor::Vm>) -> DeviceManagerResult<DeviceFd> {
-        let mut vfio_dev = kvm_bindings::kvm_create_device {
-            type_: kvm_bindings::kvm_device_type_KVM_DEV_TYPE_VFIO,
+        let mut vfio_dev = hypervisor::kvm::kvm_create_device {
+            type_: hypervisor::kvm::kvm_device_type_KVM_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
