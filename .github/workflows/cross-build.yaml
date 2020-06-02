@@ -23,7 +23,7 @@ jobs:
             target: ${{ matrix.target }}
             override: true
       - name: Disable "with-serde" in kvm-bindings
-        run: sed -i 's/"with-serde",\ //g' vmm/Cargo.toml
+        run: sed -i 's/"with-serde",\ //g' vmm/Cargo.toml && sed -i 's/"with-serde",\ //g' hypervisor/Cargo.toml
       - name: Build
         uses: actions-rs/cargo@v1
         with:

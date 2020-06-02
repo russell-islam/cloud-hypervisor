@@ -1,6 +1,6 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-
+use std::sync::Arc;
 pub mod layout;
 
 use crate::RegionType;
@@ -30,7 +30,7 @@ pub struct EntryPoint {
 }
 
 pub fn configure_vcpu(
-    _fd: &VcpuFd,
+    _fd: &Arc<dyn hypervisor::Vcpu>,
     _id: u8,
     _kernel_entry_point: Option<EntryPoint>,
     _vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,

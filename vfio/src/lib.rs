@@ -8,6 +8,7 @@
 extern crate arc_swap;
 extern crate byteorder;
 extern crate devices;
+extern crate hypervisor;
 extern crate kvm_bindings;
 extern crate kvm_ioctls;
 #[macro_use]

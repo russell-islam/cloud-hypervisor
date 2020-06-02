@@ -8,19 +8,19 @@
 use std::io::Cursor;
 use std::mem;
 use std::result;
+use std::sync::Arc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use kvm_bindings::kvm_lapic_state;
-use kvm_ioctls;
 
 #[derive(Debug)]
 pub enum Error {
-    GetLapic(kvm_ioctls::Error),
-    SetLapic(kvm_ioctls::Error),
+    GetLapic(anyhow::Error),
+    SetLapic(anyhow::Error),
 }
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, hypervisor::HypervisorCpuError>;
 
 // Defines poached from apicdef.h kernel header.
 const APIC_LVT0: usize = 0x350;
@@ -62,8 +62,8 @@ fn set_apic_delivery_mode(reg: u32, mode: u32) -> u32 {
 ///
 /// # Arguments
 /// * `vcpu` - The VCPU object to configure.
-pub fn set_lint(vcpu: &kvm_ioctls::VcpuFd) -> Result<()> {
-    let mut klapic = vcpu.get_lapic().map_err(Error::GetLapic)?;
+pub fn set_lint(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
+    let mut klapic = vcpu.get_lapic()?;
 
     let lvt_lint0 = get_klapic_reg(&klapic, APIC_LVT0);
     set_klapic_reg(
@@ -78,7 +78,7 @@ pub fn set_lint(vcpu: &kvm_ioctls::VcpuFd) -> Result<()> {
         set_apic_delivery_mode(lvt_lint1, APIC_MODE_NMI),
     );
 
-    vcpu.set_lapic(&klapic).map_err(Error::SetLapic)
+    vcpu.set_lapic(&klapic)
 }
 
 #[cfg(test)]
