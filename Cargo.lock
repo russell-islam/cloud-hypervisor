@@ -1556,8 +1556,6 @@ dependencies = [
  "devices",
  "epoll",
  "hypervisor",
- "kvm-bindings",
- "kvm-ioctls",
  "lazy_static",
  "libc",
  "linux-loader",

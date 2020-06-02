@@ -22,11 +22,12 @@ pub use {
     kvm_bindings::kvm_segment as SegmentRegister,
     kvm_bindings::kvm_sregs as SpecialRegisters,
     kvm_bindings::CpuId,
-
+    kvm_bindings::kvm_fpu as FpuState,
+    kvm_bindings::kvm_regs as StandardRegisters,
+    kvm_bindings::kvm_vcpu_events as VcpuEvents,
+    kvm_bindings::kvm_mp_state as MpState,
 };
 use crate::kvm::{KvmError, KvmResult, Kvm, Cap};
-
-use crate::common::{FpuState, MpState, StandardRegisters, VcpuEvents};
 
 use kvm_bindings::{kvm_msr_entry, Msrs};
 

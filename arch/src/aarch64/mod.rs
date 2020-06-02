@@ -4,7 +4,6 @@ use std::sync::Arc;
 pub mod layout;
 
 use crate::RegionType;
-use kvm_ioctls::*;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, GuestUsize};
 
 #[derive(Debug)]
@@ -71,11 +70,4 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     // It will be replace once rust-vmm/kvm-ioctls is ready.
     //
     40
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    Ok(())
 }

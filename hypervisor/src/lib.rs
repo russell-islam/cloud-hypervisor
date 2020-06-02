@@ -42,7 +42,13 @@ pub mod kvm;
 
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use hv::{Hypervisor, HypervisorError};
+
+//KVM related exports
+pub use common::DeviceFd;
 pub use vm::{HypervisorVmError, Vm};
+pub use kvm::*;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::CpuId;
 extern crate arch_gen;
 extern crate serde;
 extern crate serde_derive;
