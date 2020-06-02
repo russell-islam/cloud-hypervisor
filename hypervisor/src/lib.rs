@@ -34,3 +34,8 @@ pub mod vm;
 #[cfg(target_arch = "x86_64")]
 /// X86_64 related module
 pub mod x86_64;
+
+pub use cpu::{HypervisorCpuError, Vcpu};
+pub use hv::{Hypervisor, HypervisorError};
+pub use vm::{HypervisorVmError, Vm};
+extern crate thiserror;

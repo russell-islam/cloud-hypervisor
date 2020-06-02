@@ -20,6 +20,7 @@ anyhow = "1.0"
 arch = { path = "../arch" }
 devices = { path = "../devices" }
 epoll = ">=4.0.1"
+hypervisor = { path = "../hypervisor" }
 kvm-bindings = { git = "https://github.com/cloud-hypervisor/kvm-bindings", branch = "ch", features = ["with-serde", "fam-wrappers"] }
 kvm-ioctls = { git = "https://github.com/cloud-hypervisor/kvm-ioctls", branch = "ch" }
 lazy_static = "1.4.0"
@@ -43,6 +44,7 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = ">=0.5.0", features = ["with-serde"] }
 signal-hook = "0.1.15"
 tempfile = "3.1.0"
+
 
 [dependencies.linux-loader]
 git = "https://github.com/rust-vmm/linux-loader"
