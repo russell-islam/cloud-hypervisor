@@ -17,6 +17,10 @@
 //! - x86_64
 //! - arm64
 //!
+
+/// Module defining for hypervisor trait
+pub mod hv;
+
 #[cfg(target_arch = "x86_64")]
 /// X86_64 related module
 pub mod x86_64;
@@ -33,13 +37,14 @@ mod cpu;
 /// Vm related module
 pub mod vm;
 
-/// Module defining for hypervisor trait
-pub mod hv;
-
 /// KVM implementation module
 pub mod kvm;
 
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use hv::{Hypervisor, HypervisorError};
 pub use vm::{HypervisorVmError, Vm};
+extern crate arch_gen;
+extern crate serde;
+extern crate serde_derive;
+extern crate serde_json;
 extern crate thiserror;

@@ -8,7 +8,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::common::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
+use crate::common::{
+    CpuState, FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 use thiserror::Error;
@@ -226,4 +228,13 @@ pub trait Vcpu: Send + Sync {
     /// states of the vcpu.
     ///
     fn get_vcpu_events(&self) -> Result<VcpuEvents>;
+    ///
+    /// Retrieve the current cpu states. This function is necessary to snapshot the VM
+    ///
+    fn cpu_state(&self) -> Result<CpuState>;
+    ///
+    /// Setting the FPU state this.
+    /// This function is required when restoring the VM
+    ///
+    fn set_cpu_state(&self, state: &CpuState) -> Result<()>;
 }

@@ -18,3 +18,6 @@ pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
     }
     Ok(())
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VcpuKvmState {}

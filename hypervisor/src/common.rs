@@ -25,3 +25,8 @@ pub use {
     kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
 
 };
+
+#[cfg(target_arch = "aarch64")]
+pub use crate::aarch64::VcpuKvmState as CpuState;
+#[cfg(target_arch = "x86_64")]
+pub use crate::x86_64::VcpuKvmState as CpuState;

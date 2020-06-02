@@ -382,103 +382,6 @@ impl Vcpu {
             ts.as_micros()
         );
     }
-
-    #[cfg(target_arch = "x86_64")]
-    fn kvm_state(&self) -> Result<VcpuKvmState> {
-        let mut msrs = arch::x86_64::regs::boot_msr_entries();
-        self.fd
-            .get_msrs(&mut msrs)
-            .map_err(|e| Error::VcpuGetMsrs(e.into()))?;
-
-        let vcpu_events = self
-            .fd
-            .get_vcpu_events()
-            .map_err(|e| Error::VcpuGetVcpuEvents(e.into()))?;
-        let regs = self
-            .fd
-            .get_regs()
-            .map_err(|e| Error::VcpuGetRegs(e.into()))?;
-        let sregs = self
-            .fd
-            .get_sregs()
-            .map_err(|e| Error::VcpuGetSregs(e.into()))?;
-        let lapic_state = self
-            .fd
-            .get_lapic()
-            .map_err(|e| Error::VcpuGetLapic(e.into()))?;
-        let fpu = self.fd.get_fpu().map_err(|e| Error::VcpuGetFpu(e.into()))?;
-        let xsave = self
-            .fd
-            .get_xsave()
-            .map_err(|e| Error::VcpuGetXsave(e.into()))?;
-        let xcrs = self
-            .fd
-            .get_xcrs()
-            .map_err(|e| Error::VcpuGetXsave(e.into()))?;
-        let mp_state = self
-            .fd
-            .get_mp_state()
-            .map_err(|e| Error::VcpuGetMpState(e.into()))?;
-
-        Ok(VcpuKvmState {
-            msrs,
-            vcpu_events,
-            regs,
-            sregs,
-            fpu,
-            lapic_state,
-            xsave,
-            xcrs,
-            mp_state,
-        })
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn set_kvm_state(&mut self, state: &VcpuKvmState) -> Result<()> {
-        self.fd
-            .set_regs(&state.regs)
-            .map_err(|e| Error::VcpuSetRegs(e.into()))?;
-
-        self.fd
-            .set_fpu(&state.fpu)
-            .map_err(|e| Error::VcpuSetFpu(e.into()))?;
-
-        self.fd
-            .set_xsave(&state.xsave)
-            .map_err(|e| Error::VcpuSetXsave(e.into()))?;
-
-        self.fd
-            .set_sregs(&state.sregs)
-            .map_err(|e| Error::VcpuSetSregs(e.into()))?;
-
-        self.fd
-            .set_xcrs(&state.xcrs)
-            .map_err(|e| Error::VcpuSetXcrs(e.into()))?;
-
-        self.fd
-            .set_msrs(&state.msrs)
-            .map_err(|e| Error::VcpuSetMsrs(e.into()))?;
-
-        self.fd
-            .set_lapic(&state.lapic_state)
-            .map_err(|e| Error::VcpuSetLapic(e.into()))?;
-
-        self.fd
-            .set_mp_state(state.mp_state)
-            .map_err(|e| Error::VcpuSetMpState(e.into()))?;
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn kvm_state(&self) -> Result<VcpuKvmState> {
-        unimplemented!();
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn set_kvm_state(&mut self, _state: &VcpuKvmState) -> Result<()> {
-        Ok(())
-    }
 }
 
 const VCPU_SNAPSHOT_ID: &str = "vcpu";
@@ -489,7 +392,7 @@ impl Snapshottable for Vcpu {
     }
 
     fn snapshot(&self) -> std::result::Result<Snapshot, MigratableError> {
-        let snapshot = serde_json::to_vec(&self.kvm_state().map_err(|e| {
+        let snapshot = serde_json::to_vec(&self.fd.cpu_state().map_err(|e| {
             MigratableError::Snapshot(anyhow!("Could not get vCPU KVM state {:?}", e))
         })?)
         .map_err(|e| MigratableError::Snapshot(e.into()))?;
@@ -518,7 +421,7 @@ impl Snapshottable for Vcpu {
                 }
             };
 
-            self.set_kvm_state(&vcpu_state).map_err(|e| {
+            self.fd.set_cpu_state(&vcpu_state).map_err(|e| {
                 MigratableError::Restore(anyhow!("Could not set the vCPU KVM state {:?}", e))
             })?;
 

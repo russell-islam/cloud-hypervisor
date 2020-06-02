@@ -14,10 +14,10 @@ use crate::vm;
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::check_required_kvm_extensions;
-use crate::common::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
+use crate::common::{CpuState, CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
 use crate::common::{FpuState, MpState, SpecialRegisters, StandardRegisters, VcpuEvents, VcpuExit};
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::check_required_kvm_extensions;
+use crate::x86_64::{boot_msr_entries, check_required_kvm_extensions};
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
 #[cfg(target_arch = "x86_64")]
@@ -461,5 +461,88 @@ impl cpu::Vcpu for KvmVcpu {
         self.fd
             .get_vcpu_events()
             .map_err(|e| cpu::HypervisorCpuError::GetVcpuEvents(e.into()))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Get the current CPU state
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate hypervisor;
+    /// # use hypervisor::KvmHypervisor;
+    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let state = vcpu.cpu_state().unwrap();
+    ///
+    fn cpu_state(&self) -> cpu::Result<CpuState> {
+        let mut msrs = boot_msr_entries();
+        self.get_msrs(&mut msrs)?;
+
+        let vcpu_events = self.get_vcpu_events()?;
+        let regs = self.get_regs()?;
+        let sregs = self.get_sregs()?;
+        let lapic_state = self.get_lapic()?;
+        let fpu = self.get_fpu()?;
+        let xsave = self.get_xsave()?;
+        let xcrs = self.get_xcrs()?;
+        let mp_state = self.get_mp_state()?;
+
+        Ok(CpuState {
+            msrs,
+            vcpu_events,
+            regs,
+            sregs,
+            fpu,
+            lapic_state,
+            xsave,
+            xcrs,
+            mp_state,
+        })
+    }
+    #[cfg(target_arch = "aarch64")]
+    fn cpu_state(&self) -> cpu::Result<CpuState> {
+        unimplemented!();
+    }
+    #[cfg(target_arch = "x86_64")]
+    /// Restore the previously saved CPU state
+    ///
+    /// Arguments: CpuState
+    /// # Example
+    ///
+    /// ```rust
+    /// # extern crate hypervisor;
+    /// # use hypervisor::KvmHypervisor;
+    /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
+    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vcpu = vm.create_vcpu(0).unwrap();
+    /// let state = vcpu.set_cpu_state(&state).unwrap();
+    ///
+    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+        self.set_regs(&state.regs)?;
+
+        self.set_fpu(&state.fpu)?;
+
+        self.set_xsave(&state.xsave)?;
+
+        self.set_sregs(&state.sregs)?;
+
+        self.set_xcrs(&state.xcrs)?;
+
+        self.set_msrs(&state.msrs)?;
+
+        self.set_lapic(&state.lapic_state)?;
+
+        self.set_mp_state(state.mp_state)?;
+
+        Ok(())
+    }
+    #[cfg(target_arch = "aarch64")]
+    fn set_cpu_state(&self, state: &CpuState) -> cpu::Result<()> {
+        Ok(())
     }
 }
