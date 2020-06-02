@@ -21,17 +21,12 @@ use anyhow::anyhow;
 use arch::layout;
 use arch::EntryPoint;
 use devices::{interrupt_controller::InterruptController, BusDevice};
-
 #[cfg(target_arch = "x86_64")]
-use kvm_bindings::{
-    kvm_fpu, kvm_lapic_state, kvm_mp_state, kvm_regs, kvm_sregs, kvm_vcpu_events, kvm_xcrs,
-    kvm_xsave, CpuId, Msrs,
-};
-
-use kvm_ioctls::*;
+use hypervisor::CpuId;
+use hypervisor::VcpuExit;
 #[cfg(target_arch = "x86_64")]
 use libc::{c_void, siginfo_t};
-use serde_derive::{Deserialize, Serialize};
+
 #[cfg(target_arch = "x86_64")]
 use std::fmt;
 use std::os::unix::thread::JoinHandleExt;
@@ -335,24 +330,6 @@ pub struct Vcpu {
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     vm_ts: std::time::Instant,
 }
-
-#[cfg(target_arch = "x86_64")]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct VcpuKvmState {
-    msrs: Msrs,
-    vcpu_events: kvm_vcpu_events,
-    regs: kvm_regs,
-    sregs: kvm_sregs,
-    fpu: kvm_fpu,
-    lapic_state: kvm_lapic_state,
-    xsave: kvm_xsave,
-    xcrs: kvm_xcrs,
-    mp_state: kvm_mp_state,
-}
-
-#[cfg(target_arch = "aarch64")]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct VcpuKvmState {}
 
 impl Vcpu {
     /// Constructs a new VCPU for `vm`.

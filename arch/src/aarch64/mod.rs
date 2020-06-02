@@ -4,7 +4,7 @@
 pub mod layout;
 
 use crate::RegionType;
-use kvm_ioctls::*;
+//use kvm_ioctls::*;
 use vm_memory::{GuestAddress, GuestMemoryMmap, GuestUsize};
 
 /// Stub function that needs to be implemented when aarch64 functionality is added.
@@ -53,11 +53,4 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     // It will be replace once rust-vmm/kvm-ioctls is ready.
     //
     40
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    Ok(())
 }

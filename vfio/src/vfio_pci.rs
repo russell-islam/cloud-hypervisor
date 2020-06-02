@@ -10,7 +10,7 @@ extern crate vm_allocator;
 use crate::vfio_device::VfioDevice;
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use kvm_bindings::kvm_userspace_memory_region;
+use hypervisor::kvm_userspace_memory_region;
 use pci::{
     msi_num_enabled_vectors, BarReprogrammingParams, MsiConfig, MsixCap, MsixConfig,
     PciBarConfiguration, PciBarRegionType, PciCapabilityID, PciClassCode, PciConfiguration,
@@ -34,10 +34,10 @@ pub enum VfioPciError {
     AllocateGsi,
     EventFd(io::Error),
     InterruptSourceGroupCreate(io::Error),
-    IrqFd(kvm_ioctls::Error),
+    IrqFd(hypervisor::kvm_ioctls::Error),
     NewVfioPciDevice,
     MapRegionGuest(anyhow::Error),
-    SetGsiRouting(kvm_ioctls::Error),
+    SetGsiRouting(hypervisor::kvm_ioctls::Error),
     MsiNotConfigured,
     MsixNotConfigured,
     UpdateMemory(crate::VfioError),
