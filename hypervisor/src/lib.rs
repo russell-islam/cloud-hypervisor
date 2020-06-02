@@ -38,4 +38,8 @@ pub mod x86_64;
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use hv::{Hypervisor, HypervisorError};
 pub use vm::{HypervisorVmError, Vm};
+extern crate arch_gen;
+extern crate serde;
+extern crate serde_derive;
+extern crate serde_json;
 extern crate thiserror;
