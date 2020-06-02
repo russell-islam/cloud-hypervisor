@@ -51,8 +51,10 @@ name = "arch"
 version = "0.1.0"
 dependencies = [
  "acpi_tables",
+ "anyhow",
  "arch_gen",
  "byteorder",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -702,8 +704,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "devices",
- "kvm-bindings",
- "kvm-ioctls",
+ "hypervisor",
  "libc",
  "log 0.4.8",
  "serde",
@@ -1553,6 +1554,7 @@ dependencies = [
  "credibility",
  "devices",
  "epoll",
+ "hypervisor",
  "kvm-bindings",
  "kvm-ioctls",
  "lazy_static",
