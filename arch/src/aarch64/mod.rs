@@ -72,10 +72,3 @@ pub fn get_host_cpu_phys_bits() -> u8 {
     //
     40
 }
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    Ok(())
-}

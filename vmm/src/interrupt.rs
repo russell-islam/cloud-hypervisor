@@ -4,7 +4,7 @@
 //
 
 use devices::interrupt_controller::InterruptController;
-use kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
+use hypervisor::kvm_bindings::{kvm_irq_routing, kvm_irq_routing_entry, KVM_IRQ_ROUTING_MSI};
 
 use std::collections::HashMap;
 use std::io;

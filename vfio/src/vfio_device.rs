@@ -4,7 +4,7 @@
 //
 use crate::vec_with_array_field;
 use byteorder::{ByteOrder, LittleEndian};
-use kvm_ioctls::*;
+use hypervisor::DeviceFd;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::CString;
@@ -45,7 +45,7 @@ pub enum VfioError {
     UnsetContainer,
     ContainerSetIOMMU,
     GroupGetDeviceFD,
-    KvmSetDeviceAttr(kvm_ioctls::Error),
+    KvmSetDeviceAttr(hypervisor::kvm_ioctls::Error),
     VfioDeviceGetInfo,
     VfioDeviceGetRegionInfo,
     InvalidPath,
@@ -269,10 +269,10 @@ impl VfioGroup {
     fn kvm_device_add_group(device_fd: &Arc<DeviceFd>, group: &File) -> Result<()> {
         let group_fd = group.as_raw_fd();
         let group_fd_ptr = &group_fd as *const i32;
-        let dev_attr = kvm_bindings::kvm_device_attr {
+        let dev_attr = hypervisor::kvm_bindings::kvm_device_attr {
             flags: 0,
-            group: kvm_bindings::KVM_DEV_VFIO_GROUP,
-            attr: u64::from(kvm_bindings::KVM_DEV_VFIO_GROUP_ADD),
+            group: hypervisor::kvm_bindings::KVM_DEV_VFIO_GROUP,
+            attr: u64::from(hypervisor::kvm_bindings::KVM_DEV_VFIO_GROUP_ADD),
             addr: group_fd_ptr as u64,
         };
 
@@ -281,13 +281,13 @@ impl VfioGroup {
             .map_err(VfioError::KvmSetDeviceAttr)
     }
 
-    fn kvm_device_del_group(&self) -> std::result::Result<(), kvm_ioctls::Error> {
+    fn kvm_device_del_group(&self) -> std::result::Result<(), hypervisor::kvm_ioctls::Error> {
         let group_fd = self.as_raw_fd();
         let group_fd_ptr = &group_fd as *const i32;
-        let dev_attr = kvm_bindings::kvm_device_attr {
+        let dev_attr = hypervisor::kvm_bindings::kvm_device_attr {
             flags: 0,
-            group: kvm_bindings::KVM_DEV_VFIO_GROUP,
-            attr: u64::from(kvm_bindings::KVM_DEV_VFIO_GROUP_DEL),
+            group: hypervisor::kvm_bindings::KVM_DEV_VFIO_GROUP,
+            attr: u64::from(hypervisor::kvm_bindings::KVM_DEV_VFIO_GROUP_DEL),
             addr: group_fd_ptr as u64,
         };
 

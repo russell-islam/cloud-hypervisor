@@ -15,8 +15,7 @@ mod mptable;
 pub mod regs;
 use crate::InitramfsConfig;
 use crate::RegionType;
-use kvm_bindings::CpuId;
-use kvm_ioctls::*;
+
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -144,7 +143,7 @@ pub struct CpuidPatch {
 
 impl CpuidPatch {
     pub fn set_cpuid_reg(
-        cpuid: &mut CpuId,
+        cpuid: &mut hypervisor::CpuId,
         function: u32,
         index: Option<u32>,
         reg: CpuidReg,
@@ -172,7 +171,7 @@ impl CpuidPatch {
         }
     }
 
-    pub fn patch_cpuid(cpuid: &mut CpuId, patches: Vec<CpuidPatch>) {
+    pub fn patch_cpuid(cpuid: &mut hypervisor::CpuId, patches: Vec<CpuidPatch>) {
         let entries = cpuid.as_mut_slice();
 
         for entry in entries.iter_mut() {
@@ -204,7 +203,7 @@ pub fn configure_vcpu(
     id: u8,
     kernel_entry_point: Option<EntryPoint>,
     vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    cpuid: CpuId,
+    cpuid: hypervisor::CpuId,
 ) -> super::Result<()> {
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, u32::from(id));
@@ -613,19 +612,6 @@ pub fn get_host_cpu_phys_bits() -> u8 {
             36
         }
     }
-}
-
-pub fn check_required_kvm_extensions(kvm: &Kvm) -> super::Result<()> {
-    if !kvm.check_extension(Cap::SignalMsi) {
-        return Err(super::Error::CapabilityMissing(Cap::SignalMsi));
-    }
-    if !kvm.check_extension(Cap::TscDeadlineTimer) {
-        return Err(super::Error::CapabilityMissing(Cap::TscDeadlineTimer));
-    }
-    if !kvm.check_extension(Cap::SplitIrqchip) {
-        return Err(super::Error::CapabilityMissing(Cap::SplitIrqchip));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
