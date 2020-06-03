@@ -27,3 +27,7 @@ pub mod common;
 mod cpu;
 /// Vm related module
 pub mod vm;
+
+/// Module defining for hypervisor trait
+pub mod hv;
+
