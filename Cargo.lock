@@ -180,6 +180,7 @@ dependencies = [
  "dirs",
  "epoll",
  "futures",
+ "hypervisor",
  "lazy_static",
  "libc",
  "log 0.4.8",
@@ -445,6 +446,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91780f809e750b0a89f5544be56617ff6b1227ee485bcb06ebe10cdf89bd3b71"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "hypervisor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arch_gen",
+ "devices",
+ "kvm-bindings",
+ "kvm-ioctls",
+ "libc",
+ "linux-loader",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "thiserror",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
