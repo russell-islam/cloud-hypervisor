@@ -25,5 +25,7 @@ pub mod x86_64;
 pub mod common;
 /// CPU related module
 mod cpu;
+/// Module defining for hypervisor trait
+pub mod hv;
 /// Vm related module
 pub mod vm;
