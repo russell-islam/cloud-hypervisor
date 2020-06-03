@@ -18,6 +18,10 @@
 /// X86_64 related module
 pub mod x86_64;
 
+#[cfg(target_arch = "aarch64")]
+/// arm64 related module
+pub mod aarch64;
+
 /// Common for both x86 and aarch64
 pub mod common;
 /// CPU related module
@@ -28,3 +32,6 @@ pub mod vm;
 
 /// Module defining for hypervisor trait
 pub mod hv;
+
+/// KVM implementation module
+pub mod kvm;
