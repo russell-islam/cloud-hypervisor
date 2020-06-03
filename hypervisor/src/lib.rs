@@ -22,3 +22,6 @@ pub mod x86_64;
 pub mod common;
 /// CPU related module
 mod cpu;
+
+/// Vm related module
+pub mod vm;
