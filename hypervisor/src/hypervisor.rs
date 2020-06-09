@@ -7,9 +7,9 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
-use crate::vm::Vm;
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::CpuId;
+use crate::kvm::x86_64::CpuId;
+use crate::vm::Vm;
 
 #[cfg(target_arch = "x86_64")]
 use kvm_ioctls::Cap;

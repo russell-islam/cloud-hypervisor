@@ -8,7 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::common::{CpuState, MpState, VcpuExit};
+use crate::{CpuState, MpState, VcpuExit};
 
 #[cfg(target_arch = "x86_64")]
 use crate::x86_64::{
