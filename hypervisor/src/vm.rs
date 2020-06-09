@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use crate::common::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
 use crate::cpu::Vcpu;
+use crate::{CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 

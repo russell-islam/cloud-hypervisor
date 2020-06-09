@@ -13,7 +13,7 @@ use crate::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 use devices::BusDevice;
-use hypervisor::kvm::kvm_userspace_memory_region;
+use hypervisor::MemoryRegion as kvm_userspace_memory_region;
 use std::any::Any;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;

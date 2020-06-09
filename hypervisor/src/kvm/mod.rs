@@ -8,42 +8,62 @@
 //
 //
 
+use devices::ioapic;
+use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+use std::result;
+use std::sync::Arc;
+use vm_memory::Address;
+use vmm_sys_util::eventfd::EventFd;
+
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
+
 use crate::cpu;
-use crate::hv;
+use crate::hypervisor;
 use crate::vm;
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::check_required_kvm_extensions;
-use crate::common::{
-    CpuState, CreateDevice, DeviceFd, IoEventAddress, IrqRouting, MemoryRegion, MpState,
-};
+pub mod aarch64;
+
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{
+pub mod x86_64;
+
+#[cfg(target_arch = "x86_64")]
+use x86_64::{
     boot_msr_entries, check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters,
-    VcpuEvents,
+    KVM_TSS_ADDRESS,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{CpuId, ExtendedControlRegisters, LapicState, MsrEntries, Xsave};
-#[cfg(target_arch = "x86_64")]
-use devices::ioapic;
+pub use x86_64::{
+    CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState, Xsave,
+};
+
+#[cfg(target_arch = "aarch64")]
+use aarch64::check_required_kvm_extensions;
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::VcpuKvmState as CpuState;
+
 pub use kvm_bindings::{
     kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_irq_routing, kvm_irq_routing_entry,
     kvm_userspace_memory_region, KVM_IRQ_ROUTING_MSI, KVM_MEM_READONLY,
 };
-#[cfg(target_arch = "x86_64")]
-use kvm_bindings::{kvm_enable_cap, KVM_CAP_SPLIT_IRQCHIP};
-pub use kvm_ioctls;
-pub use kvm_ioctls::VcpuExit;
-pub use kvm_ioctls::{Cap, Kvm};
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-use std::result;
-use std::sync::Arc;
-#[cfg(target_arch = "x86_64")]
-use vm_memory::{Address, GuestAddress};
 
-use vmm_sys_util::eventfd::EventFd;
-#[cfg(target_arch = "x86_64")]
-pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
+///
+/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
+///
+pub use {
+    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_irq_routing as IrqRouting,
+    kvm_bindings::kvm_irq_routing_entry as IrqRoutingEntry, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::kvm_userspace_memory_region as MemoryRegion,
+    kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::DeviceFd, kvm_ioctls::IoEventAddress,
+    kvm_ioctls::VcpuExit,
+};
+
+pub use kvm_ioctls;
+pub use kvm_ioctls::{Cap, Kvm};
+
+pub use self::KvmHyperVisor as Hypervisor;
 
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
@@ -55,8 +75,8 @@ pub struct KvmVm {
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
 /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
-/// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-/// let vm = hv.create_vm().expect("new VM fd creation failed");
+/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// vm.set/get().unwrap()
 ///
 impl vm::Vm for KvmVm {
@@ -172,8 +192,8 @@ pub enum KvmError {
 pub type KvmResult<T> = result::Result<T, KvmError>;
 impl KvmHyperVisor {
     /// Create a hypervisor based on Kvm
-    pub fn new() -> hv::Result<KvmHyperVisor> {
-        let kvm_obj = Kvm::new().map_err(|e| hv::HypervisorError::VmCreate(e.into()))?;
+    pub fn new() -> hypervisor::Result<KvmHyperVisor> {
+        let kvm_obj = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
         Ok(KvmHyperVisor { kvm: kvm_obj })
     }
 }
@@ -182,20 +202,20 @@ impl KvmHyperVisor {
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
 /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
-/// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-/// let vm = hv.create_vm().expect("new VM fd creation failed");
+/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 ///
-impl hv::Hypervisor for KvmHyperVisor {
+impl hypervisor::Hypervisor for KvmHyperVisor {
     /// Create a KVM vm object and return the object as Vm trait object
     /// Example
     /// # extern crate hypervisor;
     /// # use hypervisor::KvmHyperVisor;
     /// use hypervisor::KvmVm;
-    /// let hv = KvmHyperVisor::new().unwrap();
-    /// let vm = hv.create_vm().unwrap()
+    /// let hypervisor = KvmHyperVisor::new().unwrap();
+    /// let vm = hypervisor.create_vm().unwrap()
     ///
-    fn create_vm(&self) -> hv::Result<Arc<dyn vm::Vm>> {
-        let kvm = Kvm::new().map_err(|e| hv::HypervisorError::VmCreate(e.into()))?;
+    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        let kvm = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
 
         check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
 
@@ -210,7 +230,7 @@ impl hv::Hypervisor for KvmHyperVisor {
                         // this can't be considered as a regular error.
                         continue;
                     } else {
-                        return Err(hv::HypervisorError::VmCreate(e.into()));
+                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
                     }
                 }
             }
@@ -222,7 +242,7 @@ impl hv::Hypervisor for KvmHyperVisor {
         #[cfg(target_arch = "x86_64")]
         vm_fd
             .set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(|e| hv::HypervisorError::VmSetup(e.into()))?;
+            .map_err(|e| hypervisor::HypervisorError::VmSetup(e.into()))?;
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -234,7 +254,7 @@ impl hv::Hypervisor for KvmHyperVisor {
             cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
             vm_fd
                 .enable_cap(&cap)
-                .map_err(|e| hv::HypervisorError::VmSetup(e.into()))?;
+                .map_err(|e| hypervisor::HypervisorError::VmSetup(e.into()))?;
         }
         let kvm_fd = KvmVm { fd: vm_fd };
         Ok(Arc::new(kvm_fd))
@@ -248,21 +268,21 @@ impl hv::Hypervisor for KvmHyperVisor {
     ///
     ///  Returns the size of the memory mapping required to use the vcpu's `kvm_run` structure.
     ///
-    fn get_vcpu_mmap_size(&self) -> hv::Result<usize> {
+    fn get_vcpu_mmap_size(&self) -> hypervisor::Result<usize> {
         self.kvm
             .get_vcpu_mmap_size()
-            .map_err(|e| hv::HypervisorError::GetVcpuMmap(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetVcpuMmap(e.into()))
     }
     ///
     /// Gets the recommended maximum number of VCPUs per VM.
     ///
-    fn get_max_vcpus(&self) -> hv::Result<usize> {
+    fn get_max_vcpus(&self) -> hypervisor::Result<usize> {
         Ok(self.kvm.get_max_vcpus())
     }
     ///
     /// Gets the recommended number of VCPUs per VM.
     ///
-    fn get_nr_vcpus(&self) -> hv::Result<usize> {
+    fn get_nr_vcpus(&self) -> hypervisor::Result<usize> {
         Ok(self.kvm.get_nr_vcpus())
     }
     #[cfg(target_arch = "x86_64")]
@@ -276,10 +296,10 @@ impl hv::Hypervisor for KvmHyperVisor {
     ///
     /// X86 specific call to get the system supported CPUID values.
     ///
-    fn get_cpuid(&self) -> hv::Result<CpuId> {
+    fn get_cpuid(&self) -> hypervisor::Result<CpuId> {
         self.kvm
             .get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)
-            .map_err(|e| hv::HypervisorError::GetCpuId(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))
     }
 }
 /// Vcpu struct for KVM
@@ -291,8 +311,8 @@ pub struct KvmVcpu {
 /// #[cfg(feature = "kvm")]
 /// extern crate hypervisor
 /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
-/// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-/// let vm = hv.create_vm().expect("new VM fd creation failed");
+/// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0).unwrap();
 /// vcpu.get/set().unwrap()
 ///
@@ -485,8 +505,8 @@ impl cpu::Vcpu for KvmVcpu {
     /// # extern crate hypervisor;
     /// # use hypervisor::KvmHypervisor;
     /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
-    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.cpu_state().unwrap();
     ///
@@ -529,8 +549,8 @@ impl cpu::Vcpu for KvmVcpu {
     /// # extern crate hypervisor;
     /// # use hypervisor::KvmHypervisor;
     /// let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
-    /// let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
-    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let hypervisor: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
+    /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
     /// let vcpu = vm.create_vcpu(0).unwrap();
     /// let state = vcpu.set_cpu_state(&state).unwrap();
     ///
