@@ -8,7 +8,6 @@
 //
 //
 
-use devices::ioapic;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::result;
 use std::sync::Arc;
@@ -33,6 +32,10 @@ use x86_64::{
     boot_msr_entries, check_required_kvm_extensions, FpuState, SpecialRegisters, StandardRegisters,
     KVM_TSS_ADDRESS,
 };
+
+#[cfg(target_arch = "x86_64")]
+use crate::x86::NUM_IOAPIC_PINS;
+
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
     CpuId, ExtendedControlRegisters, LapicState, MsrEntries, VcpuKvmState as CpuState, Xsave,
@@ -251,7 +254,7 @@ impl hypervisor::Hypervisor for KvmHyperVisor {
             // are not.
             let mut cap: kvm_enable_cap = Default::default();
             cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-            cap.args[0] = ioapic::NUM_IOAPIC_PINS as u64;
+            cap.args[0] = NUM_IOAPIC_PINS as u64;
             vm_fd
                 .enable_cap(&cap)
                 .map_err(|e| hypervisor::HypervisorError::VmSetup(e.into()))?;

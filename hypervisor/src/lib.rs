@@ -30,13 +30,16 @@ mod cpu;
 /// KVM implementation module
 pub mod kvm;
 
+/// x86 definitions
+#[cfg(target_arch = "x86_64")]
+pub mod x86;
+
 pub use cpu::{HypervisorCpuError, Vcpu};
 pub use hypervisor::{Hypervisor, HypervisorError};
 
 pub use kvm::*;
 pub use vm::{HypervisorVmError, Vm};
 
-extern crate arch_gen;
 extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;

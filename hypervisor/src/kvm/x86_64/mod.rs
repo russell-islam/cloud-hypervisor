@@ -28,12 +28,8 @@ pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
 
 use kvm_bindings::{kvm_msr_entry, Msrs};
 
-use arch_gen::x86::msr_index;
+use crate::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use serde_derive::{Deserialize, Serialize};
-
-// MTRR constants
-const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
-const MTRR_MEM_TYPE_WB: u64 = 0x6;
 
 macro_rules! kvm_msr {
     ($msr:expr) => {
