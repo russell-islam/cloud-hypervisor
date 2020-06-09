@@ -11,14 +11,9 @@ use std::{mem, result};
 
 use super::gdt::{gdt_entry, kvm_segment_from_gdt};
 use super::BootProtocol;
-use arch_gen::x86::msr_index;
-use kvm_bindings::{kvm_fpu, kvm_msr_entry, kvm_regs, kvm_sregs, Msrs};
+use kvm_bindings::{kvm_fpu, kvm_regs, kvm_sregs};
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryMmap};
-
-// MTRR constants
-const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
-const MTRR_MEM_TYPE_WB: u64 = 0x6;
 
 #[derive(Debug)]
 pub enum Error {
@@ -69,7 +64,7 @@ pub fn setup_fpu(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
-    vcpu.set_msrs(&boot_msr_entries())
+    vcpu.set_msrs(&hypervisor::kvm::x86_64::boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
     Ok(())
@@ -249,45 +244,6 @@ fn setup_page_tables(mem: &GuestMemoryMmap, sregs: &mut kvm_sregs) -> Result<()>
     }
 
     Ok(())
-}
-
-macro_rules! kvm_msr {
-    ($msr:expr) => {
-        kvm_msr_entry {
-            index: $msr,
-            data: 0x0,
-            ..Default::default()
-        }
-    };
-}
-
-macro_rules! kvm_msr_data {
-    ($msr:expr, $data:expr) => {
-        kvm_msr_entry {
-            index: $msr,
-            data: $data,
-            ..Default::default()
-        }
-    };
-}
-
-pub fn boot_msr_entries() -> Msrs {
-    Msrs::from_entries(&[
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_CS),
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_ESP),
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_EIP),
-        kvm_msr!(msr_index::MSR_STAR),
-        kvm_msr!(msr_index::MSR_CSTAR),
-        kvm_msr!(msr_index::MSR_LSTAR),
-        kvm_msr!(msr_index::MSR_KERNEL_GS_BASE),
-        kvm_msr!(msr_index::MSR_SYSCALL_MASK),
-        kvm_msr!(msr_index::MSR_IA32_TSC),
-        kvm_msr_data!(
-            msr_index::MSR_IA32_MISC_ENABLE,
-            msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
-        ),
-        kvm_msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
-    ])
 }
 
 #[cfg(test)]
