@@ -182,6 +182,23 @@ impl vm::Vm for KvmVm {
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))
     }
+    #[cfg(target_arch = "x86_64")]
+    fn enable_split_irq(&self) -> vm::Result<()> {
+        // Set TSS
+        self.fd
+            .set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
+            .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
+        // Create split irqchip
+        // Only the local APIC is emulated in kernel, both PICs and IOAPIC
+        // are not.
+        let mut cap: kvm_enable_cap = Default::default();
+        cap.cap = KVM_CAP_SPLIT_IRQCHIP;
+        cap.args[0] = NUM_IOAPIC_PINS as u64;
+        self.fd
+            .enable_cap(&cap)
+            .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
+        Ok(())
+    }
 }
 /// Wrapper over KVM system ioctls.
 pub struct KvmHyperVisor {
@@ -220,8 +237,6 @@ impl hypervisor::Hypervisor for KvmHyperVisor {
     fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let kvm = Kvm::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
 
-        check_required_kvm_extensions(&kvm).expect("Missing KVM capabilities");
-
         let fd: VmFd;
         loop {
             match kvm.create_vm() {
@@ -241,29 +256,15 @@ impl hypervisor::Hypervisor for KvmHyperVisor {
         }
         let vm_fd = Arc::new(fd);
 
-        // Set TSS
-        #[cfg(target_arch = "x86_64")]
-        vm_fd
-            .set_tss_address(KVM_TSS_ADDRESS.raw_value() as usize)
-            .map_err(|e| hypervisor::HypervisorError::VmSetup(e.into()))?;
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            // Create split irqchip
-            // Only the local APIC is emulated in kernel, both PICs and IOAPIC
-            // are not.
-            let mut cap: kvm_enable_cap = Default::default();
-            cap.cap = KVM_CAP_SPLIT_IRQCHIP;
-            cap.args[0] = NUM_IOAPIC_PINS as u64;
-            vm_fd
-                .enable_cap(&cap)
-                .map_err(|e| hypervisor::HypervisorError::VmSetup(e.into()))?;
-        }
         let kvm_fd = KvmVm { fd: vm_fd };
         Ok(Arc::new(kvm_fd))
     }
+    fn check_required_extensions(&self) -> hypervisor::Result<()> {
+        check_required_kvm_extensions(&self.kvm).expect("Missing KVM capabilities");
+        Ok(())
+    }
     ///
-    // Returns the KVM API version.
+    /// Returns the KVM API version.
     ///
     fn get_api_version(&self) -> i32 {
         self.kvm.get_api_version()

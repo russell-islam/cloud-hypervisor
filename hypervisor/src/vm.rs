@@ -69,6 +69,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to set GSI routing: {0}")]
     CreateDevice(#[source] anyhow::Error),
+    ///
+    /// Enable split Irq error 
+    ///
+    #[error("Failed to enable split Irq: {0}")]
+    EnableSplitIrq(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -107,4 +112,6 @@ pub trait Vm: Send + Sync {
     fn set_user_memory_region(&self, user_memory_region: MemoryRegion) -> Result<()>;
     /// Creates an emulated device in the kernel.
     fn create_device(&self, device: &mut CreateDevice) -> Result<DeviceFd>;
+    #[cfg(target_arch = "x86_64")]
+    fn enable_split_irq(&self) -> Result<()>;
 }

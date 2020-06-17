@@ -326,7 +326,11 @@ impl Vm {
         vmm_path: PathBuf,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
+        #[cfg(target_arch = "x86_64")]
+        hypervisor.check_required_extensions().unwrap();
         let fd = hypervisor.create_vm().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        fd.enable_split_irq().unwrap();
         let memory_manager = MemoryManager::new(
             fd.clone(),
             &config.lock().unwrap().memory.clone(),
@@ -365,7 +369,11 @@ impl Vm {
         prefault: bool,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
     ) -> Result<Self> {
+        #[cfg(target_arch = "x86_64")]
+        hypervisor.check_required_extensions().unwrap();
         let fd = hypervisor.create_vm().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        fd.enable_split_irq().unwrap();
         let config = vm_config_from_snapshot(snapshot).map_err(Error::Restore)?;
 
         let memory_manager = if let Some(memory_manager_snapshot) =
