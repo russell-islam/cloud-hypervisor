@@ -371,6 +371,9 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
+        use hypervisor::x86::msr_index;
+        use hypervisor::x86_64::{MsrEntries, MsrEntry};
+
         let kvm = hypervisor::kvm::KvmHyperVisor::new().unwrap();
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
@@ -379,7 +382,7 @@ mod tests {
 
         // This test will check against the last MSR entry configured (the tenth one).
         // See create_msr_entries for details.
-        let mut msrs = Msrs::from_entries(&[kvm_msr_entry {
+        let mut msrs = MsrEntries::from_entries(&[MsrEntry {
             index: msr_index::MSR_IA32_MISC_ENABLE,
             ..Default::default()
         }]);
@@ -392,7 +395,7 @@ mod tests {
         // Official entries that were setup when we did setup_msrs. We need to assert that the
         // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
         // expect.
-        let entry_vec = boot_msr_entries();
+        let entry_vec = hypervisor::x86_64::boot_msr_entries();
         assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
     }
 
