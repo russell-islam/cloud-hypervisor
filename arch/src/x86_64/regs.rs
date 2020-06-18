@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::{mem, result};
 
-use super::gdt::{gdt_entry, kvm_segment_from_gdt};
+use super::gdt::{gdt_entry, segment_from_gdt};
 use super::BootProtocol;
 use hypervisor::x86_64::{FpuState, SpecialRegisters, StandardRegisters};
 use layout::{BOOT_GDT_START, BOOT_IDT_START, PDE_START, PDPTE_START, PML4_START, PVH_INFO_START};
@@ -182,9 +182,9 @@ fn configure_segments_and_sregs(
         }
     };
 
-    let code_seg = kvm_segment_from_gdt(gdt_table[1], 1);
-    let data_seg = kvm_segment_from_gdt(gdt_table[2], 2);
-    let tss_seg = kvm_segment_from_gdt(gdt_table[3], 3);
+    let code_seg = segment_from_gdt(gdt_table[1], 1);
+    let data_seg = segment_from_gdt(gdt_table[2], 2);
+    let tss_seg = segment_from_gdt(gdt_table[3], 3);
 
     // Write segments
     write_gdt_table(&gdt_table[..], mem)?;
