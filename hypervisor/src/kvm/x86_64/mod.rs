@@ -27,23 +27,21 @@ pub use {
 
 pub const KVM_TSS_ADDRESS: GuestAddress = GuestAddress(0xfffb_d000);
 
-use kvm_bindings::{kvm_msr_entry, Msrs};
-
 use crate::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
 use serde_derive::{Deserialize, Serialize};
 
-macro_rules! kvm_msr {
+macro_rules! msr {
     ($msr:expr) => {
-        kvm_msr_entry {
+        MsrEntry {
             index: $msr,
             data: 0x0,
             ..Default::default()
         }
     };
 }
-macro_rules! kvm_msr_data {
+macro_rules! msr_data {
     ($msr:expr, $data:expr) => {
-        kvm_msr_entry {
+        MsrEntry {
             index: $msr,
             data: $data,
             ..Default::default()
@@ -51,22 +49,22 @@ macro_rules! kvm_msr_data {
     };
 }
 
-pub fn boot_msr_entries() -> Msrs {
-    Msrs::from_entries(&[
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_CS),
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_ESP),
-        kvm_msr!(msr_index::MSR_IA32_SYSENTER_EIP),
-        kvm_msr!(msr_index::MSR_STAR),
-        kvm_msr!(msr_index::MSR_CSTAR),
-        kvm_msr!(msr_index::MSR_LSTAR),
-        kvm_msr!(msr_index::MSR_KERNEL_GS_BASE),
-        kvm_msr!(msr_index::MSR_SYSCALL_MASK),
-        kvm_msr!(msr_index::MSR_IA32_TSC),
-        kvm_msr_data!(
+pub fn boot_msr_entries() -> MsrEntries {
+    MsrEntries::from_entries(&[
+        msr!(msr_index::MSR_IA32_SYSENTER_CS),
+        msr!(msr_index::MSR_IA32_SYSENTER_ESP),
+        msr!(msr_index::MSR_IA32_SYSENTER_EIP),
+        msr!(msr_index::MSR_STAR),
+        msr!(msr_index::MSR_CSTAR),
+        msr!(msr_index::MSR_LSTAR),
+        msr!(msr_index::MSR_KERNEL_GS_BASE),
+        msr!(msr_index::MSR_SYSCALL_MASK),
+        msr!(msr_index::MSR_IA32_TSC),
+        msr_data!(
             msr_index::MSR_IA32_MISC_ENABLE,
             msr_index::MSR_IA32_MISC_ENABLE_FAST_STRING as u64
         ),
-        kvm_msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
+        msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
     ])
 }
 
