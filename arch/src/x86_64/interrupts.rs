@@ -125,6 +125,8 @@ mod tests {
         let hv: Arc<dyn hypervisor::Hypervisor> = Arc::new(kvm);
         let vm = hv.create_vm().expect("new VM fd creation failed");
         assert!(hv.check_capability(hypervisor::kvm::Cap::Irqchip));
+        // Calling get_lapic will fail if there is no irqchip before hand.
+        assert!(vm.create_irq_chip().is_ok());
         let vcpu = vm.create_vcpu(0).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
