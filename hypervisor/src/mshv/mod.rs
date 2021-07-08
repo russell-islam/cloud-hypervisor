@@ -917,6 +917,22 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| vm::HypervisorVmError::GetDirtyLog(e.into()))
     }
+    ///
+    /// Enable dirty page tracking
+    ///
+    fn enable_dirty_page_tracking(&self) -> vm::Result<()> {
+        self.fd
+            .enable_dirty_page_tracking()
+            .map_err(|e| vm::HypervisorVmError::EnableDirtyPageTracking(e.into()))
+    }
+    ///
+    /// Disable dirty page tracking
+    ///
+    fn disable_dirty_page_tracking(&self) -> vm::Result<()> {
+        self.fd
+            .disable_dirty_page_tracking()
+            .map_err(|e| vm::HypervisorVmError::DisableDirtyPageTracking(e.into()))
+    }
 }
 pub use hv_cpuid_entry as CpuIdEntry;
 
