@@ -34,6 +34,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::RwLock;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
+const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 pub const PAGE_SHIFT: usize = 12;
 
 #[derive(Debug, Default, Copy, Clone, Serialize, Deserialize)]
@@ -887,9 +888,7 @@ impl vm::Vm for MshvVm {
         _memory_size: u64,
         _userspace_addr: u64,
     ) -> vm::Result<()> {
-        Err(vm::HypervisorVmError::StartDirtyLog(anyhow!(
-            "functionality not implemented"
-        )))
+        Ok(())
     }
     ///
     /// Stop logging dirty pages
@@ -901,9 +900,15 @@ impl vm::Vm for MshvVm {
         _memory_size: u64,
         _userspace_addr: u64,
     ) -> vm::Result<()> {
-        Err(vm::HypervisorVmError::StopDirtyLog(anyhow!(
-            "functionality not implemented"
-        )))
+        let _ = self
+            .fd
+            .get_dirty_log(
+                _guest_phys_addr >> PAGE_SHIFT,
+                _memory_size as usize,
+                DIRTY_BITMAP_SET_DIRTY,
+            )
+            .map_err(|e| vm::HypervisorVmError::StopDirtyLog(e.into()))?;
+        Ok(())
     }
     ///
     /// Get dirty pages bitmap (one bit per page)

@@ -1012,7 +1012,6 @@ impl Vmm {
                     "Error during config migration"
                 )));
             }
-
             // Start logging dirty pages
             vm.start_memory_dirty_log()?;
 

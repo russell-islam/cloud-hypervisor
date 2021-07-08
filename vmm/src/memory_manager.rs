@@ -1598,7 +1598,6 @@ impl MemoryManager {
                     MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
                 })?;
         }
-
         Ok(())
     }
 }
