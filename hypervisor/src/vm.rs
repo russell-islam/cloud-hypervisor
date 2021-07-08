@@ -297,7 +297,12 @@ pub trait Vm: Send + Sync {
         userspace_addr: u64,
     ) -> Result<()>;
     /// Get dirty pages bitmap
-    fn get_dirty_log(&self, slot: u32, memory_size: u64) -> Result<Vec<u64>>;
+    fn get_dirty_log(
+        &self,
+        slot: u32,
+        #[cfg(feature = "mshv")] base_gpa: u64,
+        memory_size: u64,
+    ) -> Result<Vec<u64>>;
     #[cfg(feature = "tdx")]
     /// Initalize TDX on this VM
     fn tdx_init(&self, cpuid: &CpuId, max_vcpus: u32) -> Result<()>;

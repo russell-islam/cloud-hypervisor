@@ -1482,9 +1482,17 @@ impl MemoryManager {
         let page_size = 4096; // TODO: Does this need to vary?
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
-            let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
-            })?;
+            let vm_dirty_bitmap = self
+                .vm
+                .get_dirty_log(
+                    r.slot,
+                    #[cfg(feature = "mshv")]
+                    r.gpa,
+                    r.size,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+                })?;
             let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
             {
                 Some(region) => {
@@ -1558,9 +1566,16 @@ impl MemoryManager {
                 })?;
 
             // Clear the dirty pages bitmap
-            self.vm.get_dirty_log(r.slot, r.size).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
-            })?;
+            self.vm
+                .get_dirty_log(
+                    r.slot,
+                    #[cfg(feature = "mshv")]
+                    r.gpa,
+                    r.size,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+                })?;
         }
 
         for r in self.guest_memory.memory().iter() {
