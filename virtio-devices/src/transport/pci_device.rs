@@ -307,6 +307,7 @@ pub struct VirtioPciDevice {
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
     msi_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
+    legacy_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
     msi_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
@@ -456,6 +457,7 @@ impl VirtioPciDevice {
             device_activated: Arc::new(AtomicBool::new(false)),
             interrupt_status: Arc::new(AtomicUsize::new(0)),
             msi_virtio_interrupt: None,
+            legacy_virtio_interrupt: None,
             queues,
             queue_evts,
             memory: Some(memory),
@@ -479,6 +481,10 @@ impl VirtioPciDevice {
                 virtio_pci_device.msi_interrupt_source_group.clone(),
             )));
         }
+
+        virtio_pci_device.legacy_virtio_interrupt = Some(Arc::new(VirtioInterruptLegacy::new(
+            virtio_pci_device.legacy_interrupt_source_group.clone(),
+        )));
 
         Ok(virtio_pci_device)
     }
@@ -800,6 +806,28 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
         self.msi_interrupt_source_group
             .notifier(vector as InterruptIndex)
+    }
+}
+
+pub struct VirtioInterruptLegacy {
+    legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+}
+
+impl VirtioInterruptLegacy {
+    pub fn new(legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>) -> Self {
+        VirtioInterruptLegacy {
+            legacy_interrupt_source_group,
+        }
+    }
+}
+
+impl VirtioInterrupt for VirtioInterruptLegacy {
+    fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
+        self.legacy_interrupt_source_group.trigger(0)
+    }
+
+    fn notifier(&self, int_type: VirtioInterruptType) -> Option<EventFd> {
+        self.legacy_interrupt_source_group.notifier(0)
     }
 }
 
