@@ -33,7 +33,7 @@ use virtio_queue::{Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptSourceGroup, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize, Le32};
@@ -308,6 +308,7 @@ pub struct VirtioPciDevice {
     interrupt_status: Arc<AtomicUsize>,
     msi_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
     msi_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 
     // virtio queues
     queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
@@ -354,6 +355,8 @@ impl VirtioPciDevice {
         msix_num: u16,
         access_platform: Option<Arc<dyn AccessPlatform>>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        legacy_irq: u32,
+        legacy_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
@@ -388,6 +391,11 @@ impl VirtioPciDevice {
             base: 0,
             count: msix_num as InterruptIndex,
         })?;
+
+        let legacy_interrupt_source_group =
+            legacy_interrupt_manager.create_group(LegacyIrqGroupConfig {
+                irq: legacy_irq as InterruptIndex,
+            })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(
@@ -455,6 +463,7 @@ impl VirtioPciDevice {
             settings_bar_addr: None,
             use_64bit_bar,
             msi_interrupt_source_group,
+            legacy_interrupt_source_group,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
             bar_regions: vec![],
             activate_evt,

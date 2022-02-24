@@ -3433,6 +3433,15 @@ impl DeviceManager {
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
+        // Allocate an IRQ number for the case of using legacy interrupt.
+        let legacy_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
         // behind a vIOMMU.
@@ -3496,6 +3505,8 @@ impl DeviceManager {
             msix_num,
             access_platform,
             &self.msi_interrupt_manager,
+            legacy_irq,
+            &self.legacy_interrupt_manager.as_ref().unwrap(),
             pci_device_bdf.into(),
             self.activate_evt
                 .try_clone()
