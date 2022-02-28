@@ -46,6 +46,10 @@ use vmm_sys_util::{errno::Result, eventfd::EventFd};
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
 
+/// Legacy interrupt status
+const INTERRUPT_STATUS_USED_RING: usize = 0x1;
+const INTERRUPT_STATUS_CONFIG_CHANGED: usize = 0x2;
+
 #[derive(Debug)]
 enum Error {
     /// Failed to retrieve queue ring's index.
@@ -483,6 +487,7 @@ impl VirtioPciDevice {
         }
 
         virtio_pci_device.legacy_virtio_interrupt = Some(Arc::new(VirtioInterruptLegacy::new(
+            virtio_pci_device.interrupt_status.clone(),
             virtio_pci_device.legacy_interrupt_source_group.clone(),
         )));
 
@@ -688,7 +693,8 @@ impl VirtioPciDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
-        if let Some(msi_virtio_interrupt) = self.msi_virtio_interrupt.take() {
+        // Michael: temp: hard code to legacy interrupt for test purpose
+        if let Some(virtio_interrupt) = self.legacy_virtio_interrupt.take() {
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
@@ -701,7 +707,7 @@ impl VirtioPciDevice {
                         error!("Queue {} is not valid", i);
                     }
                 }
-                return device.activate(mem, msi_virtio_interrupt, queues, queue_evts);
+                return device.activate(mem, virtio_interrupt, queues, queue_evts);
             }
         }
         Ok(())
@@ -810,12 +816,17 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 }
 
 pub struct VirtioInterruptLegacy {
+    interrupt_status: Arc<AtomicUsize>,
     legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VirtioInterruptLegacy {
-    pub fn new(legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>) -> Self {
+    pub fn new(
+        interrupt_status: Arc<AtomicUsize>,
+        legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    ) -> Self {
         VirtioInterruptLegacy {
+            interrupt_status,
             legacy_interrupt_source_group,
         }
     }
@@ -823,10 +834,35 @@ impl VirtioInterruptLegacy {
 
 impl VirtioInterrupt for VirtioInterruptLegacy {
     fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
-        self.legacy_interrupt_source_group.trigger(0)
+        match int_type {
+            VirtioInterruptType::Config => {
+                // Set bit in ISR and inject the interrupt if it was not already pending.
+                // Don't need to inject the interrupt if the guest hasn't processed it.
+                if self
+                    .interrupt_status
+                    .fetch_or(INTERRUPT_STATUS_CONFIG_CHANGED, Ordering::SeqCst)
+                    == 0
+                {
+                    self.legacy_interrupt_source_group.trigger(0)
+                } else {
+                    Ok(())
+                }
+            }
+            VirtioInterruptType::Queue(_queue_index) => {
+                if self
+                    .interrupt_status
+                    .fetch_or(INTERRUPT_STATUS_USED_RING, Ordering::SeqCst)
+                    == 0
+                {
+                    self.legacy_interrupt_source_group.trigger(0)
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
-    fn notifier(&self, int_type: VirtioInterruptType) -> Option<EventFd> {
+    fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         self.legacy_interrupt_source_group.notifier(0)
     }
 }
