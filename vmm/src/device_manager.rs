@@ -3520,6 +3520,7 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
+        let pin = virtio_pci_device.get_pin();
         // This is important as this will set the BAR address if it exists,
         // which is mandatory on the restore path.
         if let Some(addr) = config_bar_addr {

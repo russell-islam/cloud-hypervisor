@@ -3,7 +3,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::device::BarReprogrammingParams;
-use crate::{MsixConfig, PciInterruptPin};
+use crate::{MsixConfig, PciBdf, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
@@ -678,13 +678,11 @@ impl PciConfiguration {
     }
 
     /// Configures the IRQ line and pin used by this device.
-    pub fn set_irq(&mut self, line: u8, pin: PciInterruptPin) {
+    pub fn set_irq(&mut self, line: u32, pin: PciInterruptPin) {
         // `pin` is 1-based in the pci config space.
         let pin_idx = (pin as u32) + 1;
-        self.registers[INTERRUPT_LINE_PIN_REG] = (self.registers[INTERRUPT_LINE_PIN_REG]
-            & 0xffff_0000)
-            | (pin_idx << 8)
-            | u32::from(line);
+        self.registers[INTERRUPT_LINE_PIN_REG] =
+            (self.registers[INTERRUPT_LINE_PIN_REG] & 0xffff_0000) | (pin_idx << 8) | line;
     }
 
     /// Adds the capability `cap_data` to the list of capabilities.
@@ -888,6 +886,15 @@ impl PciConfiguration {
         }
 
         None
+    }
+
+    pub fn suggested_interrupt_pin(pci_bdf: PciBdf) -> PciInterruptPin {
+        match pci_bdf.function() % 4 {
+            0 => PciInterruptPin::IntA,
+            1 => PciInterruptPin::IntB,
+            2 => PciInterruptPin::IntC,
+            _ => PciInterruptPin::IntD,
+        }
     }
 }
 

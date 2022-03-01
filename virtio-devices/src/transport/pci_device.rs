@@ -17,9 +17,10 @@ use crate::{
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
-    BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
+    BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType, PciBdf,
     PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
+    PciHeaderType, PciInterruptPin, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciSubclass,
 };
 use std::any::Any;
 use std::cmp;
@@ -314,6 +315,7 @@ pub struct VirtioPciDevice {
     legacy_virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
     msi_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    pin: PciInterruptPin,
 
     // virtio queues
     queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
@@ -402,6 +404,8 @@ impl VirtioPciDevice {
                 irq: legacy_irq as InterruptIndex,
             })?;
 
+        let pin = PciConfiguration::suggested_interrupt_pin(PciBdf::from(pci_device_bdf));
+
         let (msix_config, msix_config_clone) = if msix_num > 0 {
             let msix_config = Arc::new(Mutex::new(MsixConfig::new(
                 msix_num,
@@ -429,7 +433,7 @@ impl VirtioPciDevice {
             ),
         };
 
-        let configuration = PciConfiguration::new(
+        let mut configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
             0x1, // For modern virtio-PCI devices
@@ -441,6 +445,7 @@ impl VirtioPciDevice {
             pci_device_id,
             msix_config_clone,
         );
+        configuration.set_irq(legacy_irq, pin);
 
         let mut virtio_pci_device = VirtioPciDevice {
             id,
@@ -470,6 +475,7 @@ impl VirtioPciDevice {
             use_64bit_bar,
             msi_interrupt_source_group,
             legacy_interrupt_source_group,
+            pin,
             cap_pci_cfg_info: VirtioPciCfgCapInfo::default(),
             bar_regions: vec![],
             activate_evt,
@@ -731,6 +737,10 @@ impl VirtioPciDevice {
 
     pub fn dma_handler(&self) -> Option<&Arc<dyn ExternalDmaMapping>> {
         self.dma_handler.as_ref()
+    }
+
+    pub fn get_pin(&self) -> PciInterruptPin {
+        self.pin
     }
 }
 
