@@ -909,6 +909,10 @@ pub struct DeviceManager {
     #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
     numa_nodes: NumaNodes,
 
+    // Collection of legacy interrupt mappin data,
+    // Each member is a tuple of (device_id, irq_number, pin)
+    legacy_pci_irqs: Vec<(u32, u32, u32)>,
+
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
 
@@ -1056,6 +1060,7 @@ impl DeviceManager {
             seccomp_action,
             #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
+            legacy_pci_irqs: Vec::new(),
             balloon: None,
             activate_evt: activate_evt
                 .try_clone()
@@ -1210,6 +1215,10 @@ impl DeviceManager {
     /// Gets the information of the devices registered up to some point in time.
     pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
         &self.id_to_dev_info
+    }
+
+    pub fn get_legacy_pci_irqs(&self) -> &Vec<(u32, u32, u32)> {
+        &self.legacy_pci_irqs
     }
 
     #[allow(unused_variables)]
@@ -3521,6 +3530,8 @@ impl DeviceManager {
         .map_err(DeviceManagerError::VirtioDevice)?;
 
         let pin = virtio_pci_device.get_pin();
+        self.legacy_pci_irqs
+            .push((pci_device_bdf.into(), legacy_irq, pin.to_mask()));
         // This is important as this will set the BAR address if it exists,
         // which is mandatory on the restore path.
         if let Some(addr) = config_bar_addr {
