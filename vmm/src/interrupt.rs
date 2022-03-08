@@ -41,6 +41,7 @@ impl InterruptRoute {
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
+            debug!("+++++ InterruptRoute::enable, gsi = {}", self.gsi);
             vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -57,6 +58,7 @@ impl InterruptRoute {
 
     pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
+            debug!("+++++ InterruptRoute::disable, gsi = {}", self.gsi);
             vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -72,6 +74,7 @@ impl InterruptRoute {
     }
 
     pub fn trigger(&self) -> Result<()> {
+        debug!("+++++ InterruptRoute::trigger, gsi = {}", self.gsi);
         self.irq_fd.write(1)
     }
 

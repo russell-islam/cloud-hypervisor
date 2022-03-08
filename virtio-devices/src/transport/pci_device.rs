@@ -699,7 +699,8 @@ impl VirtioPciDevice {
     }
 
     fn activate(&mut self) -> ActivateResult {
-        // Michael: temp: hard code to legacy interrupt for test purpose
+        // Michael: temp: hard code to legacy interrupt for test purpose:
+        // msi_virtio_interrupt, legacy_virtio_interrupt
         if let Some(virtio_interrupt) = self.legacy_virtio_interrupt.take() {
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
@@ -1052,7 +1053,9 @@ impl PciDevice for VirtioPciDevice {
                 self.device.clone(),
             ),
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
+                debug!("+++++ michael: guest reading ISR");
                 if let Some(v) = data.get_mut(0) {
+                    debug!("+++++ michael: guest read ISR successfully");
                     // Reading this register resets it to 0.
                     *v = self.interrupt_status.swap(0, Ordering::AcqRel) as u8;
                 }
@@ -1097,7 +1100,9 @@ impl PciDevice for VirtioPciDevice {
                 self.device.clone(),
             ),
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
+                debug!("+++++ michael: guest writing ISR");
                 if let Some(v) = data.get(0) {
+                    debug!("+++++ michael: guest wrote ISR successfully");
                     self.interrupt_status
                         .fetch_and(!(*v as usize), Ordering::AcqRel);
                 }
