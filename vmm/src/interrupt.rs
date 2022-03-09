@@ -22,12 +22,14 @@ pub type Result<T> = std::io::Result<T>;
 struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
+    resample_fd: EventFd,
     registered: AtomicBool,
 }
 
 impl InterruptRoute {
     pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
+        let resample_fd = EventFd::new(libc::EFD_NONBLOCK)?;
         let gsi = allocator
             .allocate_gsi()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed allocating new GSI"))?;
@@ -35,6 +37,7 @@ impl InterruptRoute {
         Ok(InterruptRoute {
             gsi,
             irq_fd,
+            resample_fd,
             registered: AtomicBool::new(false),
         })
     }
@@ -42,12 +45,13 @@ impl InterruptRoute {
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
             debug!("+++++ InterruptRoute::enable, gsi = {}", self.gsi);
-            vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {}", e),
-                )
-            })?;
+            vm.register_irqfd(&self.irq_fd, self.gsi, Some(&self.resample_fd))
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed registering irq_fd: {}", e),
+                    )
+                })?;
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
