@@ -589,6 +589,7 @@ impl VirtioDevice for Block {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         mut queue_evts: Vec<EventFd>,
+        resample_evt: Option<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
 

@@ -89,6 +89,14 @@ impl InterruptRoute {
                 .expect("Failed cloning interrupt's EventFd"),
         )
     }
+
+    pub fn resample_fd(&self) -> Option<EventFd> {
+        Some(
+            self.resample_fd
+                .try_clone()
+                .expect("Failed cloning resample EventFd"),
+        )
+    }
 }
 
 pub struct RoutingEntry<IrqRoutingEntry> {
@@ -167,6 +175,14 @@ impl InterruptSourceGroup for MsiInterruptGroup<IrqRoutingEntry> {
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd> {
         if let Some(route) = self.irq_routes.get(&index) {
             return route.notifier();
+        }
+
+        None
+    }
+
+    fn resample_fd(&self, index: InterruptIndex) -> Option<EventFd> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.resample_fd();
         }
 
         None
@@ -260,6 +276,10 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
 
     fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
         self.ioapic.lock().unwrap().notifier(self.irq as usize)
+    }
+
+    fn resample_fd(&self, _index: InterruptIndex) -> Option<EventFd> {
+        self.ioapic.lock().unwrap().resample_fd(self.irq as usize)
     }
 }
 

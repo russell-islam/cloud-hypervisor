@@ -714,7 +714,8 @@ impl VirtioPciDevice {
                         error!("Queue {} is not valid", i);
                     }
                 }
-                return device.activate(mem, virtio_interrupt, queues, queue_evts);
+                let resample_fd = virtio_interrupt.resample_fd(VirtioInterruptType::Config);
+                return device.activate(mem, virtio_interrupt, queues, queue_evts, resample_fd);
             }
         }
         Ok(())
@@ -824,6 +825,10 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         self.msi_interrupt_source_group
             .notifier(vector as InterruptIndex)
     }
+
+    fn resample_fd(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
+        None
+    }
 }
 
 pub struct VirtioInterruptLegacy {
@@ -875,6 +880,10 @@ impl VirtioInterrupt for VirtioInterruptLegacy {
 
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         self.legacy_interrupt_source_group.notifier(0)
+    }
+
+    fn resample_fd(&self, _index: VirtioInterruptType) -> Option<EventFd> {
+        self.legacy_interrupt_source_group.resample_fd(0)
     }
 }
 

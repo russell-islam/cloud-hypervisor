@@ -173,6 +173,8 @@ pub trait InterruptSourceGroup: Send + Sync {
     #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
 
+    fn resample_fd(&self, index: InterruptIndex) -> Option<EventFd>;
+
     /// Update the interrupt source group configuration.
     ///
     /// # Arguments
