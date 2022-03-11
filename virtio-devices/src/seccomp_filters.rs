@@ -11,6 +11,7 @@ use seccompiler::{
 use std::convert::TryInto;
 
 pub enum Thread {
+    VirtioCommon,
     VirtioBalloon,
     VirtioBlock,
     VirtioConsole,
@@ -58,6 +59,10 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
+fn create_virtio_common_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
+}
+
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
 }
@@ -99,6 +104,10 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
+}
+
+fn virtio_common_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![(libc::SYS_ioctl, create_virtio_common_ioctl_seccomp_rule())]
 }
 
 fn virtio_console_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -223,6 +232,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
     let mut rules = match thread_type {
         Thread::VirtioBalloon => virtio_balloon_thread_rules(),
         Thread::VirtioBlock => virtio_block_thread_rules(),
+        Thread::VirtioCommon => virtio_common_thread_rules(),
         Thread::VirtioConsole => virtio_console_thread_rules(),
         Thread::VirtioIommu => virtio_iommu_thread_rules(),
         Thread::VirtioMem => virtio_mem_thread_rules(),
