@@ -508,7 +508,7 @@ impl VirtioDevice for Fs {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<Queue<GuestMemoryAtomic<GuestMemoryMmap>>>,
         queue_evts: Vec<EventFd>,
-        resample_evt: Option<EventFd>,
+        _resample_evt: Option<EventFd>,
     ) -> ActivateResult {
         self.common.activate(&queues, &queue_evts, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());

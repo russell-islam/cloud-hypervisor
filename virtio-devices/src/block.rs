@@ -650,6 +650,16 @@ impl VirtioDevice for Block {
             )?;
         }
 
+        if let Some(resample_evt) = resample_evt {
+            self.common.start_common_epoll(
+                self.id.clone(),
+                &interrupt_cb,
+                resample_evt,
+                &self.exit_evt,
+                &mut epoll_threads,
+                &self.seccomp_action,
+            )?;
+        }
         self.common.epoll_threads = Some(epoll_threads);
         event!("virtio-device", "activated", "id", &self.id);
 
