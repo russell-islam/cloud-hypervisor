@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod dist_regs;
+pub mod gicv2;
 pub mod gicv3;
 pub mod gicv3_its;
 pub mod icc_regs;
@@ -76,6 +77,7 @@ pub trait GicDevice: Send {
 pub mod kvm {
     use super::GicDevice;
     use super::Result;
+    use crate::aarch64::gic::gicv2::kvm::KvmGicV2;
     use crate::aarch64::gic::gicv3_its::kvm::KvmGicV3Its;
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
@@ -200,8 +202,11 @@ pub mod kvm {
     /// Create a GICv3-ITS device.
     ///
     pub fn create_gic(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GicDevice>> {
-        debug!("creating a GICv3-ITS");
-        KvmGicV3Its::new(vm, vcpu_count)
+        debug!("Creating a GICv3-ITS");
+        KvmGicV3Its::new(vm, vcpu_count).or_else(|_| {
+            debug!("Failed to create a GICv3-ITS, trying GICv2.");
+            KvmGicV2::new(vm, vcpu_count)
+        })
     }
 
     /// Function that saves RDIST pending tables into guest RAM.

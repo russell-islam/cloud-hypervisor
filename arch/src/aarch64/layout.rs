@@ -55,6 +55,11 @@ pub const UEFI_SIZE: u64 = 0x040_0000;
 /// Below this address will reside the GIC, above this address will reside the MMIO devices.
 pub const MAPPED_IO_START: u64 = 0x0900_0000;
 
+// See arch/arm64/include/uapi/asm/kvm.h file from the linux kernel.
+pub const GIC_V2_DIST_SIZE: u64 = 0x1000;
+pub const GIC_V2_DIST_START: u64 = MAPPED_IO_START - GIC_V2_DIST_SIZE;
+pub const GIC_V2_CPU_SIZE: u64 = 0x2000;
+
 /// See kernel file arch/arm64/include/uapi/asm/kvm.h for the GIC related definitions.
 /// 0x08ff_0000 ~ 0x0900_0000 is reserved for GICv3 Distributor
 pub const GIC_V3_DIST_SIZE: u64 = 0x01_0000;
