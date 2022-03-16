@@ -1203,12 +1203,7 @@ impl Vm {
                 Error::ConfigureSystem(arch::Error::AArch64Setup(arch::aarch64::Error::VcpuInitPmu))
             })?;
 
-        let pci_irqs = self
-            .device_manager
-            .lock()
-            .unwrap()
-            .get_legacy_pci_irqs()
-            .clone();
+        let pci_irqs = self.device_manager.lock().unwrap().get_pci_irqs().clone();
 
         arch::configure_system(
             &mem,

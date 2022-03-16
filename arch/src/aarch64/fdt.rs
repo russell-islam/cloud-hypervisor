@@ -633,7 +633,7 @@ fn create_pci_nodes(
             interrupt_map.push(0);
             // CONTROLLER_DATA(3)
             interrupt_map.push(GIC_FDT_IRQ_TYPE_SPI);
-            interrupt_map.push(*irq_num - 32);
+            interrupt_map.push(*irq_num);
             interrupt_map.push(IRQ_TYPE_LEVEL_HI);
             // PCI_DEVICE(3)
             interrupt_map_mask.push(0xf800); // bits 11..15 (device)

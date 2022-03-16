@@ -34,7 +34,8 @@ use virtio_queue::{Error as QueueError, Queue};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceGroup, LegacyIrqGroupConfig, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_device::BusDevice;
 use vm_memory::{Address, ByteValued, GuestAddress, GuestMemoryAtomic, GuestUsize, Le32};
@@ -364,8 +365,7 @@ impl VirtioPciDevice {
         msix_num: u16,
         access_platform: Option<Arc<dyn AccessPlatform>>,
         msi_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        legacy_irq: u32,
-        legacy_interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        gsi: u32,
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
@@ -403,8 +403,9 @@ impl VirtioPciDevice {
             })?;
 
         let legacy_interrupt_source_group =
-            legacy_interrupt_manager.create_group(LegacyIrqGroupConfig {
-                irq: legacy_irq as InterruptIndex,
+            msi_interrupt_manager.create_group(MsiIrqGroupConfig {
+                base: 0,
+                count: 1 as InterruptIndex,
             })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
@@ -446,7 +447,7 @@ impl VirtioPciDevice {
             pci_device_id,
             msix_config_clone,
         );
-        configuration.set_irq(legacy_irq, PciInterruptPin::IntA);
+        configuration.set_irq(gsi, PciInterruptPin::IntA);
 
         let mut virtio_pci_device = VirtioPciDevice {
             id,
@@ -494,6 +495,7 @@ impl VirtioPciDevice {
         }
 
         virtio_pci_device.legacy_virtio_interrupt = Some(Arc::new(VirtioInterruptLegacy::new(
+            gsi,
             virtio_pci_device.interrupt_status.clone(),
             virtio_pci_device.legacy_interrupt_source_group.clone(),
         )));
@@ -709,6 +711,7 @@ impl VirtioPciDevice {
             self.legacy_virtio_interrupt.take()
         };
         if let Some(virtio_interrupt) = virtio_interrupt {
+            virtio_interrupt.enable().unwrap();
             if self.memory.is_some() {
                 let mem = self.memory.as_ref().unwrap().clone();
                 let mut device = self.device.lock().unwrap();
@@ -835,16 +838,19 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 }
 
 pub struct VirtioInterruptLegacy {
+    gsi: u32,
     interrupt_status: Arc<AtomicUsize>,
     legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
 }
 
 impl VirtioInterruptLegacy {
     pub fn new(
+        gsi: u32,
         interrupt_status: Arc<AtomicUsize>,
         legacy_interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     ) -> Self {
         VirtioInterruptLegacy {
+            gsi,
             interrupt_status,
             legacy_interrupt_source_group,
         }
@@ -852,6 +858,22 @@ impl VirtioInterruptLegacy {
 }
 
 impl VirtioInterrupt for VirtioInterruptLegacy {
+    #[cfg(target_arch = "aarch64")]
+    fn enable(&self) -> std::result::Result<(), std::io::Error> {
+        self.legacy_interrupt_source_group.enable().unwrap();
+        let config = LegacyIrqSourceConfig {
+            irqchip: 0,
+            pin: (self.gsi) as u32,
+        };
+        self.legacy_interrupt_source_group
+            .update(
+                0 as InterruptIndex,
+                InterruptSourceConfig::LegacyIrq(config),
+            )
+            .unwrap();
+        Ok(())
+    }
+
     fn trigger(&self, int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
         match int_type {
             VirtioInterruptType::Config => {

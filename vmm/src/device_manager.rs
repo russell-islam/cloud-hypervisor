@@ -911,7 +911,7 @@ pub struct DeviceManager {
 
     // Collection of legacy interrupt mappin data,
     // Each member is a tuple of (device_id, irq_number)
-    legacy_pci_irqs: Vec<(u32, u32)>,
+    pci_irqs: Vec<(u32, u32)>,
 
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
@@ -1060,7 +1060,7 @@ impl DeviceManager {
             seccomp_action,
             #[cfg(any(target_arch = "aarch64", feature = "acpi"))]
             numa_nodes,
-            legacy_pci_irqs: Vec::new(),
+            pci_irqs: Vec::new(),
             balloon: None,
             activate_evt: activate_evt
                 .try_clone()
@@ -1217,8 +1217,8 @@ impl DeviceManager {
         &self.id_to_dev_info
     }
 
-    pub fn get_legacy_pci_irqs(&self) -> &Vec<(u32, u32)> {
-        &self.legacy_pci_irqs
+    pub fn get_pci_irqs(&self) -> &Vec<(u32, u32)> {
+        &self.pci_irqs
     }
 
     #[allow(unused_variables)]
@@ -3442,13 +3442,13 @@ impl DeviceManager {
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
-        // Allocate an IRQ number for the case of using legacy interrupt.
-        let legacy_irq = self
+        // Allocate an GSI  number for the case of using legacy interrupt.
+        let gsi = self
             .address_manager
             .allocator
             .lock()
             .unwrap()
-            .allocate_irq()
+            .allocate_gsi()
             .unwrap();
 
         // Create the AccessPlatform trait from the implementation IommuMapping.
@@ -3514,8 +3514,7 @@ impl DeviceManager {
             msix_num,
             access_platform,
             &self.msi_interrupt_manager,
-            legacy_irq,
-            &self.legacy_interrupt_manager.as_ref().unwrap(),
+            gsi,
             pci_device_bdf.into(),
             self.activate_evt
                 .try_clone()
@@ -3529,8 +3528,7 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
-        self.legacy_pci_irqs
-            .push((pci_device_bdf.into(), legacy_irq));
+        self.pci_irqs.push((pci_device_bdf.into(), gsi));
         // This is important as this will set the BAR address if it exists,
         // which is mandatory on the restore path.
         if let Some(addr) = config_bar_addr {

@@ -59,6 +59,7 @@ impl Gic {
 
 impl InterruptController for Gic {
     fn enable(&self) -> Result<()> {
+        debug!("+++++ michael: gic: enable()");
         // Set irqfd for legacy interrupts
         self.interrupt_source_group
             .enable()
