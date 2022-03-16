@@ -3,7 +3,7 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use crate::device::BarReprogrammingParams;
-use crate::{MsixConfig, PciBdf, PciInterruptPin};
+use crate::{MsixConfig, PciInterruptPin};
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
