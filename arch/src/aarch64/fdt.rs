@@ -94,7 +94,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     gic_device: &dyn GicDevice,
     initrd: &Option<InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],
-    pci_irqs: Vec<(u32, u32, u32)>,
+    pci_irqs: Vec<(u32, u32)>,
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
@@ -538,7 +538,7 @@ fn create_pci_nodes(
     fdt: &mut FdtWriter,
     pci_device_info: &[PciSpaceInfo],
     virtio_iommu_bdf: Option<u32>,
-    pci_irqs: Vec<(u32, u32, u32)>,
+    pci_irqs: Vec<(u32, u32)>,
 ) -> FdtWriterResult<()> {
     // Add node for PCIe controller.
     // See Documentation/devicetree/bindings/pci/host-generic-pci.txt in the kernel
@@ -620,13 +620,13 @@ fn create_pci_nodes(
         // Legacy IRQs
         let mut interrupt_map: Vec<u32> = Vec::new();
         let mut interrupt_map_mask: Vec<u32> = Vec::new();
-        for (device_id, irq_num, irq_pin) in pci_irqs.iter() {
+        for (device_id, irq_num) in pci_irqs.iter() {
             // PCI_DEVICE(3)
             interrupt_map.push((*device_id) << 8);
             interrupt_map.push(0);
             interrupt_map.push(0);
-            // INT#(1)
-            interrupt_map.push(irq_pin + 1);
+            // Hardcode to INT#A
+            interrupt_map.push(1);
             // CONTROLLER(PHANDLE)
             interrupt_map.push(GIC_PHANDLE);
             interrupt_map.push(0);

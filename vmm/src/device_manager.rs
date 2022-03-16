@@ -910,8 +910,8 @@ pub struct DeviceManager {
     numa_nodes: NumaNodes,
 
     // Collection of legacy interrupt mappin data,
-    // Each member is a tuple of (device_id, irq_number, pin)
-    legacy_pci_irqs: Vec<(u32, u32, u32)>,
+    // Each member is a tuple of (device_id, irq_number)
+    legacy_pci_irqs: Vec<(u32, u32)>,
 
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
@@ -1217,7 +1217,7 @@ impl DeviceManager {
         &self.id_to_dev_info
     }
 
-    pub fn get_legacy_pci_irqs(&self) -> &Vec<(u32, u32, u32)> {
+    pub fn get_legacy_pci_irqs(&self) -> &Vec<(u32, u32)> {
         &self.legacy_pci_irqs
     }
 
@@ -3529,9 +3529,8 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::VirtioDevice)?;
 
-        let pin = virtio_pci_device.get_pin();
         self.legacy_pci_irqs
-            .push((pci_device_bdf.into(), legacy_irq, pin.to_mask()));
+            .push((pci_device_bdf.into(), legacy_irq));
         // This is important as this will set the BAR address if it exists,
         // which is mandatory on the restore path.
         if let Some(addr) = config_bar_addr {

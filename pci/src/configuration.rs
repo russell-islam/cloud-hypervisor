@@ -887,15 +887,6 @@ impl PciConfiguration {
 
         None
     }
-
-    pub fn suggested_interrupt_pin(pci_bdf: PciBdf) -> PciInterruptPin {
-        match pci_bdf.function() % 4 {
-            0 => PciInterruptPin::IntA,
-            1 => PciInterruptPin::IntB,
-            2 => PciInterruptPin::IntC,
-            _ => PciInterruptPin::IntD,
-        }
-    }
 }
 
 impl Pausable for PciConfiguration {}
