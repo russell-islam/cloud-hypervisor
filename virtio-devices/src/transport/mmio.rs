@@ -245,6 +245,7 @@ impl VirtioMmioDevice {
     }
 
     fn is_driver_ready(&self) -> bool {
+        info!("{} is_driver_ready: driver_status {}", self.id, self.driver_status);
         let ready_bits = DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK;
         self.driver_status == ready_bits && self.driver_status & DEVICE_FAILED == 0
     }
@@ -314,13 +315,14 @@ impl VirtioMmioDevice {
     }
 
     fn needs_activation(&self) -> bool {
+        info!("{} device_activated: {}", self.id, self.device_activated.load(Ordering::SeqCst));
         !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
     }
 }
 
 impl VirtioTransport for VirtioMmioDevice {
     fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
-        debug!("MMIO: ioeventfds");
+        //debug!("MMIO: ioeventfds id {}", self.id());
         let notify_base = base_addr + u64::from(NOTIFY_REG_OFFSET);
         self.queue_evts()
             .iter()
@@ -331,7 +333,7 @@ impl VirtioTransport for VirtioMmioDevice {
 
 impl BusDevice for VirtioMmioDevice {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        debug!("MMIO: read");
+        //debug!("MMIO: id {} read", self.id());
         match offset {
             0x00..=0xff if data.len() == 4 => {
                 let v = match offset {
@@ -365,8 +367,7 @@ impl BusDevice for VirtioMmioDevice {
                                 (0, !0 as u64)
                             } else {
                                 (
-                                    shm_regions.region_list[self.shm_region_select as usize].offset
-                                        + shm_regions.addr.0,
+                                    shm_regions.region_list[self.shm_region_select as usize].offset + shm_regions.addr.0,
                                     shm_regions.region_list[self.shm_region_select as usize].len,
                                 )
                             }
@@ -407,7 +408,7 @@ impl BusDevice for VirtioMmioDevice {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        debug!("MMIO: write");
+        //debug!("MMIO: write id {}", self.id());
         fn hi(v: &mut GuestAddress, x: u32) {
             *v = (*v & 0xffff_ffff) | (u64::from(x) << 32)
         }
@@ -442,7 +443,10 @@ impl BusDevice for VirtioMmioDevice {
                         self.interrupt_status
                             .fetch_and(!(v as usize), Ordering::SeqCst);
                     }
-                    0x70 => self.driver_status = v,
+                    0x70 =>{
+                       info!("{} MMIO WRITE 0x70 - {}", self.id, v);
+                       self.driver_status = v
+                   },
                     0x80 => self.with_queue_mut(|q| lo(&mut q.state.desc_table, v)),
                     0x84 => self.with_queue_mut(|q| hi(&mut q.state.desc_table, v)),
                     0x90 => self.with_queue_mut(|q| lo(&mut q.state.avail_ring, v)),

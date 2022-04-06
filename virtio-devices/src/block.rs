@@ -619,7 +619,7 @@ impl VirtioDevice for Block {
 
         self.common.epoll_threads = Some(epoll_threads);
         event!("virtio-device", "activated", "id", &self.id);
-
+        info!("{} MMIO virtio-device activated", self.id);
         Ok(())
     }
 

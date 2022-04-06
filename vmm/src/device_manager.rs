@@ -3647,7 +3647,7 @@ impl DeviceManager {
                 irq: irq_num as InterruptIndex,
             })
             .map_err(DeviceManagerError::CreateInterruptGroup)?;
-
+        info!("{} MMIO_irq_num: {}", id, irq_num);
         let mmio_device = virtio_devices::transport::VirtioMmioDevice::new(
             id.clone(),
             memory,
