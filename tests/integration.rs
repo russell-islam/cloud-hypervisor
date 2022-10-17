@@ -2583,10 +2583,13 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut child = GuestCommand::new(&guest)
+            .verbosity(VerbosityLevel::Debug)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--log-file", "./log.txt"])
+            .args(["-vvvv"])
             .default_disks()
             .default_net()
             .capture_output()

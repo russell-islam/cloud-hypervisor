@@ -101,7 +101,9 @@ pub use {
     kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
     kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::VcpuExit,
 };
+extern crate string_builder;
 
+use string_builder::Builder;
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
@@ -526,7 +528,12 @@ impl vm::Vm for KvmVm {
                 _ => panic!("IrqRoutingEntry type is wrong"),
             })
             .collect();
-
+        let mut b = Builder::default();
+        for ent in &entries {
+            b.append(ent.gsi.to_string());
+            b.append(", ");
+        }
+        debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
         // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.

@@ -4,7 +4,9 @@
 //
 
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
+extern crate string_builder;
 
+use string_builder::Builder;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::{Emulator, EmulatorCpuState};
 use crate::cpu;
@@ -1140,7 +1142,12 @@ impl vm::Vm for MshvVm {
                 _ => panic!("IrqRoutingEntry type is wrong"),
             })
             .collect();
-
+        let mut b = Builder::default();
+        for ent in &entries {
+            b.append(ent.gsi.to_string());
+            b.append(", ");
+        }
+        debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
         // SAFETY: msi_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.

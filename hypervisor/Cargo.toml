@@ -23,6 +23,7 @@ mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", branch = "main", optio
 serde = { version = "1.0.147", features = ["rc", "derive"] }
 serde_with = { version = "2.0.1", default-features = false, features = ["macros"] }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
+string-builder = "0.2.0"
 vm-memory = { version = "0.9.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.10.0", features = ["with-serde"] }
 
