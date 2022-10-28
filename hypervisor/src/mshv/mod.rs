@@ -805,12 +805,12 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
         let gpa = self.translate(gva)?;
-        debug!(
+        /*debug!(
             "mshv emulator: memory read {} bytes from [{:#x} -> {:#x}]",
             data.len(),
             gva,
             gpa
-        );
+        ); */
 
         if let Some(vm_ops) = &self.vcpu.vm_ops {
             if vm_ops.guest_mem_read(gpa, data).is_err() {
@@ -825,12 +825,12 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
         let gpa = self.translate(gva)?;
-        debug!(
+        /*debug!(
             "mshv emulator: memory write {} bytes at [{:#x} -> {:#x}]",
             data.len(),
             gva,
             gpa
-        );
+        );*/
 
         if let Some(vm_ops) = &self.vcpu.vm_ops {
             if vm_ops.guest_mem_write(gpa, data).is_err() {
@@ -861,8 +861,8 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             .get_sregs()
             .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
 
-        debug!("mshv emulator: Getting new CPU state");
-        debug!("mshv emulator: {:#x?}", regs);
+        //debug!("mshv emulator: Getting new CPU state");
+        //debug!("mshv emulator: {:#x?}", regs);
 
         Ok(EmulatorCpuState { regs, sregs })
     }
@@ -876,8 +876,8 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             )));
         }
 
-        debug!("mshv emulator: Setting new CPU state");
-        debug!("mshv emulator: {:#x?}", state.regs);
+        //debug!("mshv emulator: Setting new CPU state");
+        //debug!("mshv emulator: {:#x?}", state.regs);
 
         self.vcpu
             .set_regs(&state.regs)
@@ -953,7 +953,7 @@ impl vm::Vm for MshvVm {
     /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
     ///
     fn register_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
-        debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
+        //debug!("register_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
         self.fd
             .register_irqfd(fd, gsi)
@@ -965,7 +965,7 @@ impl vm::Vm for MshvVm {
     /// Unregisters an event that will, when signaled, trigger the `gsi` IRQ.
     ///
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> vm::Result<()> {
-        debug!("unregister_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
+        //debug!("unregister_irqfd fd {} gsi {}", fd.as_raw_fd(), gsi);
 
         self.fd
             .unregister_irqfd(fd, gsi)
@@ -1147,7 +1147,7 @@ impl vm::Vm for MshvVm {
             b.append(ent.gsi.to_string());
             b.append(", ");
         }
-        debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
+        //debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
         // SAFETY: msi_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.

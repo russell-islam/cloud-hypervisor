@@ -47,7 +47,7 @@ impl InterruptRoute {
                     format!("Failed registering irq_fd: {}", e),
                 )
             })?;
-            debug!("MUISLAM: register_irqfd: {}", self.gsi);
+            //debug!("MUISLAM: register_irqfd: {}", self.gsi);
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
         }
@@ -63,7 +63,7 @@ impl InterruptRoute {
                     format!("Failed unregistering irq_fd: {}", e),
                 )
             })?;
-            debug!("MUISLAM: unregister_irqfd: {}", self.gsi);
+            //debug!("MUISLAM: unregister_irqfd: {}", self.gsi);
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
         }
@@ -105,7 +105,7 @@ impl MsiInterruptGroup {
 
             entry_vec.push(entry.route);
         }
-        debug!("MUISLAM: set_gsi_routes: {:?}", entry_vec.len());
+        //debug!("MUISLAM: set_gsi_routes: {:?}", entry_vec.len());
         self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
@@ -179,12 +179,12 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             if masked {
                 route.disable(&self.vm)?;
             } else {
-                debug!("MUISLAM: route.enable(&self.vm)?; GSI: {:?}", route.gsi);
+                //debug!("MUISLAM: route.enable(&self.vm)?; GSI: {:?}", route.gsi);
                 route.enable(&self.vm)?;
             }
             let mut routes = self.gsi_msi_routes.lock().unwrap();
             routes.insert(route.gsi, entry);
-            debug!("MUISLAM: Setting GSI routes");
+            //debug!("MUISLAM: Setting GSI routes");
             return self.set_gsi_routes(&routes);
         }
 

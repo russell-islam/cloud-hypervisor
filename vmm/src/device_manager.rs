@@ -2998,6 +2998,7 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
+        debug!("MUISLAM: add_vfio_device");
         let vfio_name = if let Some(id) = &device_cfg.id {
             id.clone()
         } else {
@@ -3228,6 +3229,7 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
+        debug!("MUISLAM: add_vfio_user_device");
         let vfio_user_name = if let Some(id) = &device_cfg.id {
             id.clone()
         } else {
@@ -3354,6 +3356,7 @@ impl DeviceManager {
         pci_segment_id: u16,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> DeviceManagerResult<PciBdf> {
+        debug!("MUISLAM: add_virtio_pci_device");
         let id = format!("{}-{}", VIRTIO_PCI_DEVICE_NAME_PREFIX, virtio_device_id);
 
         // Add the new virtio-pci node to the device tree.
@@ -3552,7 +3555,9 @@ impl DeviceManager {
     }
 
     pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
+        debug!("MUISLAM: device_managers update_memory 1");
         for handle in self.virtio_devices.iter() {
+            debug!("MUISLAM: handle virtio_device add_memory_region");
             handle
                 .virtio_device
                 .lock()
@@ -3564,15 +3569,17 @@ impl DeviceManager {
                 if !handle.iommu {
                     let gpa = new_region.start_addr().0;
                     let size = new_region.len();
+                    debug!("MUISLAM: handle handle.iommu gpa: {:?}, size: {:?}", gpa, size);
                     dma_handler
                         .map(gpa, gpa, size)
                         .map_err(DeviceManagerError::VirtioDmaMap)?;
                 }
             }
         }
-
+        debug!("MUISLAM: device_managers update_memory 2");
         // Take care of updating the memory for VFIO PCI devices.
         if let Some(vfio_container) = &self.vfio_container {
+            debug!("MUISLAM: vfio_container");
             vfio_container
                 .vfio_dma_map(
                     new_region.start_addr().raw_value(),
@@ -3581,16 +3588,18 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
-
+        debug!("MUISLAM: device_managers update_memory 3");
         // Take care of updating the memory for vfio-user devices.
         {
             let device_tree = self.device_tree.lock().unwrap();
             for pci_device_node in device_tree.pci_devices() {
+                debug!("MUISLAM: vfio_user_pci_device 1");
                 if let PciDeviceHandle::VfioUser(vfio_user_pci_device) = pci_device_node
                     .pci_device_handle
                     .as_ref()
                     .ok_or(DeviceManagerError::MissingPciDevice)?
                 {
+                    debug!("MUISLAM: vfio_user_pci_device 2");
                     vfio_user_pci_device
                         .lock()
                         .unwrap()
@@ -3599,7 +3608,7 @@ impl DeviceManager {
                 }
             }
         }
-
+        debug!("MUISLAM: device_managers update_memory 4");
         Ok(())
     }
 

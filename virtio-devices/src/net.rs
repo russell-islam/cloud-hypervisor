@@ -229,9 +229,9 @@ impl NetEpollHandler {
             || !self.driver_awake
         {
             self.signal_used_queue(self.queue_index_base + 1)?;
-            debug!("Signalling TX queue");
+            //debug!("Signalling TX queue");
         } else {
-            debug!("Not signalling TX queue");
+            //debug!("Not signalling TX queue");
         }
         Ok(())
     }

@@ -533,7 +533,7 @@ impl vm::Vm for KvmVm {
             b.append(ent.gsi.to_string());
             b.append(", ");
         }
-        debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
+        //debug!("MUISLAM: set_gsi_routing: {:?}", b.string().unwrap());
         // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.

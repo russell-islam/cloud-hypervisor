@@ -136,7 +136,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_byte(&self, offset: u64) -> u8 {
-        debug!("read_common_config_byte: offset 0x{:x}", offset);
+        //debug!("read_common_config_byte: offset 0x{:x}", offset);
         // The driver is only allowed to do aligned, properly sized access.
         match offset {
             0x14 => self.driver_status,
@@ -149,7 +149,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn write_common_config_byte(&mut self, offset: u64, value: u8) {
-        debug!("write_common_config_byte: offset 0x{:x}", offset);
+        //debug!("write_common_config_byte: offset 0x{:x}", offset);
         match offset {
             0x14 => self.driver_status = value,
             _ => {
@@ -159,7 +159,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
-        debug!("read_common_config_word: offset 0x{:x}", offset);
+        //debug!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
             0x10 => self.msix_config.load(Ordering::Acquire),
             0x12 => queues.len() as u16, // num_queues
@@ -176,7 +176,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn write_common_config_word(&mut self, offset: u64, value: u16, queues: &mut [Queue]) {
-        debug!("write_common_config_word: offset 0x{:x}", offset);
+        //debug!("write_common_config_word: offset 0x{:x}", offset);
         match offset {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
@@ -213,7 +213,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_dword(&self, offset: u64, device: Arc<Mutex<dyn VirtioDevice>>) -> u32 {
-        debug!("read_common_config_dword: offset 0x{:x}", offset);
+        //debug!("read_common_config_dword: offset 0x{:x}", offset);
         match offset {
             0x00 => self.device_feature_select,
             0x04 => {
@@ -241,7 +241,7 @@ impl VirtioPciCommonConfig {
         queues: &mut [Queue],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
-        debug!("write_common_config_dword: offset 0x{:x}", offset);
+        //debug!("write_common_config_dword: offset 0x{:x}", offset);
 
         match offset {
             0x00 => self.device_feature_select = value,
@@ -271,12 +271,12 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_qword(&self, _offset: u64) -> u64 {
-        debug!("read_common_config_qword: offset 0x{:x}", _offset);
+        //debug!("read_common_config_qword: offset 0x{:x}", _offset);
         0 // Assume the guest has no reason to read write-only registers.
     }
 
     fn write_common_config_qword(&mut self, offset: u64, value: u64, queues: &mut [Queue]) {
-        debug!("write_common_config_qword: offset 0x{:x}", offset);
+        //debug!("write_common_config_qword: offset 0x{:x}", offset);
 
         let low = Some((value & 0xffff_ffff) as u32);
         let high = Some((value >> 32) as u32);

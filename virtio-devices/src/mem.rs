@@ -255,7 +255,7 @@ impl VirtioMemConfig {
         }
 
         self.requested_size = size;
-
+        debug!("MUISLAM: VirtioMemConfig resize ");
         Ok(())
     }
 
@@ -453,6 +453,7 @@ impl MemEpollHandler {
     }
 
     fn state_change_request(&mut self, addr: u64, nb_blocks: u16, plug: bool) -> u16 {
+        debug!("MUISLAM: State change request 1: addr: {:?}, nb_blocks: {:?}, plug: {:?}", addr, nb_blocks, plug);
         let mut config = self.config.lock().unwrap();
         let size: u64 = nb_blocks as u64 * config.block_size;
 
@@ -481,7 +482,7 @@ impl MemEpollHandler {
                 return VIRTIO_MEM_RESP_ERROR;
             }
         }
-
+        debug!("MUISLAM: State change request 2");
         self.blocks_state
             .lock()
             .unwrap()
@@ -489,6 +490,7 @@ impl MemEpollHandler {
 
         let handlers = self.dma_mapping_handlers.lock().unwrap();
         if plug {
+            debug!("MUISLAM: State change request 3");
             let mut gpa = addr;
             for _ in 0..nb_blocks {
                 for (_, handler) in handlers.iter() {
@@ -500,12 +502,13 @@ impl MemEpollHandler {
                         return VIRTIO_MEM_RESP_ERROR;
                     }
                 }
-
+                debug!("MUISLAM: State change request 3.5");
                 gpa += config.block_size;
             }
 
             config.plugged_size += size;
         } else {
+            debug!("MUISLAM: State change request 4");
             for (_, handler) in handlers.iter() {
                 if let Err(e) = handler.unmap(addr, size) {
                     error!(
@@ -518,7 +521,7 @@ impl MemEpollHandler {
 
             config.plugged_size -= size;
         }
-
+        debug!("MUISLAM: State change request 5");
         VIRTIO_MEM_RESP_ACK
     }
 
@@ -560,6 +563,7 @@ impl MemEpollHandler {
     }
 
     fn state_request(&self, addr: u64, nb_blocks: u16) -> (u16, u16) {
+        debug!("MUISLAM: state_request 1");
         let config = self.config.lock().unwrap();
         let size: u64 = nb_blocks as u64 * config.block_size;
 
@@ -578,6 +582,7 @@ impl MemEpollHandler {
                 .unwrap()
                 .is_range_state(first_block_index, nb_blocks, true)
             {
+                debug!("MUISLAM: state_request 2");
                 VIRTIO_MEM_STATE_PLUGGED
             } else if self.blocks_state.lock().unwrap().is_range_state(
                 first_block_index,
@@ -723,7 +728,7 @@ impl Mem {
         state: Option<MemState>,
     ) -> io::Result<Mem> {
         let region_len = region.len();
-
+        debug!("MUISLAM: new virtio-mem device with size: {:?}",region_len);
         if region_len != region_len / VIRTIO_MEM_ALIGN_SIZE * VIRTIO_MEM_ALIGN_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -814,12 +819,14 @@ impl Mem {
         })?;
 
         if let Some(interrupt_cb) = self.interrupt_cb.as_ref() {
+            debug!("MUISLAM: mem.rs resize triggering interrupt");
             interrupt_cb
                 .trigger(VirtioInterruptType::Config)
                 .map_err(|e| {
                     Error::ResizeError(anyhow!("Failed to signal the guest about resize: {:?}", e))
                 })
         } else {
+            debug!("MUISLAM: mem.rs resize else ok");
             Ok(())
         }
     }
