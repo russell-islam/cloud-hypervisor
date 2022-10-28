@@ -139,6 +139,7 @@ pub trait VirtioDevice: Send {
         &mut self,
         _region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), Error> {
+        debug!("MUISLAM: add_memory_region device.rs");
         Ok(())
     }
 

@@ -785,6 +785,7 @@ impl MemoryManager {
                     .collect();
 
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone() {
+                debug!("MUISLAM: VirtIO Mem: hotpluz size: {:?}", virtio_mem_zone.hotplugged_size);
                 regions.push((virtio_mem_zone.region().clone(), true));
             }
 
@@ -1672,7 +1673,9 @@ impl MemoryManager {
     pub fn virtio_mem_resize(&mut self, id: &str, size: u64) -> Result<(), Error> {
         if let Some(memory_zone) = self.memory_zones.get_mut(id) {
             if let Some(virtio_mem_zone) = &mut memory_zone.virtio_mem_zone {
+                debug!("MUISLAM: virtio_mem_resize 1");
                 if let Some(virtio_mem_device) = virtio_mem_zone.virtio_device.as_ref() {
+                    debug!("MUISLAM: virtio_mem_resize 2");
                     virtio_mem_device
                         .lock()
                         .unwrap()
@@ -1714,7 +1717,7 @@ impl MemoryManager {
                     if !self.dynamic {
                         return Ok(region);
                     }
-
+                    debug!("MUISLAM: match self.hotplug_method ");
                     self.virtio_mem_resize(DEFAULT_MEMORY_ZONE, desired_ram - self.boot_ram)?;
                     self.current_ram = desired_ram;
                 }

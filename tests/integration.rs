@@ -294,10 +294,12 @@ fn resize_command(
     }
 
     if let Some(desired_ram) = desired_ram {
+        println!("resize_command: desired_ram {:?}", desired_ram);
         cmd.arg(format!("--memory={}", desired_ram));
     }
 
     if let Some(desired_balloon) = desired_balloon {
+        println!("resize_command: desired_balloon {:?}", desired_balloon);
         cmd.arg(format!("--balloon={}", desired_balloon));
     }
 
@@ -4556,8 +4558,9 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            let mut total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 480_000);
 
             guest.enable_memory_hotplug();
 
@@ -4566,27 +4569,33 @@ mod common_parallel {
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 960_000);
 
             // Use balloon to remove RAM from the VM
             let desired_balloon = 512 << 20;
             resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory> 480_000);
+            assert!(total_memory < 960_000);
 
             guest.reboot_linux(0, None);
-
-            assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory < 960_000);
 
             // Use balloon add RAM to the VM
             let desired_balloon = 0;
             resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 960_000);
 
             guest.enable_memory_hotplug();
 
@@ -4595,16 +4604,19 @@ mod common_parallel {
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 1_920_000);
 
             // Remove RAM to the VM (only applies after reboot)
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             guest.reboot_linux(1, None);
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 960_000);
+            assert!(total_memory < 1_920_000);
         });
 
         let _ = child.kill();
@@ -4614,7 +4626,7 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
+    //#[cfg(not(feature = "mshv"))]
     fn test_virtio_mem() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -4639,8 +4651,9 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            let mut total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 480_000);
 
             guest.enable_memory_hotplug();
 
@@ -4649,35 +4662,44 @@ mod common_parallel {
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 960_000);
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 1_920_000);
 
             // Remove RAM from the VM
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 960_000);
+            assert!(total_memory < 1_920_000);
 
             guest.reboot_linux(0, None);
-
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
             // Check the amount of memory after reboot is 1GiB
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+            assert!(total_memory > 960_000);
+            assert!(total_memory < 1_920_000);
 
             // Check we can still resize to 512MiB
             let desired_ram = 512 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
             thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 480_000);
+            assert!(total_memory < 960_000);
         });
 
         let _ = child.kill();
@@ -5693,6 +5715,7 @@ mod common_parallel {
             .args(["--net", net_params.as_str()])
             .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--log-file", "./out_log.txt"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -5707,6 +5730,7 @@ mod common_parallel {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
+<<<<<<< HEAD
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             if use_hotplug {
                 // Increase guest RAM with virtio-mem
@@ -5732,6 +5756,36 @@ mod common_parallel {
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
             }
+=======
+            let mut total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!( total_memory > 3_840_000);
+            // Increase guest RAM with virtio-mem
+            resize_command(
+                &api_socket_source,
+                None,
+                Some(6 << 30),
+                None,
+                Some(&event_path),
+            );
+            thread::sleep(std::time::Duration::new(5, 0));
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory> 5_760_000);
+            // Use balloon to remove RAM from the VM
+            resize_command(
+                &api_socket_source,
+                None,
+                None,
+                Some(1 << 30),
+                Some(&event_path),
+            );
+            thread::sleep(std::time::Duration::new(5, 0));
+            total_memory = guest.get_total_memory().unwrap_or_default();
+            println!("Total Memory: {:?}", total_memory);
+            assert!(total_memory > 4_800_000);
+            assert!(total_memory < 5_760_000);
+>>>>>>> 5c223a06 (Debugging virtio-mem on MSHV)
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
 

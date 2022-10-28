@@ -1290,8 +1290,9 @@ impl Vm {
                 .map_err(Error::MemoryManager)?;
 
             let mut memory_config = &mut self.config.lock().unwrap().memory;
-
+            debug!("MUISLAM: vm.rs update_memory 1");
             if let Some(new_region) = &new_region {
+                debug!("MUISLAM: vm.rs update_memory 2");
                 self.device_manager
                     .lock()
                     .unwrap()

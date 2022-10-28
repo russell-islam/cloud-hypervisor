@@ -47,7 +47,6 @@ impl InterruptRoute {
                     format!("Failed registering irq_fd: {}", e),
                 )
             })?;
-
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
         }
@@ -63,7 +62,6 @@ impl InterruptRoute {
                     format!("Failed unregistering irq_fd: {}", e),
                 )
             })?;
-
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
         }
@@ -105,7 +103,6 @@ impl MsiInterruptGroup {
 
             entry_vec.push(entry.route);
         }
-
         self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,

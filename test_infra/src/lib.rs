@@ -665,6 +665,7 @@ pub fn ssh_command_ip_with_auth(
             let mut channel = sess
                 .channel_session()
                 .map_err(SshCommandError::ChannelSession)?;
+            println!("SSH Command: {:?}", command);
             channel.exec(command).map_err(SshCommandError::Command)?;
 
             // Intentionally ignore these results here as their failure
@@ -1220,10 +1221,10 @@ impl<'a> GuestCommand<'a> {
         match &self.verbosity {
             Warn => {}
             Info => {
-                self.command.arg("-v");
+                self.command.arg("-vvvv");
             }
             Debug => {
-                self.command.arg("-vv");
+                self.command.arg("-vvvv");
             }
         };
 

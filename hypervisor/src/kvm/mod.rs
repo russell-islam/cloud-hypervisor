@@ -526,7 +526,6 @@ impl vm::Vm for KvmVm {
                 _ => panic!("IrqRoutingEntry type is wrong"),
             })
             .collect();
-
         // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
         // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
         // everything from entries.

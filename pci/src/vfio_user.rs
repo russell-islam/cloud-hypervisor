@@ -245,7 +245,7 @@ impl VfioUserPciDevice {
             Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
             None => return Ok(()),
         };
-
+        debug!("MUISLAM: vfio_user: start: {:?}, Size: {:?}", region.start_addr().raw_value(), region.len());
         self.client
             .lock()
             .unwrap()
