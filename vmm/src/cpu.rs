@@ -85,6 +85,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 use zerocopy::AsBytes;
+use igvm_parser::snp::SEV_VMSA;
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
@@ -349,6 +350,7 @@ impl Vcpu {
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
+        #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -365,7 +367,7 @@ impl Vcpu {
             cpuid,
             kvm_hyperv,
             #[cfg(feature = "igvm")]
-            None,
+            vmsa,
         )
         .map_err(Error::VcpuConfiguration)?;
 
@@ -776,6 +778,7 @@ impl CpuManager {
         &self,
         vcpu: Arc<Mutex<Vcpu>>,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+        #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
@@ -783,7 +786,7 @@ impl CpuManager {
         assert!(!self.cpuid.is_empty());
 
         #[cfg(target_arch = "x86_64")]
-        vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv)?;
+        vcpu.configure(boot_setup, self.cpuid.clone(), self.config.kvm_hyperv, #[cfg(feature = "igvm")] vmsa)?;
 
         #[cfg(target_arch = "aarch64")]
         vcpu.configure(&self.vm, boot_setup)?;
@@ -1198,7 +1201,7 @@ impl CpuManager {
             cmp::Ordering::Greater => {
                 let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None)?
+                    self.configure_vcpu(vcpu, None, #[cfg(feature = "igvm")] None)?
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
