@@ -60,6 +60,7 @@ use bitmap::SimpleAtomicBitmap;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
+const ONE_GB: usize = 1024 * 1024 * 1024;
 
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
@@ -294,12 +295,19 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         let vm_fd = Arc::new(fd);
 
+        #[cfg(feature = "snp")]
+        let mem_size_for_bitmap = if _mem_size as usize >  3 * ONE_GB {
+            _mem_size as usize  + ONE_GB
+        } else {
+            _mem_size as usize
+        };
+
         Ok(Arc::new(MshvVm {
             fd: vm_fd,
             msrs,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
-            host_access_pages: SimpleAtomicBitmap::new_with_bytes(_mem_size as usize, HV_PAGE_SIZE as usize),
+            host_access_pages: SimpleAtomicBitmap::new_with_bytes(mem_size_for_bitmap, HV_PAGE_SIZE as usize),
         }))
     }
 
