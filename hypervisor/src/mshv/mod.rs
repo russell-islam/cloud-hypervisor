@@ -647,11 +647,35 @@ impl cpu::Vcpu for MshvVcpu {
                     let info = x.to_gpa_attribute_info().unwrap();
                     let vp_index = info.vp_index;
                     let host_vis = info.__bindgen_anon_1.host_visibility();
-                    info!("vp_index: {:?}, host_vis: {:?}", vp_index, host_vis);
+                    debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
+                    if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
+                        warn!("Ignored attribute intercept with full host vis");
+                        return Ok(cpu::VmExit::Ignore);
+                    }
+
+                    let num_ranges = info.__bindgen_anon_1.range_count();
+                    assert!(num_ranges >= 1);
+                    if num_ranges > 1 {
+                        warn!("Attribute intercept - expected only 1 gpa range!");
+                    }
+
+                    // TODO we could also deny the request with HvCallCompleteIntercept
+                    let mut gpa_list = Vec::new();
                     let ranges = info.ranges;
-                    let (gpa_start, gpa_count) = snp::parse_gpa_range(ranges[0]).unwrap();
-                    info!("gpa_start: {:?}, gpa_count: {:?}", gpa_start, gpa_count);
-                    self.host_access_pages.reset_bits_range((gpa_start >> PAGE_SHIFT) as usize, gpa_count as usize);
+                    let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+                    self.host_access_pages.reset_bits_range(gfn_start as usize, gfn_count as usize);
+
+                    debug!("Releasing pages: gfn_start: {:x?}, gfn_count: {:?}", gfn_start, gfn_count);
+                    let gpa_start = gfn_start * HV_PAGE_SIZE;
+                    for i in 0..gfn_count {
+                        gpa_list.push(gpa_start + i * HV_PAGE_SIZE);
+                    }
+                    if _modify_gpa_host_access(self.vm_fd.clone(), host_vis, 0, 0, gpa_list.as_slice()).is_err() {
+                        error!("Failed to release range: gfn_start: {:x?}, gfn_count: {:?}", gfn_start, gfn_count);
+                        return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access"
+                        )))
+                    }
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(feature = "snp")]
