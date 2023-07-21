@@ -307,7 +307,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             msrs,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
-            host_access_pages: SimpleAtomicBitmap::new_with_bytes(mem_size_for_bitmap, HV_PAGE_SIZE as usize),
+            host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(_mem_size as usize, HV_PAGE_SIZE as usize)),
         }))
     }
 
@@ -349,6 +349,8 @@ pub struct MshvVcpu {
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "snp")]
+    host_access_pages: Arc<SimpleAtomicBitmap>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -645,25 +647,36 @@ impl cpu::Vcpu for MshvVcpu {
                     let info = x.to_gpa_attribute_info().unwrap();
                     let vp_index = info.vp_index;
                     let host_vis = info.__bindgen_anon_1.host_visibility();
-                    info!("vp_index: {:?}, host_vis: {:?}", vp_index, host_vis);
-                    let ranges = info.ranges;
-                    let (gpa_start, gpa_count) = snp::parse_gpa_range(ranges[0]).unwrap();
-                    info!("gpa_start: {:?}, gpa_count: {:?}", gpa_start, gpa_count);
-                    /*
-                    let mut gpa_list = Vec::new();
-                    for i in 0..gpa_count {
-                        let gpa = guest_memory
-                            .clone()
-                            .memory()
-                            .get_host_address(GuestAddress(gpa_start + i * HV_PAGE_SIZE))
-                            .unwrap() as u64;
-                        self.vm_fd.remove_gpa_from_host_acess_cache(gpa);
-                        gpa_list.push(gpa);
+                    debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
+                    if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
+                        warn!("Ignored attribute intercept with full host vis");
+                        return Ok(cpu::VmExit::Ignore);
                     }
-                    Ok(cpu::VmExit::Ignore) */
-                    Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                        "Unhandled VCPU exit: Attribute Intercept"
-                    )))
+
+                    let num_ranges = info.__bindgen_anon_1.range_count();
+                    assert!(num_ranges >= 1);
+                    if num_ranges > 1 {
+                        warn!("Attribute intercept - expected only 1 gpa range!");
+                    }
+
+                    // TODO we could also deny the request with HvCallCompleteIntercept
+                    let mut gpa_list = Vec::new();
+                    let ranges = info.ranges;
+                    let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+                    self.host_access_pages.reset_bits_range(gfn_start as usize, gfn_count as usize);
+
+                    debug!("Releasing pages: gfn_start: {:x?}, gfn_count: {:?}", gfn_start, gfn_count);
+                    let gpa_start = gfn_start * HV_PAGE_SIZE;
+                    for i in 0..gfn_count {
+                        gpa_list.push(gpa_start + i * HV_PAGE_SIZE);
+                    }
+                    if _modify_gpa_host_access(self.vm_fd.clone(), host_vis, 0, 0, gpa_list.as_slice()).is_err() {
+                        error!("Failed to release range: gfn_start: {:x?}, gfn_count: {:?}", gfn_start, gfn_count);
+                        return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access"
+                        )))
+                    }
+                    Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(feature = "snp")]
                 hv_message_type_HVMSG_X64_SEV_VMG_EXIT_INTERCEPT => {
@@ -1410,7 +1423,7 @@ pub struct MshvVm {
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "snp")]
-    host_access_pages: SimpleAtomicBitmap,
+    host_access_pages: Arc<SimpleAtomicBitmap>,
 }
 
 impl MshvVm {
@@ -1504,6 +1517,8 @@ impl vm::Vm for MshvVm {
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "snp")]
+            host_access_pages: self.host_access_pages.clone(),
         };
         Ok(Arc::new(vcpu))
     }
