@@ -133,6 +133,8 @@ where
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
+                #[cfg(feature = "snp")]
+                self.vm.clone(),
             ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
@@ -175,6 +177,8 @@ where
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
+                #[cfg(feature = "snp")]
+                self.vm.clone(),
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
