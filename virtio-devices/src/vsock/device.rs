@@ -169,8 +169,6 @@ where
     /// the backend for processing.
     ///
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
-        println!("-------------------------vsock: epoll_handler::process_tx()");
-
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
