@@ -99,6 +99,8 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
+    #[cfg(feature = "snp")]
+    pub vm: Arc<dyn hypervisor::Vm>,
 }
 
 impl<B> VsockEpollHandler<B>
@@ -321,6 +323,8 @@ pub struct Vsock<B: VsockBackend> {
     path: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    #[cfg(feature = "snp")]
+    vm: Arc<dyn hypervisor::Vm>,
 }
 
 #[derive(Versionize)]
@@ -347,6 +351,8 @@ where
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<VsockState>,
+        #[cfg(feature = "snp")]
+        vm: Arc<dyn hypervisor::Vm>,
     ) -> io::Result<Vsock<B>> {
         let (avail_features, acked_features, paused) = if let Some(state) = state {
             info!("Restoring virtio-vsock {}", id);
@@ -377,6 +383,8 @@ where
             path,
             seccomp_action,
             exit_evt,
+            #[cfg(feature = "snp")]
+            vm,
         })
     }
 
@@ -461,6 +469,8 @@ where
             interrupt_cb,
             backend: self.backend.clone(),
             access_platform: self.common.access_platform.clone(),
+            #[cfg(feature = "snp")]
+            vm: self.vm.clone(),
         };
 
         let paused = self.common.paused.clone();
