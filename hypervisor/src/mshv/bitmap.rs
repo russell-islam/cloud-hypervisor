@@ -30,7 +30,9 @@ impl AtomicBitmapOps for AtomicU64 {
         self.fetch_and(!(1 << index), Ordering::SeqCst);
     }
     fn load_bit(&self, index: usize, order: Ordering) -> bool {
-        assert!(index < self.bit_size());
+        if index >= self.bit_size() {
+            panic!("Index: {:?} is greater than size: {:?}", index, self.bit_size());
+        }
         1 == 1 & (self.load(order) >> index)
     }
     fn capacity() -> usize {
@@ -68,7 +70,9 @@ impl SimpleAtomicBitmap {
         SimpleAtomicBitmap::new(num_pages)
     }
     pub fn is_bit_set(&self, index: usize) -> bool {
-        assert!(index < self.size);
+        if index >= self.size {
+            panic!("Index: {:?} is greater than size: {:?}", index, self.size);
+        }
         self.map[index >> 6].get_bit(index & INDEX_MASK )
     }
 
@@ -98,11 +102,15 @@ impl SimpleAtomicBitmap {
         }
     }
     pub fn set_bit(&self, index: usize) {
-        assert!(index < self.size);
+        if index >= self.size {
+            panic!("Index: {:?} is greater than size: {:?}", index, self.size);
+        }
         self.map[index >> 6].set_bit(index & INDEX_MASK)
     }
     pub fn reset_bit(&self, index: usize) {
-        assert!(index < self.size);
+        if index >= self.size {
+            panic!("Index: {:?} is greater than size: {:?}", index, self.size);
+        }
         self.map[index >> 6].reset_bit(index & INDEX_MASK)
     }
 
