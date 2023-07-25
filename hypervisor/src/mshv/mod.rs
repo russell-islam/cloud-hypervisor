@@ -303,7 +303,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         let vm_fd = Arc::new(fd);
 
         #[cfg(feature = "snp")]
-        let mem_size_for_bitmap = if _mem_size as usize >  3 * ONE_GB {
+        let mem_size_for_bitmap = if _mem_size as usize > 3 * ONE_GB {
             _mem_size as usize  + ONE_GB
         } else {
             _mem_size as usize
@@ -314,7 +314,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             msrs,
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
-            host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(_mem_size as usize, HV_PAGE_SIZE as usize)),
+            host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(mem_size_for_bitmap as usize, HV_PAGE_SIZE as usize)),
         }))
     }
 
