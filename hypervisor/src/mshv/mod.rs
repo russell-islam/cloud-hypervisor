@@ -265,10 +265,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
+        let mut snp_enabled = false;
         match vm_type {
             1 /* SEV-SNP VM */ => {
                 let snp_policy = snp::get_default_snp_guest_policy();
+                snp_enabled = true;
                 let offloaded_features = snp::get_default_vmgexit_offload_features();
                 unsafe {
                     debug!("Setting the partition isolation policy as: 0x{:x}", snp_policy.as_uint64);
@@ -315,6 +316,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
             host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(mem_size_for_bitmap as usize, HV_PAGE_SIZE as usize)),
+            snp_enabled,
         }))
     }
 
@@ -1431,6 +1433,7 @@ pub struct MshvVm {
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "snp")]
     host_access_pages: Arc<SimpleAtomicBitmap>,
+    snp_enabled: bool,
 }
 
 impl MshvVm {
@@ -1543,8 +1546,7 @@ impl vm::Vm for MshvVm {
         addr: &IoEventAddress,
         datamatch: Option<DataMatch>,
     ) -> vm::Result<()> {
-        #[cfg(not(feature = "snp"))]
-        {
+        if !self.snp_enabled {
             let addr = &mshv_ioctls::IoEventAddress::from(*addr);
             debug!(
                 "register_ioevent fd {} addr {:x?} datamatch {:?}",
@@ -1568,16 +1570,13 @@ impl vm::Vm for MshvVm {
                     .register_ioevent(fd, addr, NoDatamatch)
                     .map_err(|e| vm::HypervisorVmError::RegisterIoEvent(e.into()))
             }
-        }
-        #[cfg(feature = "snp")]
-        {
+        } else {
             Ok(()) 
         }
     }
     /// Unregister an event from a certain address it has been previously registered to.
     fn unregister_ioevent(&self, fd: &EventFd, addr: &IoEventAddress) -> vm::Result<()> {
-        #[cfg(not(feature = "snp"))]
-        {
+        if !self.snp_enabled {
             
             let addr = &mshv_ioctls::IoEventAddress::from(*addr);
             debug!("unregister_ioevent fd {} addr {:x?}", fd.as_raw_fd(), addr);
@@ -1585,9 +1584,7 @@ impl vm::Vm for MshvVm {
             self.fd
                 .unregister_ioevent(fd, addr, NoDatamatch)
                 .map_err(|e| vm::HypervisorVmError::UnregisterIoEvent(e.into())) 
-        }
-        #[cfg(feature = "snp")]
-        {
+        } else {
             Ok(()) 
         }
     }
@@ -1834,7 +1831,10 @@ impl vm::Vm for MshvVm {
         &self,
         gpa: u64,
         size: u32,
-    ) -> vm::Result<()>{
+    ) -> vm::Result<()> {
+        if !self.snp_enabled {
+            return Ok(());
+        }
         let mut gpa_list = Vec::new();
         let mut _pfn = (gpa >> PAGE_SHIFT) as usize;
 

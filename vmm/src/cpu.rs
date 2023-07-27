@@ -478,6 +478,7 @@ pub struct CpuManager {
     proximity_domain_per_cpu: BTreeMap<u8, u32>,
     affinity: BTreeMap<u8, Vec<u8>>,
     dynamic: bool,
+    snp_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -624,6 +625,7 @@ impl CpuManager {
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
+        snp_enabled: bool
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded);
@@ -713,6 +715,7 @@ impl CpuManager {
             proximity_domain_per_cpu,
             affinity,
             dynamic,
+            snp_enabled,
         })))
     }
 
@@ -796,20 +799,22 @@ impl CpuManager {
         let mut vcpu = vcpu.lock().unwrap();
 
         #[cfg(feature = "snp")]
-        vcpu.set_sev_control_register(vmsa_pfn)?;
+        if self.snp_enabled {
+            vcpu.set_sev_control_register(vmsa_pfn)?;
+        }
 
-        // #[cfg(target_arch = "x86_64")]
-        // assert!(!self.cpuid.is_empty());
+        #[cfg(target_arch = "x86_64")]
+        if !self.snp_enabled {
+            assert!(!self.cpuid.is_empty());
 
-        // #[cfg(target_arch = "x86_64")]
-        // vcpu.configure(
-        //     boot_setup,
-        //     self.cpuid.clone(),
-        //     self.config.kvm_hyperv,
-        //     #[cfg(feature = "igvm")]
-        //     vmsa,
-        // )?;
-
+            vcpu.configure(
+                boot_setup,
+                self.cpuid.clone(),
+                self.config.kvm_hyperv,
+                #[cfg(feature = "igvm")]
+                vmsa,
+            )?;
+        }
         #[cfg(target_arch = "aarch64")]
         vcpu.configure(&self.vm, boot_setup)?;
 
@@ -1209,11 +1214,12 @@ impl CpuManager {
 
         let ret = self.create_vcpus(self.boot_vcpus(), snapshot);
 
-        #[cfg(feature = "snp")]
-        self.vm
-            .snp_init()
-            .map_err(|e| Error::InitializeSnp(e.into()))?;
-
+        #[cfg(feature = "snp")] 
+        if self.snp_enabled {
+            self.vm
+                .snp_init()
+                .map_err(|e| Error::InitializeSnp(e.into()))?;
+        }
         ret
     }
 
