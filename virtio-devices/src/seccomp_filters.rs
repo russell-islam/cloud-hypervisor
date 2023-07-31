@@ -54,11 +54,24 @@ const FIONBIO: u64 = 0x5421;
 const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 
+#[cfg(feature = "mshv")]
+pub const MSHV_MODIFY_GPA_HOST_ACCESS: u64 = 0x4018_b828;
+
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
+}
+
+#[cfg(feature = "mshv")]
+fn virtio_mshv_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![(libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule())]
+}
+
+#[cfg(feature = "mshv")]
+fn create_mshv_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![Cond::new(1, ArgLen::Dword, Eq, MSHV_MODIFY_GPA_HOST_ACCESS).unwrap()]]
 }
 
 fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
@@ -240,6 +253,8 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
     rules.append(&mut virtio_thread_common());
+    #[cfg(feature = "mshv")]
+    rules.append(&mut virtio_mshv_thread_rules());
     rules
 }
 
