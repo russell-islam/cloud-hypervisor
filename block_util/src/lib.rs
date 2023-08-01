@@ -209,6 +209,7 @@ impl Request {
     pub fn parse(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
+        #[cfg(feature = "snp")]
         vm: Option<&Arc<dyn hypervisor::Vm>>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
@@ -226,7 +227,7 @@ impl Request {
 
         let hdr_desc_addr = hdr_desc
             .addr()
-            .translate_gva_with_vmfd(access_platform, hdr_desc.len() as usize, vm);
+            .translate_gva_with_vmfd(access_platform, hdr_desc.len() as usize, #[cfg(feature = "snp")] vm);
 
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
@@ -269,7 +270,7 @@ impl Request {
 
                 req.data_descriptors.push((
                     desc.addr()
-                        .translate_gva_with_vmfd(access_platform, desc.len() as usize, vm),
+                        .translate_gva_with_vmfd(access_platform, desc.len() as usize, #[cfg(feature = "snp")] vm),
                     desc.len(),
                 ));
                 desc = desc_chain
@@ -294,7 +295,7 @@ impl Request {
 
         req.status_addr = status_desc
             .addr()
-            .translate_gva_with_vmfd(access_platform, status_desc.len() as usize, vm);
+            .translate_gva_with_vmfd(access_platform, status_desc.len() as usize, #[cfg(feature = "snp")]vm);
 
         Ok(req)
     }
@@ -355,6 +356,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         disk_id: &[u8],
         user_data: u64,
+        #[cfg(feature = "snp")] 
         vm: Option<&Arc<dyn hypervisor::Vm>>,
     ) -> result::Result<bool, ExecuteError> {
         let sector = self.sector;
@@ -364,7 +366,7 @@ impl Request {
         let mut iovecs: SmallVec<[libc::iovec; 1]> =
             SmallVec::with_capacity(self.data_descriptors.len());
         for (data_addr, data_len) in &self.data_descriptors {
-            data_addr.translate_gva_with_vmfd(None, *data_len as usize, vm);
+            data_addr.translate_gva_with_vmfd(None, *data_len as usize, #[cfg(feature = "snp")]vm);
             if *data_len == 0 {
                 continue;
             }
@@ -434,7 +436,7 @@ impl Request {
         match request_type {
             RequestType::In => {
                 for (data_addr, data_len) in &self.data_descriptors {
-                    data_addr.translate_gva_with_vmfd(None, *data_len as usize, vm);
+                    data_addr.translate_gva_with_vmfd(None, *data_len as usize, #[cfg(feature = "snp")]vm);
                     mem.get_slice(*data_addr, *data_len as usize)
                         .map_err(ExecuteError::GetHostAddress)?
                         .bitmap()

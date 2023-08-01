@@ -127,6 +127,7 @@ impl VirtioPciCommonConfig {
     pub fn new(
         state: VirtioPciCommonConfigState,
         access_platform: Option<Arc<dyn AccessPlatform>>,
+        #[cfg(feature = "snp")] 
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Self {
         VirtioPciCommonConfig {

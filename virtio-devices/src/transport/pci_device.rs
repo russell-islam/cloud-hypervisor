@@ -375,6 +375,7 @@ pub struct VirtioPciDevice {
 
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
+    #[cfg(feature = "snp")]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -394,6 +395,7 @@ impl VirtioPciDevice {
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
         snapshot: Option<Snapshot>,
+        #[cfg(feature = "snp")]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
@@ -506,7 +508,7 @@ impl VirtioPciDevice {
             })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
-            VirtioPciCommonConfig::new(common_config_state, access_platform, vm.clone())
+            VirtioPciCommonConfig::new(common_config_state, access_platform, #[cfg(feature = "snp")] vm.clone())
         } else {
             VirtioPciCommonConfig::new(
                 VirtioPciCommonConfigState {
@@ -519,6 +521,7 @@ impl VirtioPciDevice {
                     msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
                 },
                 access_platform,
+                #[cfg(feature = "snp")] 
                 vm.clone(),
             )
         };
@@ -539,7 +542,6 @@ impl VirtioPciDevice {
             for (i, queue) in queues.iter_mut().enumerate() {
                 queue.set_size(state.queues[i].size);
                 queue.set_ready(state.queues[i].ready);
-                info!("MUISLAM ------------------------- VirtioPciDevice {:0x} {:0x} {:0x} ---------------------", state.queues[i].desc_table,state.queues[i].avail_ring, state.queues[i].used_ring);
                 queue
                     .try_set_desc_table_address(GuestAddress(state.queues[i].desc_table))
                     .unwrap();
@@ -595,6 +597,7 @@ impl VirtioPciDevice {
             activate_evt,
             dma_handler,
             pending_activations,
+            #[cfg(feature = "snp")]
             vm,
         };
 
@@ -800,7 +803,7 @@ impl VirtioPciDevice {
 
             queues.push((
                 queue_index,
-                vm_virtio::clone_queue(queue, Some(&self.vm.clone())),
+                vm_virtio::clone_queue(queue, #[cfg(feature = "snp")] Some(&self.vm.clone())),
                 self.queue_evts[queue_index].try_clone().unwrap(),
             ));
         }

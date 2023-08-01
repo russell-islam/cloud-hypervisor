@@ -60,7 +60,7 @@ impl TxVirtio {
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
-                    .translate_gva_with_vmfd(access_platform, desc.len() as usize, vm);
+                    .translate_gva_with_vmfd(access_platform, desc.len() as usize, #[cfg(feature = "snp")]vm);
                 if !desc.is_write_only() && desc.len() > 0 {
                     let buf = desc_chain
                         .memory()
@@ -170,6 +170,7 @@ impl RxVirtio {
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
+        #[cfg(feature = "snp")]
         vm: Option<&Arc<dyn hypervisor::Vm>>,
     ) -> Result<bool, NetQueuePairError> {
         let mut exhausted_descs = true;
@@ -190,7 +191,7 @@ impl RxVirtio {
                 .memory()
                 .checked_offset(
                     desc.addr()
-                        .translate_gva_with_vmfd(access_platform, desc.len() as usize, vm),
+                        .translate_gva_with_vmfd(access_platform, desc.len() as usize, #[cfg(feature = "snp")]vm),
                     10,
                 )
                 .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
@@ -200,7 +201,7 @@ impl RxVirtio {
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
-                    .translate_gva_with_vmfd(access_platform, desc.len() as usize, vm);
+                    .translate_gva_with_vmfd(access_platform, desc.len() as usize, #[cfg(feature = "snp")]vm);
                 if desc.is_write_only() && desc.len() > 0 {
                     let buf = desc_chain
                         .memory()

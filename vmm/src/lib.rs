@@ -1230,7 +1230,11 @@ impl Vmm {
         })?;
 
         let phys_bits = vm::physical_bits(config.lock().unwrap().cpus.max_phys_bits);
-
+        let mut snp_enabled = false ;
+        #[cfg(feature= "snp")]
+        {
+            snp_enabled = config.lock().unwrap().is_snp_enabled();
+        }
         let memory_manager = MemoryManager::new(
             vm,
             &config.lock().unwrap().memory.clone(),
@@ -1242,7 +1246,7 @@ impl Vmm {
             existing_memory_files,
             #[cfg(target_arch = "x86_64")]
             None,
-            #[cfg(feature = "snp")] config.lock().unwrap().is_snp_enabled(),
+            snp_enabled,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(

@@ -780,6 +780,7 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
+        let mut snp_enabled  = false;
         #[cfg(feature = "snp")]
         let snp_enabled = if snapshot.is_some() {
             false
@@ -826,7 +827,7 @@ impl Vm {
                 None,
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc_config,
-                #[cfg(feature = "snp")] snp_enabled,
+                snp_enabled,
             )
             .map_err(Error::MemoryManager)?
         };

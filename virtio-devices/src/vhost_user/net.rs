@@ -234,6 +234,7 @@ impl Net {
             seccomp_action,
             exit_evt,
             iommu,
+            #[cfg(feature = "snp")] 
             vm,
         })
     }

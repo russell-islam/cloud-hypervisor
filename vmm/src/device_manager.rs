@@ -3595,6 +3595,7 @@ impl DeviceManager {
                 dma_handler,
                 self.pending_activations.clone(),
                 vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str()),
+                #[cfg(feature = "snp")] 
                 self.address_manager.vm.clone(),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,

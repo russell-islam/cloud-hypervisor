@@ -145,7 +145,7 @@ impl BlockEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref(), Some(&self.vm.clone()))
+            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref(), #[cfg(feature = "snp")]  Some(&self.vm.clone()))
                 .map_err(Error::RequestParsing)?;
 
             // For virtio spec compliance

@@ -6,8 +6,10 @@ edition = "2021"
 
 [features]
 default = []
+snp = []
 
 [dependencies]
+cfg-if = "1.0.0"
 hypervisor = { path = "../hypervisor" }
 log = "0.4.17"
 virtio-queue = "0.7.1"

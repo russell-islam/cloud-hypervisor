@@ -135,7 +135,7 @@ impl VsockPacket {
             hdr: get_host_address_range(
                 desc_chain.memory(),
                 head.addr()
-                    .translate_gva_with_vmfd(access_platform, head.len() as usize, Some(&vm.clone())),
+                    .translate_gva_with_vmfd(access_platform, head.len() as usize, #[cfg(feature = "snp")] Some(&vm.clone())),
                 VSOCK_PKT_HDR_SIZE,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -174,7 +174,7 @@ impl VsockPacket {
                 desc_chain.memory(),
                 buf_desc
                     .addr()
-                    .translate_gva_with_vmfd(access_platform, buf_desc.len() as usize, Some(&vm.clone())),
+                    .translate_gva_with_vmfd(access_platform, buf_desc.len() as usize, #[cfg(feature = "snp")]Some(&vm.clone())),
                 pkt.buf_size,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -222,7 +222,7 @@ impl VsockPacket {
             hdr: get_host_address_range(
                 desc_chain.memory(),
                 head.addr()
-                    .translate_gva_with_vmfd(access_platform, head.len() as usize, Some(&vm.clone())),
+                    .translate_gva_with_vmfd(access_platform, head.len() as usize, #[cfg(feature = "snp")]Some(&vm.clone())),
                 VSOCK_PKT_HDR_SIZE,
             )
             .ok_or(VsockError::GuestMemory)? as *mut u8,
@@ -231,7 +231,7 @@ impl VsockPacket {
                     desc_chain.memory(),
                     buf_desc
                         .addr()
-                        .translate_gva_with_vmfd(access_platform, buf_desc.len() as usize, Some(&vm.clone())),
+                        .translate_gva_with_vmfd(access_platform, buf_desc.len() as usize, #[cfg(feature = "snp")] Some(&vm.clone())),
                     buf_size,
                 )
                 .ok_or(VsockError::GuestMemory)? as *mut u8,

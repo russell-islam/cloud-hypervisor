@@ -229,7 +229,7 @@ impl NetEpollHandler {
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair.1, Some(&self.vm))
+            .process_tx(&self.mem.memory(), &mut self.queue_pair.1, #[cfg(feature = "snp")]  Some(&self.vm))
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -258,7 +258,7 @@ impl NetEpollHandler {
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair.0, Some(&self.vm))
+            .process_rx(&self.mem.memory(), &mut self.queue_pair.0, #[cfg(feature = "snp")]  Some(&self.vm))
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
