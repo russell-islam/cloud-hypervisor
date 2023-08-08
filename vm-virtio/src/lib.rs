@@ -105,7 +105,7 @@ pub trait AccessPlatform: Send + Sync + Debug {
 pub trait Translatable {
     fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self;
     fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self;
-    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(feature = "snp")] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self;
+    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(all(feature = "mshv", feature = "snp"))] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self;
 }
 
 impl Translatable for GuestAddress {
@@ -115,8 +115,8 @@ impl Translatable for GuestAddress {
     fn translate_gpa(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
         GuestAddress(self.0.translate_gpa(access_platform, len))
     }
-    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(feature = "snp")] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self {
-        GuestAddress(self.0.translate_gva_with_vmfd(access_platform, len, #[cfg(feature = "snp")] vm))
+    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(all(feature = "mshv", feature = "snp"))] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self {
+        GuestAddress(self.0.translate_gva_with_vmfd(access_platform, len, #[cfg(all(feature = "mshv", feature = "snp"))] vm))
     }
 }
 
@@ -136,9 +136,9 @@ impl Translatable for u64 {
             *self
         }
     }
-    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(feature = "snp")] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self {
+    fn translate_gva_with_vmfd(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize, #[cfg(all(feature = "mshv", feature = "snp"))] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Self {
         cfg_if::cfg_if! {
-            if #[cfg(feature = "snp")] {
+            if #[cfg(all(feature = "mshv", feature = "snp"))] {
                 if let Some(_vm) = vm {
                     _vm.gain_page_Access(*self, len  as u32).unwrap();
                 }
@@ -159,7 +159,7 @@ impl Translatable for u64 {
 }
 
 /// Helper for cloning a Queue since QueueState doesn't derive Clone
-pub fn clone_queue(queue: &Queue, #[cfg(feature = "snp")] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Queue {
+pub fn clone_queue(queue: &Queue, #[cfg(all(feature = "mshv", feature = "snp"))] vm: Option<&Arc<dyn hypervisor::Vm>>) -> Queue {
     let mut q = Queue::new(queue.max_size()).unwrap();
 
     q.set_next_avail(queue.next_avail());
@@ -172,11 +172,11 @@ pub fn clone_queue(queue: &Queue, #[cfg(feature = "snp")] vm: Option<&Arc<dyn hy
     let mut avail_a = GuestAddress(queue.avail_ring());
     let mut ring_a = GuestAddress(queue.used_ring());
 
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     if let Some(_vm) = vm {
-        desc_a = desc_a.translate_gva_with_vmfd(None, 8, #[cfg(feature = "snp")] vm);
-        avail_a = avail_a.translate_gva_with_vmfd(None, 8, #[cfg(feature = "snp")] vm);
-        ring_a = ring_a.translate_gva_with_vmfd(None, 8, #[cfg(feature = "snp")] vm);
+        desc_a = desc_a.translate_gva_with_vmfd(None, 8, vm);
+        avail_a = avail_a.translate_gva_with_vmfd(None, 8, vm);
+        ring_a = ring_a.translate_gva_with_vmfd(None, 8, vm);
     }
     q.try_set_desc_table_address(GuestAddress(queue.desc_table()))
         .unwrap();

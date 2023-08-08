@@ -7,6 +7,7 @@ build = "../build.rs"
 
 [features]
 default = []
+mshv = []
 snp = []
 
 [dependencies]

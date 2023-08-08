@@ -99,7 +99,7 @@ pub struct VsockEpollHandler<B: VsockBackend> {
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub backend: Arc<RwLock<B>>,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     pub vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -133,7 +133,7 @@ where
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 self.vm.clone(),
             ) {
                 Ok(mut pkt) => {
@@ -175,7 +175,7 @@ where
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
                 self.access_platform.as_ref(),
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 self.vm.clone(),
             ) {
                 Ok(pkt) => pkt,
@@ -325,7 +325,7 @@ pub struct Vsock<B: VsockBackend> {
     path: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -353,7 +353,7 @@ where
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<VsockState>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> io::Result<Vsock<B>> {
         let (avail_features, acked_features, paused) = if let Some(state) = state {
@@ -385,7 +385,7 @@ where
             path,
             seccomp_action,
             exit_evt,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         })
     }
@@ -471,7 +471,7 @@ where
             interrupt_cb,
             backend: self.backend.clone(),
             access_platform: self.common.access_platform.clone(),
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm: self.vm.clone(),
         };
 

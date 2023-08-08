@@ -134,7 +134,7 @@ struct BlockEpollHandler {
     rate_limiter: Option<RateLimiter>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -145,7 +145,7 @@ impl BlockEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref(), #[cfg(feature = "snp")]  Some(&self.vm.clone()))
+            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref(),  #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm.clone()))
                 .map_err(Error::RequestParsing)?;
 
             // For virtio spec compliance
@@ -209,7 +209,7 @@ impl BlockEpollHandler {
                     self.disk_image.as_mut(),
                     &self.disk_image_id,
                     desc_chain.head_index() as u64,
-                    #[cfg(feature = "snp")]
+                    #[cfg(all(feature = "mshv", feature = "snp"))]
                     Some(&self.vm.clone()),
                 )
                 .map_err(Error::RequestExecuting)?
@@ -492,7 +492,7 @@ pub struct Block {
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
     read_only: bool,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -522,7 +522,7 @@ impl Block {
         rate_limiter_config: Option<RateLimiterConfig>,
         exit_evt: EventFd,
         state: Option<BlockState>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
@@ -622,7 +622,7 @@ impl Block {
             rate_limiter_config,
             exit_evt,
             read_only,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         })
     }
@@ -761,7 +761,7 @@ impl VirtioDevice for Block {
                 rate_limiter,
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 vm: self.vm.clone(),
             };
 

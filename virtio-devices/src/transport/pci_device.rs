@@ -375,7 +375,7 @@ pub struct VirtioPciDevice {
 
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -395,7 +395,7 @@ impl VirtioPciDevice {
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
         snapshot: Option<Snapshot>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
@@ -508,7 +508,7 @@ impl VirtioPciDevice {
             })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
-            VirtioPciCommonConfig::new(common_config_state, access_platform, #[cfg(feature = "snp")] vm.clone())
+            VirtioPciCommonConfig::new(common_config_state, access_platform,  #[cfg(all(feature = "mshv", feature = "snp"))] vm.clone())
         } else {
             VirtioPciCommonConfig::new(
                 VirtioPciCommonConfigState {
@@ -521,7 +521,7 @@ impl VirtioPciDevice {
                     msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
                 },
                 access_platform,
-                #[cfg(feature = "snp")] 
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 vm.clone(),
             )
         };
@@ -597,7 +597,7 @@ impl VirtioPciDevice {
             activate_evt,
             dma_handler,
             pending_activations,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         };
 
@@ -803,7 +803,7 @@ impl VirtioPciDevice {
 
             queues.push((
                 queue_index,
-                vm_virtio::clone_queue(queue, #[cfg(feature = "snp")] Some(&self.vm.clone())),
+                vm_virtio::clone_queue(queue,  #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm.clone())),
                 self.queue_evts[queue_index].try_clone().unwrap(),
             ));
         }
@@ -1148,7 +1148,7 @@ impl PciDevice for VirtioPciDevice {
             {
                 //println!("fn write_bar 4");
                 // Handled with ioeventfds.
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 error!("Unexpected read to notification BAR: Base = 0x{:x} ,  offset = 0x{:x}", _base, o);
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
@@ -1203,7 +1203,7 @@ impl PciDevice for VirtioPciDevice {
             {
                 //println!("fn write_bar 2");
                 // Handled with ioeventfds.
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 for (_event, _addr) in self.ioeventfds(_base) {
                     if _addr == _base + offset {
                         _event.write(1).unwrap();
