@@ -140,7 +140,7 @@ impl Translatable for u64 {
         cfg_if::cfg_if! {
             if #[cfg(all(feature = "mshv", feature = "snp"))] {
                 if let Some(_vm) = vm {
-                    _vm.gain_page_Access(*self, len  as u32).unwrap();
+                    _vm.gain_page_access(*self, len  as u32).unwrap();
                 }
                 if let Some(access_platform) = access_platform {
                     access_platform.translate_gpa(*self, len as u64).unwrap()

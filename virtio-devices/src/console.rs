@@ -265,7 +265,7 @@ impl ConsoleEpollHandler {
     fn process_output_queue(&mut self) -> Result<bool, Error> {
         let trans_queue = &mut self.output_queue; //transmitq
         let mut used_descs = false;
-        //println!("console: process_output_queue: Start");
+
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             if let Some(out) = &mut self.out {

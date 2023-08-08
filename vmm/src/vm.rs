@@ -668,7 +668,6 @@ impl Vm {
             stop_on_boot,
             load_payload_handle,
             snp_enabled,
-
         })
     }
 
