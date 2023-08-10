@@ -63,7 +63,7 @@ pub struct Blk {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     iommu: bool,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -76,7 +76,7 @@ impl Blk {
         exit_evt: EventFd,
         iommu: bool,
         state: Option<State>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Blk> {
         let num_queues = vu_cfg.num_queues;
@@ -206,7 +206,7 @@ impl Blk {
             seccomp_action,
             exit_evt,
             iommu,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         })
     }
@@ -249,7 +249,7 @@ impl VirtioDevice for Blk {
 
     fn features(&self) -> u64 {
         let mut features = self.common.avail_features;
-        //#[cfg(feature = "snp")]
+
         features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
         if self.iommu {
             features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;

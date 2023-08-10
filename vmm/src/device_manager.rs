@@ -990,7 +990,7 @@ impl DeviceManager {
             } else {
                 1
             };
-        println!("DeviceManager: new num_pci_segments {:?}", num_pci_segments);
+
         let start_of_device_area = memory_manager.lock().unwrap().start_of_device_area().0;
         let end_of_device_area = memory_manager.lock().unwrap().end_of_device_area().0;
 
@@ -1282,7 +1282,6 @@ impl DeviceManager {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
         let iommu_device = if self.config.lock().unwrap().iommu {
-            println!("-----------------------------------------BUG");
             let (device, mapping) = virtio_devices::Iommu::new(
                 iommu_id.clone(),
                 self.seccomp_action.clone(),
@@ -3595,6 +3594,7 @@ impl DeviceManager {
                 dma_handler,
                 self.pending_activations.clone(),
                 vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str()),
+                #[cfg(all(feature = "mshv", feature = "snp"))] 
                 self.address_manager.vm.clone(),
             )
             .map_err(DeviceManagerError::VirtioDevice)?,

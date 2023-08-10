@@ -106,7 +106,7 @@ struct ConsoleEpollHandler {
     out: Option<Box<dyn Write + Send>>,
     write_out: Option<Arc<AtomicBool>>,
     file_event_registered: bool,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))] 
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -173,7 +173,7 @@ impl ConsoleEpollHandler {
         kill_evt: EventFd,
         pause_evt: EventFd,
         access_platform: Option<Arc<dyn AccessPlatform>>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Self {
         let out_file = endpoint.out_file();
@@ -209,7 +209,7 @@ impl ConsoleEpollHandler {
             out,
             write_out,
             file_event_registered: false,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         }
     }
@@ -238,7 +238,7 @@ impl ConsoleEpollHandler {
                 .write_slice(
                     &source_slice[..],
                     desc.addr()
-                        .translate_gva_with_vmfd(self.access_platform.as_ref(), desc.len() as usize, Some(&self.vm.clone())),
+                        .translate_gva_with_vmfd(self.access_platform.as_ref(), desc.len() as usize,  #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm.clone())),
                 )
                 .map_err(Error::GuestMemoryWrite)?;
 
@@ -265,7 +265,7 @@ impl ConsoleEpollHandler {
     fn process_output_queue(&mut self) -> Result<bool, Error> {
         let trans_queue = &mut self.output_queue; //transmitq
         let mut used_descs = false;
-        //println!("console: process_output_queue: Start");
+
         while let Some(mut desc_chain) = trans_queue.pop_descriptor_chain(self.mem.memory()) {
             let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
             if let Some(out) = &mut self.out {
@@ -273,7 +273,7 @@ impl ConsoleEpollHandler {
                     .memory()
                     .write_to(
                         desc.addr()
-                            .translate_gva_with_vmfd(self.access_platform.as_ref(), desc.len() as usize, Some(&self.vm.clone())),
+                            .translate_gva_with_vmfd(self.access_platform.as_ref(), desc.len() as usize,  #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm.clone())),
                         out,
                         desc.len() as usize,
                     )
@@ -591,7 +591,7 @@ pub struct Console {
     seccomp_action: SeccompAction,
     in_buffer: Arc<Mutex<VecDeque<u8>>>,
     exit_evt: EventFd,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -634,7 +634,7 @@ impl Console {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<ConsoleState>,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
         let (avail_features, acked_features, config, in_buffer, paused) = if let Some(state) = state
@@ -694,7 +694,7 @@ impl Console {
                 seccomp_action,
                 in_buffer: Arc::new(Mutex::new(in_buffer)),
                 exit_evt,
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 vm,
             },
             resizer,
@@ -784,7 +784,7 @@ impl VirtioDevice for Console {
             kill_evt,
             pause_evt,
             self.common.access_platform.clone(),
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             self.vm.clone(),
         );
 

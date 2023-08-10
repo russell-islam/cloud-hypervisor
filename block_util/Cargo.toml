@@ -6,6 +6,8 @@ edition = "2021"
 
 [features]
 default = []
+mshv = []
+snp = []
 
 [dependencies]
 hypervisor = { path = "../hypervisor" }

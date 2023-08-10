@@ -455,6 +455,7 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+    snp_enabled: bool,
 }
 
 impl Vm {
@@ -497,9 +498,15 @@ impl Vm {
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
         #[cfg(feature= "snp")]
-        let force_iommu = true;
+        let mut force_iommu = true;
         #[cfg(all(not(feature = "tdx"), not(feature = "snp")))]
         let force_iommu = false;
+        let mut snp_enabled = false ;
+        #[cfg(feature= "snp")]
+        {
+            snp_enabled = config.lock().unwrap().is_snp_enabled();
+            force_iommu = snp_enabled;
+        }
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -532,6 +539,7 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             &numa_nodes,
+            snp_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -659,6 +667,7 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             load_payload_handle,
+            snp_enabled,
         })
     }
 
@@ -770,6 +779,7 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
+        let mut snp_enabled  = false;
         #[cfg(feature = "snp")]
         let snp_enabled = if snapshot.is_some() {
             false
@@ -816,7 +826,7 @@ impl Vm {
                 None,
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc_config,
-                #[cfg(feature = "snp")] snp_enabled,
+                snp_enabled,
             )
             .map_err(Error::MemoryManager)?
         };
@@ -1077,7 +1087,12 @@ impl Vm {
         let igvm = &payload.igvm;
         #[cfg(feature = "snp")]
         let host_data = &payload.host_data;
-
+        #[cfg(feature = "igvm")] {
+            if kernel.is_some() && igvm.is_some() {
+                // Providing both Kernel and IGVM is wrong
+                panic!("Invalid playload: Either igvm or kernel should be provided");
+            }
+        }
         if firmware.is_some() {
             let firmware = File::open(firmware.as_ref().unwrap()).map_err(Error::FirmwareFile)?;
             return Self::load_kernel(firmware, None, memory_manager);
@@ -2070,17 +2085,34 @@ impl Vm {
         current_state.valid_transition(new_state)?;
 
         // Do earlier to parallelise with loading kernel
-        #[cfg(not(feature = "igvm"))]
         #[cfg(target_arch = "x86_64")]
-        let rsdp_addr = self.create_acpi_tables();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "snp")] { 
+                let rsdp_addr =  if self.snp_enabled {
+                    None
+                } else {
+                    self.create_acpi_tables()
+                };
+            } else {
+                let rsdp_addr =  self.create_acpi_tables();
+            }
+        }
 
         // Load kernel synchronously or if asynchronous then wait for load to
         // finish.
         let entry_point = self.entry_point()?;
-        #[cfg(feature = "igvm")]
-        let vmsa = entry_point.unwrap().vmsa;
         #[cfg(feature = "snp")]
-        let vmsa_pfn = entry_point.unwrap().vmsa_pfn;
+        let vmsa = if self.snp_enabled {
+            entry_point.unwrap().vmsa
+        } else {
+            None
+        };
+        #[cfg(feature = "snp")]
+        let vmsa_pfn = if self.snp_enabled { 
+            entry_point.unwrap().vmsa_pfn
+        } else {
+            0
+        };
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
@@ -2125,16 +2157,17 @@ impl Vm {
         #[cfg(target_arch = "aarch64")]
         let rsdp_addr = self.create_acpi_tables();
 
-        #[cfg(not(feature = "igvm"))]
-        // Configure shared state based on loaded kernel
-        entry_point
-            .map(|_| {
-                // Safe to unwrap rsdp_addr as we know it can't be None when
-                // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap())
-            })
-            .transpose()?;
 
+        if !self.snp_enabled {
+            // Configure shared state based on loaded kernel
+            entry_point
+                .map(|_| {
+                    // Safe to unwrap rsdp_addr as we know it can't be None when
+                    // the entry_point is Some.
+                    self.configure_system(rsdp_addr.unwrap())
+                })
+                .transpose()?;
+        }
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
             // With the HOB address extracted the vCPUs can have
@@ -2152,17 +2185,19 @@ impl Vm {
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
 
-        // #[cfg(target_arch = "x86_64")]
-        // // Note: For x86, always call this function before invoking start boot vcpus.
-        // // Otherwise guest would fail to boot because we haven't created the
-        // // userspace mappings to update the hypervisor about the memory mappings.
-        // // These mappings must be created before we start the vCPU threads for
-        // // the very first time.
-        // self.memory_manager
-        //     .lock()
-        //     .unwrap()
-        //     .allocate_address_space()
-        //     .map_err(Error::MemoryManager)?;
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        if !self.snp_enabled {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .allocate_address_space()
+                .map_err(Error::MemoryManager)?;
+        }
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         self.cpu_manager
             .lock()

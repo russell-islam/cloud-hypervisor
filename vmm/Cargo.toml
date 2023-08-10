@@ -8,9 +8,9 @@ edition = "2021"
 default = []
 guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
 kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
-mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "virtio-devices/mshv", "vm-device/mshv", "pci/mshv"]
+mshv = ["block_util/mshv", "hypervisor/mshv", "net_util/mshv", "vfio-ioctls/mshv", "vhost_user_block/mshv", "vhost_user_net/mshv", "vm-virtio/mshv", "virtio-devices/mshv", "vm-device/mshv", "pci/mshv"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
-snp = ["arch/snp", "hypervisor/snp","virtio-devices/snp", "net_util/snp"]
+snp = ["arch/snp", "block_util/snp", "hypervisor/snp","virtio-devices/snp", "vhost_user_block/snp", "vhost_user_net/snp", "vm-virtio/snp", "net_util/snp"]
 tracing = ["tracer/tracing"]
 igvm = ["hex", "igvm-parser", "arch/igvm", "mshv-bindings"]
 
@@ -50,7 +50,9 @@ versionize = "0.1.10"
 versionize_derive = "0.1.4"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
-vhdx = { path = "../vhdx" }
+vhdx = { path = "../vhdx"}
+vhost_user_block = {path = "../vhost_user_block", optional  = true}
+vhost_user_net = {path = "../vhost_user_net", optional  = true}
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.7.1"
 vm-allocator = { path = "../vm-allocator" }

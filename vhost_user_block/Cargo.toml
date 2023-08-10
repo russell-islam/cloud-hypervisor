@@ -5,6 +5,11 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 build = "../build.rs"
 
+[features]
+default = []
+mshv = []
+snp = []
+
 [dependencies]
 argh = "0.1.9"
 block_util = { path = "../block_util" }

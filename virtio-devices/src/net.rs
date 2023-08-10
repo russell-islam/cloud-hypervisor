@@ -63,7 +63,7 @@ pub struct NetCtrlEpollHandler {
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queue_index: u16,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     pub vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -107,7 +107,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                     ))
                 })?;
                 self.ctrl_q
-                    .process(mem.deref(), &mut self.queue, self.access_platform.as_ref(), #[cfg(feature = "snp")] Some(&self.vm.clone()))
+                    .process(mem.deref(), &mut self.queue, self.access_platform.as_ref(), #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm.clone()))
                     .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to process control queue: {:?}",
@@ -183,7 +183,7 @@ struct NetEpollHandler {
     // a restore as the vCPU thread isn't ready to handle the interrupt. This causes
     // issues when combined with VIRTIO_RING_F_EVENT_IDX interrupt suppression.
     driver_awake: bool,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -229,7 +229,7 @@ impl NetEpollHandler {
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair.1, Some(&self.vm))
+            .process_tx(&self.mem.memory(), &mut self.queue_pair.1,  #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm))
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -258,7 +258,7 @@ impl NetEpollHandler {
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
         if self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair.0, Some(&self.vm))
+            .process_rx(&self.mem.memory(), &mut self.queue_pair.0, #[cfg(all(feature = "mshv", feature = "snp"))] Some(&self.vm))
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
@@ -425,7 +425,7 @@ pub struct Net {
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
-    #[cfg(feature = "snp")]
+    #[cfg(all(feature = "mshv", feature = "snp"))] 
     vm: Arc<dyn hypervisor::Vm>,
 }
 
@@ -456,7 +456,7 @@ impl Net {
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Self> {
         assert!(!taps.is_empty());
@@ -550,7 +550,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         })
     }
@@ -576,7 +576,7 @@ impl Net {
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Self> {
         let taps = open_tap(
@@ -604,7 +604,7 @@ impl Net {
             offload_tso,
             offload_ufo,
             offload_csum,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         )
     }
@@ -624,7 +624,7 @@ impl Net {
         offload_tso: bool,
         offload_ufo: bool,
         offload_csum: bool,
-        #[cfg(feature = "snp")]
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Self> {
         let mut taps: Vec<Tap> = Vec::new();
@@ -661,7 +661,7 @@ impl Net {
             offload_tso,
             offload_ufo,
             offload_csum,
-            #[cfg(feature = "snp")]
+            #[cfg(all(feature = "mshv", feature = "snp"))]
             vm,
         )
     }
@@ -745,7 +745,7 @@ impl VirtioDevice for Net {
                 access_platform: self.common.access_platform.clone(),
                 queue_index: ctrl_queue_index as u16,
                 interrupt_cb: interrupt_cb.clone(),
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 vm: self.vm.clone(),
             };
 
@@ -830,7 +830,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 driver_awake: false,
-                #[cfg(feature = "snp")]
+                #[cfg(all(feature = "mshv", feature = "snp"))]
                 vm: self.vm.clone(),
             };
 

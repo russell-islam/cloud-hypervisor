@@ -395,7 +395,7 @@ pub trait Vm: Send + Sync + Any {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
-    fn gain_page_Access(
+    fn gain_page_access(
         &self,
         gpa: u64,
         size: u32,
