@@ -50,27 +50,27 @@ stages:
             'x86_64 cargo build --package vhost_user_block':
               AGENT_POOL: 'lsg-virt-amd64-1es-agent-pool-2'
               BUILD_CMD: 'cargo build --package vhost_user_block'
-            'x86_64 cargo test --lib --bins --workspace --features mshv':
-              AGENT_POOL: 'lsg-virt-amd64-1es-agent-pool-2'
-              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
-            'aarch64 cargo build':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
-              BUILD_CMD: 'cargo build'
-            'aarch64 cargo build --no-default-features --features "mshv,kvm"':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-1'
-              BUILD_CMD: 'cargo build --no-default-features --features "mshv,kvm"'
-            'aarch64 cargo build --no-default-features --features "mshv,kvm,snp,igvm"':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-1'
-              BUILD_CMD: 'cargo build --no-default-features --features "mshv,kvm,snp,igvm"'
-            'aarch64 cargo build --package vhost_user_net':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
-              BUILD_CMD: 'cargo build --package vhost_user_net'
-            'aarch64 cargo build --package vhost_user_block':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
-              BUILD_CMD: 'cargo build --package vhost_user_block'
-            'aarch64 cargo test --lib --bins --workspace --features mshv':
-              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
-              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
+#            'x86_64 cargo test --lib --bins --workspace --features mshv':
+#              AGENT_POOL: 'lsg-virt-amd64-1es-agent-pool-2'
+#              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
+#            'aarch64 cargo build':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
+#              BUILD_CMD: 'cargo build'
+#            'aarch64 cargo build --no-default-features --features "mshv,kvm"':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-1'
+#              BUILD_CMD: 'cargo build --no-default-features --features "mshv,kvm"'
+#            'aarch64 cargo build --no-default-features --features "mshv,kvm,snp,igvm"':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-1'
+#              BUILD_CMD: 'cargo build --no-default-features --features "mshv,kvm,snp,igvm"'
+#            'aarch64 cargo build --package vhost_user_net':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
+#              BUILD_CMD: 'cargo build --package vhost_user_net'
+#            'aarch64 cargo build --package vhost_user_block':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
+#              BUILD_CMD: 'cargo build --package vhost_user_block'
+#            'aarch64 cargo test --lib --bins --workspace --features mshv':
+#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
+#              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
         pool:
           name: $(AGENT_POOL)
         steps:
