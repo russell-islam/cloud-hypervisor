@@ -88,6 +88,10 @@ pub enum VirtioDeviceType {
  *	// Total length of the descriptor chain which was used (written to)
  *	__virtio32 len;
  * };
+* 
+ * Kernel header used for this reference: include/uapi/linux/virtio_ring.h
+ * Virtio Spec: https://docs.oasis-open.org/virtio/virtio/v1.2/csd01/virtio-v1.2-csd01.html
+ * 
  */
 #[cfg(all(feature = "mshv", feature = "snp"))]
 const VRING_DESC_ELEMENT_SIZE: usize = 16;
