@@ -1760,18 +1760,36 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(feature = "snp")]
-    fn complete_isolated_import(&self, snp_id_block: IgvmVhsSnpIdBlock, host_data: &[u8]) -> vm::Result<()> {
+    fn complete_isolated_import(&self, snp_id_block: IgvmVhsSnpIdBlock, host_data: &[u8], id_block_enabled: u8) -> vm::Result<()> {
+        let mut auth_info = hv_snp_id_auth_info {
+            id_key_algorithm: snp_id_block.id_key_algorithm,
+            auth_key_algorithm: snp_id_block.author_key_algorithm,
+            ..Default::default()
+        };
+
+        auth_info.id_block_signature[..72]
+            .copy_from_slice(snp_id_block.id_key_signature.r_comp.as_ref());
+        auth_info.id_block_signature[72..144]
+            .copy_from_slice(snp_id_block.id_key_signature.s_comp.as_ref());
+        auth_info.id_key[..4]
+            .copy_from_slice(snp_id_block.id_public_key.curve.to_le_bytes().as_ref());
+        auth_info.id_key[4..76].copy_from_slice(snp_id_block.id_public_key.qx.as_ref());
+        auth_info.id_key[76..148].copy_from_slice(snp_id_block.id_public_key.qy.as_ref());
+
         let data = mshv_complete_isolated_import {
             import_data: hv_partition_complete_isolated_import_data {
                 psp_parameters: hv_psp_launch_finish_data {
                     id_block: hv_snp_id_block {
-                        ..Default::default()
+                        launch_digest: snp_id_block.ld,
+                        family_id: snp_id_block.family_id,
+                        image_id: snp_id_block.image_id,
+                        version: snp_id_block.version,
+                        guest_svn: snp_id_block.guest_svn,
+                        policy: get_default_snp_guest_policy(),
                     },
-                    id_auth_info: hv_snp_id_auth_info {
-                        ..Default::default()
-                    },
+                    id_auth_info: auth_info,
                     host_data: host_data[0..32].try_into().unwrap(),
-                    id_block_enabled: 0,
+                    id_block_enabled,
                     author_key_enabled: 0,
                 },
             },
