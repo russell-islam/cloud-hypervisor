@@ -496,7 +496,7 @@ pub fn load_igvm(
                 *area = ParameterAreaState::Inserted;
                 gpas.push(GpaPages {
                     gpa: *gpa,
-                    page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
+                    page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
                     page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                 });
             }
