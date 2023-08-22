@@ -519,96 +519,20 @@ pub fn load_igvm(
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
 
-        debug!("Importing vmsa pages!");
-        memory_manager
-            .lock()
-            .unwrap()
-            .vm
-            .import_isolated_pages(
-                hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
-                hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                &gpas
-                    .iter()
-                    .filter(|x| {
-                        x.page_type == hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA as u32
-                    })
-                    .map(|x| x.gpa / 4096)
-                    .collect::<Vec<u64>>(),
-            )
-            .map_err(Error::ImportIsolatedPages)?;
+        gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
 
-        debug!("Importing normal pages!");
-        memory_manager
-            .lock()
-            .unwrap()
-            .vm
-            .import_isolated_pages(
-                hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
-                hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                &gpas
-                    .iter()
-                    .filter(|x| {
-                        x.page_type == hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL as u32
-                    })
-                    .map(|x| x.gpa / 4096)
-                    .collect::<Vec<u64>>(),
-            )
-            .map_err(Error::ImportIsolatedPages)?;
-
-        debug!("Importing zero pages!");
-        memory_manager
-            .lock()
-            .unwrap()
-            .vm
-            .import_isolated_pages(
-                hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_ZERO,
-                hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                &gpas
-                    .iter()
-                    .filter(|x| {
-                        x.page_type == hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_ZERO as u32
-                    })
-                    .map(|x| x.gpa / 4096)
-                    .collect::<Vec<u64>>(),
-            )
-            .map_err(Error::ImportIsolatedPages)?;
-
-        debug!("Importing cpuid pages!");
-        memory_manager
-            .lock()
-            .unwrap()
-            .vm
-            .import_isolated_pages(
-                hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
-                hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                &gpas
-                    .iter()
-                    .filter(|x| {
-                        x.page_type == hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID as u32
-                    })
-                    .map(|x| x.gpa / 4096)
-                    .collect::<Vec<u64>>(),
-            )
-            .map_err(Error::ImportIsolatedPages)?;
-
-        debug!("Importing secret pages!");
-
-        memory_manager
-            .lock()
-            .unwrap()
-            .vm
-            .import_isolated_pages(
-                hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
-                hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                &gpas
-                    .iter()
-                    .filter(|x| {
-                        x.page_type == hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS as u32
-                    })
-                    .map(|x| x.gpa / 4096)
-                    .collect::<Vec<u64>>(),
-            )
-            .map_err(Error::ImportIsolatedPages)?;
+        for gpa in gpas.iter() {
+            memory_manager
+                .lock()
+                .unwrap()
+                .vm
+                .import_isolated_pages(
+                    gpa.page_type,
+                    hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
+                    &vec![gpa.gpa / 4096],
+                )
+                .map_err(Error::ImportIsolatedPages)?;
+        }
 
         // Call Complete Isolated Import since we are done importing isolated pages
         memory_manager
