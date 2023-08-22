@@ -539,7 +539,7 @@ pub fn load_igvm(
             .lock()
             .unwrap()
             .vm
-            .complete_isolated_import(loaded_info.snp_id_block, &host_data_contents)
+            .complete_isolated_import(loaded_info.snp_id_block, &host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
     }
     debug!("Loaded info xcr0: {:0x}", loaded_info.vmsa.xcr0);

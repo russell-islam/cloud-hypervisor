@@ -395,23 +395,20 @@ pub trait Vm: Send + Sync + Any {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
-    fn gain_page_access(
-        &self,
-        gpa: u64,
-        size: u32,
-    ) -> Result<()> {
+    fn gain_page_access(&self, gpa: u64, size: u32) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
-    fn psp_issue_guest_request(
-        &self,
-        req_gpa: u64,
-        rsp_gpa: u64,
-    ) -> Result<()> {
+    fn psp_issue_guest_request(&self, req_gpa: u64, rsp_gpa: u64) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
-    fn complete_isolated_import(&self, snp_id_block: IgvmVhsSnpIdBlock, host_data: &[u8]) -> Result<()> {
+    fn complete_isolated_import(
+        &self,
+        snp_id_block: IgvmVhsSnpIdBlock,
+        host_data: &[u8],
+        id_block_enabled: u8,
+    ) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
