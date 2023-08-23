@@ -656,7 +656,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let info = x.to_gpa_attribute_info().unwrap();
                     let vp_index = info.vp_index;
                     let host_vis = info.__bindgen_anon_1.host_visibility();
-                    debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
+                    // debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
                     if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
                         warn!("Ignored attribute intercept with full host vis");
                         return Ok(cpu::VmExit::Ignore);
@@ -688,7 +688,7 @@ impl cpu::Vcpu for MshvVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(feature = "snp")]
-                hv_message_type_HVMSG_X64_SEV_VMG_EXIT_INTERCEPT => {
+                hv_message_type_HVMSG_X64_SEV_VMGEXIT_INTERCEPT => {
                     let info = x.to_vmg_intercept_info().unwrap();
                     let ghcb_data = (info.ghcb_msr >> GHCB_INFO_BIT_WIDTH) as u64;
                     let ghcb_msr = svm_ghcb_msr {
@@ -699,7 +699,7 @@ impl cpu::Vcpu for MshvVcpu {
                     // Don't understand the need for this check????
                     // assert!(info.__bindgen_anon_1.ghcb_page_valid() != 1);
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
-                    debug!("VMG Exit Intercept: op: {:0x}", op);
+                    // debug!("VMG Exit Intercept: op: {:0x}", op);
                     if op == GHCB_INFO_REGISTER_REQUEST as u64 {
 
 
