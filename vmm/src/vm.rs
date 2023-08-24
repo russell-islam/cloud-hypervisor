@@ -1107,6 +1107,8 @@ impl Vm {
                 #[cfg(feature = "snp")] {
                     if let Some(host_data_str) =  host_data {
                         return Self::load_igvm(igvm, memory_manager, cpu_manager, host_data_str);
+                    } else {
+                        return Self::load_igvm(igvm, memory_manager, cpu_manager, "");
                     }
                 }
                 #[cfg(not(feature = "snp"))]
