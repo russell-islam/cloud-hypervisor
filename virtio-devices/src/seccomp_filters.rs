@@ -60,18 +60,28 @@ pub const MSHV_MODIFY_GPA_HOST_ACCESS: u64 = 0x4018_b828;
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
-fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
-}
-
 #[cfg(feature = "mshv")]
-fn virtio_mshv_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![(libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule())]
+fn mshv_ioctl_seccomp_rule() -> SeccompRule {
+    and![Cond::new(
+        1,
+        ArgLen::Dword,
+        Eq,
+        MSHV_MODIFY_GPA_HOST_ACCESS
+    )
+    .unwrap()]
 }
 
 #[cfg(feature = "mshv")]
 fn create_mshv_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, MSHV_MODIFY_GPA_HOST_ACCESS).unwrap()]]
+    or![mshv_ioctl_seccomp_rule()]
+}
+
+fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()],
+        #[cfg(feature = "mshv")]
+        mshv_ioctl_seccomp_rule(),
+    ]
 }
 
 fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
@@ -109,6 +119,8 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule()),
     ]
 }
 
@@ -139,11 +151,17 @@ fn virtio_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_readv, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
         (libc::SYS_writev, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule()),
     ]
 }
 
 fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD).unwrap()],]
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD).unwrap()],
+        #[cfg(feature = "mshv")]
+        mshv_ioctl_seccomp_rule(),
+    ]
 }
 
 fn virtio_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -151,7 +169,9 @@ fn virtio_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 }
 
 fn virtio_pmem_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![(libc::SYS_fsync, vec![])]
+    vec![
+        (libc::SYS_fsync, vec![]),
+    ]
 }
 
 fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -159,6 +179,8 @@ fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule()),
     ]
 }
 
@@ -212,7 +234,11 @@ fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 }
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],]
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],
+        #[cfg(feature = "mshv")]
+        mshv_ioctl_seccomp_rule(),
+    ]
 }
 
 fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -231,6 +257,8 @@ fn virtio_watchdog_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
+        #[cfg(feature = "mshv")]
+        (libc::SYS_ioctl, create_mshv_ioctl_seccomp_rule()),
     ]
 }
 
@@ -253,8 +281,6 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
     };
     rules.append(&mut virtio_thread_common());
-    #[cfg(feature = "mshv")]
-    rules.append(&mut virtio_mshv_thread_rules());
     rules
 }
 
