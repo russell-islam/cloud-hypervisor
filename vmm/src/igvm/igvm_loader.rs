@@ -156,9 +156,11 @@ pub fn load_igvm(
     let mut host_data_contents = [0; 32];
     #[cfg(feature = "snp")]
     {
-        assert_eq!(64, host_data.len());
-        hex::decode_to_slice(host_data, &mut host_data_contents as &mut [u8])
-            .expect("Failed to decode host data");
+        if !host_data.is_empty() {
+            assert_eq!(64, host_data.len());
+            hex::decode_to_slice(host_data, &mut host_data_contents as &mut [u8])
+                .expect("Failed to decode host data");
+        }
     }
 
     let igvm_file = IgvmFile::new_from_binary(
