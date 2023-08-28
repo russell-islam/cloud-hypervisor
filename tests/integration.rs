@@ -21,6 +21,7 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::string::String;
@@ -176,6 +177,33 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path.push("Image");
 
     kernel_path
+}
+
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = match console {
+        Some(t) => t,
+        None => "hvc0",
+    };
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!("{}", format!("IGVM console should be hvc0 or ttyS0, got: {console_str}"));
+    }
+
+    // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+    // Please add directory as volume to docker container as /igvm_files
+    // Refer ./scripts/dev_cli.sh for this
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        let path = PathBuf::from(
+            igvm_filepath
+        );
+
+        path
+    } else {
+        panic!("{}", format!("IGVM File not found at path: {igvm_filepath}"));
+    }
 }
 
 fn edk2_path() -> PathBuf {
@@ -6785,6 +6813,37 @@ mod common_parallel {
 
         let _ = swtpm_child.kill();
         let _d_out = swtpm_child.wait_with_output().unwrap();
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "mshv", feature = "igvm", feature = "snp"))]
+    fn test_sev_snp_boot_without_host_data() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let cpu_count: u8 = 1;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", &format!("boot={cpu_count}")])
+            .args(["--memory", "size=512M"])
+            .args(["--igvm", direct_igvm_boot_path(Some("hvc0")).to_str().unwrap()])
+            .args(["--platform", "snp=on"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+        });
 
         let _ = child.kill();
         let output = child.wait_with_output().unwrap();
