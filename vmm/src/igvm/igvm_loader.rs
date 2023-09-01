@@ -531,7 +531,7 @@ pub fn load_igvm(
                 .import_isolated_pages(
                     gpa.page_type,
                     hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                    &vec![gpa.gpa / 4096],
+                    &[gpa.gpa >> 12],
                 )
                 .map_err(Error::ImportIsolatedPages)?;
         }
