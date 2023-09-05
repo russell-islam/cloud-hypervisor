@@ -215,13 +215,13 @@ impl Translatable for u64 {
                     _vm.gain_page_access(*self, len  as u32).unwrap();
                 }
                 if let Some(access_platform) = access_platform {
-                    access_platform.translate_gpa(*self, len as u64).unwrap()
+                    access_platform.translate_gva(*self, len as u64).unwrap()
                 } else {
                     *self
                 }
             } else {
                 if let Some(access_platform) = access_platform {
-                    access_platform.translate_gpa(*self, len as u64).unwrap()
+                    access_platform.translate_gva(*self, len as u64).unwrap()
                 } else {
                     *self
                 }
