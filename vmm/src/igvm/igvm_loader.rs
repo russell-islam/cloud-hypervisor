@@ -515,11 +515,21 @@ pub fn load_igvm(
 
     #[cfg(feature = "snp")]
     {
+        use std::time::Instant;
+
+        let now = Instant::now();
+
         memory_manager
             .lock()
             .unwrap()
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
+
+        let elapsed = now.elapsed();
+
+        info!("Time it took to allocate address space {:.2?}", elapsed);
+
+        let now = Instant::now();
 
         gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
 
@@ -536,6 +546,11 @@ pub fn load_igvm(
                 .map_err(Error::ImportIsolatedPages)?;
         }
 
+        let elapsed = now.elapsed();
+
+        info!("Time it took to for hashing pages {:.2?} and page_count {:?}", elapsed, gpas.len());
+
+        let now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
         memory_manager
             .lock()
@@ -543,6 +558,10 @@ pub fn load_igvm(
             .vm
             .complete_isolated_import(loaded_info.snp_id_block, &host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
+
+        let elapsed = now.elapsed();
+
+        info!("Time it took to for launch complete command  {:.2?}", elapsed);
     }
     debug!("Loaded info xcr0: {:0x}", loaded_info.vmsa.xcr0);
     Ok(loaded_info)
