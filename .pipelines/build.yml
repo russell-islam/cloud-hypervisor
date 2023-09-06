@@ -50,9 +50,6 @@ stages:
             'x86_64 cargo build --package vhost_user_block':
               AGENT_POOL: 'lsg-virt-amd64-1es-agent-pool-2'
               BUILD_CMD: 'cargo build --package vhost_user_block'
-#            'x86_64 cargo test --lib --bins --workspace --features mshv':
-#              AGENT_POOL: 'lsg-virt-amd64-1es-agent-pool-2'
-#              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
 #            'aarch64 cargo build':
 #              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
 #              BUILD_CMD: 'cargo build'
@@ -68,9 +65,6 @@ stages:
 #            'aarch64 cargo build --package vhost_user_block':
 #              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
 #              BUILD_CMD: 'cargo build --package vhost_user_block'
-#            'aarch64 cargo test --lib --bins --workspace --features mshv':
-#              AGENT_POOL: 'lsg-virt-aarch64-1es-agent-pool-2'
-#              BUILD_CMD: 'cargo test --lib --bins --workspace --features mshv'
         pool:
           name: $(AGENT_POOL)
         steps:
