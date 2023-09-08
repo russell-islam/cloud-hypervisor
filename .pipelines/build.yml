@@ -27,9 +27,9 @@ pr:
       - $(DEFAULT_BRANCH)
 
 stages:
-  - stage: CH_BUILD
+  - stage:
     jobs:
-      - job:
+      - job: CH_BUILD
 
         timeoutInMinutes: 30
 
@@ -84,9 +84,7 @@ stages:
             popd
           displayName: Build
 
-  - stage: CH_FMT_CLIPPY
-    jobs:
-      - job:
+      - job: CH_FMT
 
         timeoutInMinutes: 30
         pool:
