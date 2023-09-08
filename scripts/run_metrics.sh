@@ -82,7 +82,10 @@ if [ ${TEST_ARCH} == "aarch64" ]; then
 fi
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-build_custom_linux
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+if [ ! -f "$VMLINUX_IMAGE" ]; then
+    build_custom_linux
+fi
 
 BUILD_TARGET="${TEST_ARCH}-unknown-linux-${CH_LIBC}"
 CFLAGS=""
