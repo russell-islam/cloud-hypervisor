@@ -22,6 +22,10 @@ CLH_DOCKERFILE="${CLH_SCRIPTS_DIR}/../resources/Dockerfile"
 CLH_CTR_BUILD_DIR="/tmp/cloud-hypervisor/ctr-build"
 CLH_INTEGRATION_WORKLOADS="${HOME}/workloads"
 
+# Host paths for MS-IGVM and MS-VMLINUX
+MS_CLH_FILES_PATH="/usr/share/cloud-hypervisor/"
+MS_VMLINUX_PATH="${MS_CLH_FILES_PATH}/vmlinux.bin"
+
 # Container paths
 CTR_CLH_ROOT_DIR="/cloud-hypervisor"
 CTR_IGVM_PARSER_ROOT_DIR="/igvm-parser"
@@ -417,6 +421,14 @@ cmd_tests() {
     fi
 
     if [ "$integration" = true ]; then
+        if [ "$USE_MS_GUEST_KERNEL" = "YES" ]; then
+            if [ ! -f "$MS_VMLINUX_PATH" ]; then
+                echo "File not found: $MS_VMLINUX_PATH"
+                exit 1
+            fi
+            echo "Using MS VMLINUX"
+            cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+        fi
         say "Running integration tests for $target..."
         $DOCKER_RUNTIME run \
             --workdir "$CTR_CLH_ROOT_DIR" \
@@ -537,6 +549,14 @@ cmd_tests() {
     fi
 
     if [ "$metrics" = true ]; then
+        if [ "$USE_MS_GUEST_KERNEL" = "YES" ]; then
+            if [ ! -f "$MS_VMLINUX_PATH" ]; then
+                echo "File not found: $MS_VMLINUX_PATH"
+                exit 1
+            fi
+            echo "Using MS VMLINUX"
+            cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+        fi
         say "Generating performance metrics for $target..."
         $DOCKER_RUNTIME run \
             --workdir "$CTR_CLH_ROOT_DIR" \
