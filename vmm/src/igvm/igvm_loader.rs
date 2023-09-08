@@ -548,7 +548,11 @@ pub fn load_igvm(
 
         let elapsed = now.elapsed();
 
-        info!("Time it took to for hashing pages {:.2?} and page_count {:?}", elapsed, gpas.len());
+        info!(
+            "Time it took to for hashing pages {:.2?} and page_count {:?}",
+            elapsed,
+            gpas.len()
+        );
 
         let now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
@@ -561,7 +565,10 @@ pub fn load_igvm(
 
         let elapsed = now.elapsed();
 
-        info!("Time it took to for launch complete command  {:.2?}", elapsed);
+        info!(
+            "Time it took to for launch complete command  {:.2?}",
+            elapsed
+        );
     }
     debug!("Loaded info xcr0: {:0x}", loaded_info.vmsa.xcr0);
     Ok(loaded_info)
