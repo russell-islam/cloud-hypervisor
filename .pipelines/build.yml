@@ -27,7 +27,7 @@ pr:
       - $(DEFAULT_BRANCH)
 
 stages:
-  - stage: CLOUD_HYPERVISOR_BUILD
+  - stage: CH_BUILD
     jobs:
       - job:
 
@@ -83,3 +83,30 @@ stages:
             $(BUILD_CMD) --release
             popd
           displayName: Build
+
+  - stage: CH_FMT_CLIPPY
+    jobs:
+      - job:
+
+        timeoutInMinutes: 30
+        pool:
+          name: lsg-virt-amd64-1es-agent-pool-3
+
+        steps:
+        - checkout: self
+          persistCredentials: true
+        - checkout: igvm-parser
+          persistCredentials: true
+          fetchTags: false
+          clean: true
+        - template: templates/ubuntu-20.04-build.yml
+        - bash: |
+            set -e
+            set -x
+
+            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
+            cargo fmt -- --check
+            popd
+
+        - bash: test -z "$(git status --porcelain)"
+
