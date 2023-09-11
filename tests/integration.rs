@@ -34,7 +34,7 @@ use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
 use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
-const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+const MAX_NUM_PCI_SEGMENTS: u16 = 10;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
@@ -2484,7 +2484,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_pci_multiple_segments() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -2526,7 +2525,7 @@ mod common_parallel {
                 )
                 .as_str(),
                 "--disk",
-                format!("path={test_disk_path},pci_segment=15").as_str(),
+                format!("path={test_disk_path},pci_segment=6").as_str(),
             ])
             .capture_output()
             .default_net();
@@ -3187,13 +3186,13 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, true, Some(6))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        _test_virtio_fs(&prepare_virtiofsd, false, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, false, Some(6))
     }
 
     #[test]
@@ -5305,7 +5304,7 @@ mod common_parallel {
 
     #[test]
     fn test_pmem_multi_segment_hotplug() {
-        _test_pmem_hotplug(Some(15))
+        _test_pmem_hotplug(Some(6))
     }
 
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
@@ -5448,7 +5447,7 @@ mod common_parallel {
 
     #[test]
     fn test_net_multi_segment_hotplug() {
-        _test_net_hotplug(Some(15))
+        _test_net_hotplug(Some(6))
     }
 
     fn _test_net_hotplug(pci_segment: Option<u16>) {
