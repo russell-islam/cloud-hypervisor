@@ -123,6 +123,7 @@ pub struct AcpiTables<'a> {
     pub pptt: Option<&'a [u8]>,
 }
 
+#[derive(Copy, Clone)]
 struct GpaPages {
     pub gpa: u64,
     pub page_type: u32,
@@ -533,15 +534,34 @@ pub fn load_igvm(
 
         gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
 
-        for gpa in gpas.iter() {
+        let gpas_grouped = gpas
+            .iter()
+            .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
+                if let Some(last_vec) = acc.last_mut() {
+                    if last_vec[0].page_type == gpa.page_type {
+                        last_vec.push(*gpa);
+                        return acc;
+                    }
+                }
+                acc.push(vec![*gpa]);
+                acc
+            });
+
+        for group in gpas_grouped.iter() {
+            info!(
+                "Importing {} page{}",
+                group.len(),
+                if group.len() > 1 { "s" } else { "" }
+            );
+            let mut v: Vec<u64> = group.iter().map(|gpa| gpa.gpa >> 12).collect();
             memory_manager
                 .lock()
                 .unwrap()
                 .vm
                 .import_isolated_pages(
-                    gpa.page_type,
+                    group[0].page_type,
                     hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
-                    &[gpa.gpa >> 12],
+                    &v,
                 )
                 .map_err(Error::ImportIsolatedPages)?;
         }
