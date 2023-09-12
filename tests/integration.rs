@@ -187,7 +187,10 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     };
 
     if console_str != "hvc0" && console_str != "ttyS0" {
-        panic!("{}", format!("IGVM console should be hvc0 or ttyS0, got: {console_str}"));
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
     }
 
     // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
@@ -196,13 +199,14 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
     let igvm_path_exist = Path::new(&igvm_filepath);
     if igvm_path_exist.exists() {
-        let path = PathBuf::from(
-            igvm_filepath
-        );
+        let path = PathBuf::from(igvm_filepath);
 
         path
     } else {
-        panic!("{}", format!("IGVM File not found at path: {igvm_filepath}"));
+        panic!(
+            "{}",
+            format!("IGVM File not found at path: {igvm_filepath}")
+        );
     }
 }
 
@@ -6830,7 +6834,10 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={cpu_count}")])
             .args(["--memory", "size=512M"])
-            .args(["--igvm", direct_igvm_boot_path(Some("hvc0")).to_str().unwrap()])
+            .args([
+                "--igvm",
+                direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+            ])
             .args(["--platform", "snp=on"])
             .default_disks()
             .default_net()
