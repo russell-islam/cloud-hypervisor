@@ -630,15 +630,13 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
 
     let mut cmd = GuestCommand::new(&guest);
     cmd.args([
-            "--cpus",
-            &format!(
-                "boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"
-            ),
-        ])
-        .args(["--memory", "size=512M"])
-        .default_disks()
-        .default_net()
-        .capture_output();
+        "--cpus",
+        &format!("boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"),
+    ])
+    .args(["--memory", "size=512M"])
+    .default_disks()
+    .default_net()
+    .capture_output();
 
     let igvm = direct_igvm_boot_path(Some("hvc0"));
     cmd = extend_guest_cmd(
@@ -3012,16 +3010,10 @@ mod common_parallel {
             ])
             .default_net()
             .capture_output();
-        
+
         let igvm = direct_igvm_boot_path(Some("hvc0"));
         let kernel = fw_path(FwType::RustHypervisorFirmware);
-        cmd = extend_guest_cmd(
-            cmd,
-            kernel.as_str(),
-            None,
-            igvm.to_str().unwrap(),
-            None,
-        );
+        cmd = extend_guest_cmd(cmd, kernel.as_str(), None, igvm.to_str().unwrap(), None);
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
@@ -3683,7 +3675,7 @@ mod common_parallel {
                 format!("file={}", serial_path.to_str().unwrap()).as_str(),
             ])
             .capture_output();
-        
+
         let igvm = direct_igvm_boot_path(Some("ttyS0"));
         let kernel = direct_kernel_boot_path();
         let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.replace("console=hvc0 ", console_str);
@@ -3840,7 +3832,8 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         let mut guest_cmd = GuestCommand::new(&guest);
-        guest_cmd.args(["--cpus", "boot=1"])
+        guest_cmd
+            .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
             .default_disks()
             .default_net()
@@ -4307,7 +4300,7 @@ mod common_parallel {
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );    
+            );
         }
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
@@ -4387,7 +4380,7 @@ mod common_parallel {
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );    
+            );
         }
 
         let r = std::panic::catch_unwind(|| {
@@ -4483,7 +4476,7 @@ mod common_parallel {
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );    
+            );
         }
 
         let r = std::panic::catch_unwind(|| {
@@ -4582,7 +4575,7 @@ mod common_parallel {
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );    
+            );
         }
         simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
@@ -5084,7 +5077,7 @@ mod common_parallel {
             .default_net()
             .default_disks()
             .capture_output();
-        
+
         let igvm = direct_igvm_boot_path(Some("hvc0"));
         cmd = extend_guest_cmd(
             cmd,
@@ -5124,7 +5117,7 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M"])            
+            .args(["--memory", "size=512M"])
             .default_disks()
             .default_net()
             .capture_output();
@@ -5798,7 +5791,11 @@ mod common_parallel {
             .capture_output();
 
         let pltfrm_string = format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
-        let platform = if pci_segment.is_some() { Some(pltfrm_string.as_str()) } else { None };
+        let platform = if pci_segment.is_some() {
+            Some(pltfrm_string.as_str())
+        } else {
+            None
+        };
 
         let igvm = direct_igvm_boot_path(Some("hvc0"));
         cmd = extend_guest_cmd(

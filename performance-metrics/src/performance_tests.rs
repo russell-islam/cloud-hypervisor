@@ -85,7 +85,10 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     };
 
     if console_str != "hvc0" && console_str != "ttyS0" {
-        panic!("{}", format!("IGVM console should be hvc0 or ttyS0, got: {console_str}"));
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
     }
 
     // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
@@ -94,13 +97,14 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
     let igvm_path_exist = Path::new(&igvm_filepath);
     if igvm_path_exist.exists() {
-        let path = PathBuf::from(
-            igvm_filepath
-        );
+        let path = PathBuf::from(igvm_filepath);
 
         path
     } else {
-        panic!("{}", format!("IGVM File not found at path: {igvm_filepath}"));
+        panic!(
+            "{}",
+            format!("IGVM File not found at path: {igvm_filepath}")
+        );
     }
 }
 
@@ -318,14 +322,13 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
 
-        cmd
-            .args([
-                "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-            ])
-            .args(["--memory", "size=1G"])
-            .args(["--console", "off"])
-            .default_disks();
+        cmd.args([
+            "--cpus",
+            &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+        ])
+        .args(["--memory", "size=1G"])
+        .args(["--console", "off"])
+        .default_disks();
 
         let igvm = direct_igvm_boot_path(Some("hvc0"));
         let kernel = direct_kernel_boot_path();

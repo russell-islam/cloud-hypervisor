@@ -11,6 +11,7 @@ mod performance_tests;
 use argh::FromArgs;
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::{
     fmt,
     process::Command,
@@ -18,7 +19,6 @@ use std::{
     thread,
     time::Duration,
 };
-use std::env;
 use test_infra::*;
 use thiserror::Error;
 

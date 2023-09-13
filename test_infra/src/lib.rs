@@ -6,7 +6,7 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 use once_cell::sync::Lazy;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 use serde_json::Value;
 use ssh2::Session;
 use std::env;
@@ -849,9 +849,16 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str, is_cvm: bool, host_data: &str) -> String {
-        if is_cvm{
-            format! (
+    pub fn api_create_body(
+        &self,
+        cpu_count: u8,
+        kernel_path: &str,
+        kernel_cmd: &str,
+        is_cvm: bool,
+        host_data: &str,
+    ) -> String {
+        if is_cvm {
+            format!(
                 // Add snp flag under platform element
                 // Add host-data under payload element
                 r#"{{
@@ -868,11 +875,14 @@ impl Guest {
                 host_data,
                 self.network.host_ip,
                 self.network.guest_mac,
-                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                self.disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap()
+                    .as_str(),
                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             )
         } else {
-            format! (
+            format!(
                 r#"{{
                     "cpus":{{"boot_vcpus":{},"max_vcpus":{}}},
                     "payload":{{"kernel":"{}","cmdline": "{}"}},
@@ -885,7 +895,10 @@ impl Guest {
                 kernel_cmd,
                 self.network.host_ip,
                 self.network.guest_mac,
-                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                self.disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap()
+                    .as_str(),
                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             )
         }
@@ -1719,7 +1732,7 @@ pub fn extend_guest_cmd<'a>(
     igvm: &'a str,
     platform: Option<&'a str>,
 ) -> GuestCommand<'a> {
-    if is_guest_vm_type_cvm(){
+    if is_guest_vm_type_cvm() {
         cmd.args(["--igvm", igvm]);
         cmd.args(["--host-data", generate_host_data().as_str()]);
 
