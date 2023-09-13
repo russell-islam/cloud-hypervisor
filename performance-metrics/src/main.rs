@@ -18,8 +18,7 @@ use std::{
     thread,
     time::Duration,
 };
-use std::env;
-use test_infra::*;
+use test_infra::FioOps;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -221,8 +220,7 @@ impl PerformanceTest {
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
     pub fn calc_timeout(&self, test_iterations: &Option<u32>, test_timeout: &Option<u32>) -> u64 {
-        let setup_time = if is_guest_vm_type_cvm() { 100 } else { 20 };
-        ((test_timeout.unwrap_or(self.control.test_timeout) + setup_time)
+        ((test_timeout.unwrap_or(self.control.test_timeout) + 20)
             * test_iterations.unwrap_or(self.control.test_iterations)) as u64
     }
 }
