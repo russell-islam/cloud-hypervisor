@@ -89,3 +89,42 @@ stages:
 
         - bash: test -z "$(git status --porcelain)"
 
+      - job: CH_CLIPPY
+
+        timeoutInMinutes: 30
+        strategy:
+          matrix:
+            "clippy default":
+                    CLIPPY_ARGS: "--locked --all --all-targets --tests --examples -- -D warnings -D clippy::undocumented_unsafe_blocks"
+            "clippy default + guest_debug":
+                    CLIPPY_ARGS: '--locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+            "clippy default + tracing":
+                    CLIPPY_ARGS: '--locked --all --all-targets --tests --examples --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+            "clippy mshv":
+                    CLIPPY_ARGS: '--locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+            "clippy mshv + kvm":
+                    CLIPPY_ARGS: '--locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+            "clippy kvm + tdx":
+                    CLIPPY_ARGS: '--locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+            "clippy mshv + kvm + snp + igvm ":
+                    CLIPPY_ARGS: '--locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm,igvm,snp" -- -D warnings -D clippy::undocumented_unsafe_blocks'
+        pool:
+          name: lsg-virt-amd64-1es-agent-pool-2
+        steps:
+        - checkout: self
+          persistCredentials: true
+        - checkout: igvm-parser
+          persistCredentials: true
+          fetchTags: false
+          clean: true
+        - template: templates/ubuntu-20.04-build.yml
+        - bash: |
+            set -e
+            set -x
+
+            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
+            cargo clippy $(CLIPPY_ARGS)
+            popd
+
+        - bash: test -z "$(git status --porcelain)"
+
