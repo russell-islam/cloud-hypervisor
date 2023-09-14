@@ -21,7 +21,7 @@ use crate::MpState;
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::GuestMemoryAtomic;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap};
+use vm_memory::GuestAddress;
 
 #[derive(Error, Debug)]
 ///
