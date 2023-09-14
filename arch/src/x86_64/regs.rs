@@ -10,7 +10,9 @@ use crate::layout::{BOOT_GDT_START, BOOT_IDT_START, PVH_INFO_START};
 use crate::GuestMemoryMmap;
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::{FpuState, SegmentRegister, SpecialRegisters, StandardRegisters};
+use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
+#[cfg(feature = "igvm")]
+use hypervisor::arch::x86::SegmentRegister;
 #[cfg(feature = "igvm")]
 use igvm_parser::snp_defs::{SevSelector, SevVmsa};
 use std::sync::Arc;
