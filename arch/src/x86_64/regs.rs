@@ -56,11 +56,13 @@ pub fn setup_fpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> Result<()> {
-    let mut fpu: FpuState = FpuState {
+    let fpu: FpuState = FpuState {
         fcw: 0x37f,
         mxcsr: 0x1f80,
         ..Default::default()
     };
+    #[cfg(feature = "igvm")]
+    let mut fpu = fpu;
 
     #[cfg(feature = "igvm")]
     {
@@ -96,12 +98,14 @@ pub fn setup_regs(
     boot_ip: u64,
     #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> Result<()> {
-    let mut regs = StandardRegisters {
+    let regs = StandardRegisters {
         rflags: 0x0000000000000002u64,
         rbx: PVH_INFO_START.raw_value(),
         rip: boot_ip,
         ..Default::default()
     };
+    #[cfg(feature = "igvm")]
+    let mut regs = regs;
 
     #[cfg(feature = "igvm")]
     {
