@@ -915,6 +915,23 @@ impl cpu::Vcpu for MshvVcpu {
                                 arg_exit1.data[0..8].copy_from_slice(&value1.to_le_bytes());
                                 self.fd.gpa_write(&mut arg_exit1).unwrap();
                             }
+                            SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
+                                debug!("SNP extended guest request not supported");
+
+                                let mut arg_exit1: mshv_read_write_gpa =
+                                    mshv_read_write_gpa::default();
+                                // Extended guest request not supported by the Hypervisor
+                                // Returning error to the guest
+                                // 0x0006 means `The NAE event was not valid`
+                                // Reference: GHCB Spec, page 42
+                                let value1: u64 = 0x0006;
+                                // 0x3a0: Offset of SW_EXITINFO2 in GHCB page (gpa)
+                                // Ref: GHCB Spec, page 24
+                                arg_exit1.base_gpa = gpa + 0x3a0;
+                                arg_exit1.byte_count = 8;
+                                arg_exit1.data[0..8].copy_from_slice(&value1.to_le_bytes());
+                                self.fd.gpa_write(&mut arg_exit1).unwrap();
+                            }
                             SVM_EXITCODE_SNP_AP_CREATION => {
                                 debug!(
                                     "AP_CREATE_REQUEST with VMSA GPA {:0x}, abd APIC ID {:?}",
