@@ -261,12 +261,12 @@ pub fn clone_queue(
     q.set_size(queue.size());
     q.set_ready(queue.ready());
 
-    let mut desc_a = GuestAddress(queue.desc_table());
-    let mut avail_a = GuestAddress(queue.avail_ring());
-    let mut ring_a = GuestAddress(queue.used_ring());
-
     #[cfg(all(feature = "mshv", feature = "snp"))]
     if let Some(_vm) = vm {
+        let mut desc_a = GuestAddress(queue.desc_table());
+        let mut avail_a = GuestAddress(queue.avail_ring());
+        let mut ring_a = GuestAddress(queue.used_ring());
+
         desc_a = desc_a.translate_gva_with_vmfd(
             None,
             get_vring_size(VringType::VRING_DESC, queue.size()) as usize,
