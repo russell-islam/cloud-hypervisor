@@ -19,7 +19,6 @@ use vm_virtio::AccessPlatform;
 use vm_virtio::{get_vring_size, VringType};
 
 pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
-pub const MAX_QUEUE_SIZE: u32 = 32768;
 
 #[derive(Clone, Versionize)]
 pub struct VirtioPciCommonConfigState {
