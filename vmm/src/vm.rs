@@ -497,16 +497,14 @@ impl Vm {
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
-        #[cfg(feature = "snp")]
-        let mut force_iommu = true;
         #[cfg(all(not(feature = "tdx"), not(feature = "snp")))]
         let force_iommu = false;
-        let mut snp_enabled = false;
+        #[cfg(not(feature = "snp"))]
+        let snp_enabled = false;
         #[cfg(feature = "snp")]
-        {
-            snp_enabled = config.lock().unwrap().is_snp_enabled();
-            force_iommu = snp_enabled;
-        }
+        let snp_enabled = config.lock().unwrap().is_snp_enabled();
+        #[cfg(feature = "snp")]
+        let force_iommu = snp_enabled;
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -779,7 +777,8 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
-        let mut snp_enabled = false;
+        #[cfg(not(feature = "snp"))]
+        let snp_enabled = false;
         #[cfg(feature = "snp")]
         let snp_enabled = if snapshot.is_some() {
             false
