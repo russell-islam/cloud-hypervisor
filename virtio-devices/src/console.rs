@@ -4,7 +4,7 @@
 use super::Error as DeviceError;
 use super::{
     ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_ACCESS_PLATFORM,
+    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
     VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
