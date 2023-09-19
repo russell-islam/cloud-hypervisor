@@ -7237,6 +7237,63 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_guest_clock_sync_with_host() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let cpu_count: u8 = 1;
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", &format!("boot={cpu_count}")])
+            .args(["--memory", "size=512M"])
+            .default_disks()
+            .default_net()
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            let output = exec_host_command_output("date +%s");
+            let host_time_str = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u128>();
+            let guest_time_str = guest
+                .ssh_command("date +%s")
+                .unwrap()
+                .trim()
+                .parse::<u128>();
+
+            assert!(host_time_str.is_ok(), "Can not parse Host time string");
+            assert!(guest_time_str.is_ok(), "Can not parse Guest time string");
+
+            let host_time = host_time_str.unwrap();
+            let guest_time = guest_time_str.unwrap();
+            let difference = host_time - guest_time;
+
+            assert!(
+                difference < 5,
+                "Host and Guest clock time has more than 5 seconds difference"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
 }
 
 mod common_sequential {
