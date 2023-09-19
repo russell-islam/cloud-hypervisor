@@ -7,6 +7,7 @@
 
 use crate::{mean, PerformanceTestControl};
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::string::String;
 use std::thread;
@@ -76,6 +77,42 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path
 }
 
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    if is_guest_vm_type_cvm() {
+        // get the default hvc0 igvm file if console string is not passed
+        let console_str = match console {
+            Some(t) => t,
+            None => "hvc0",
+        };
+
+        if console_str != "hvc0" && console_str != "ttyS0" {
+            panic!(
+                "{}",
+                format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+            );
+        }
+
+        // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+        // Please add directory as volume to docker container as /igvm_files
+        // Refer ./scripts/dev_cli.sh for this
+        let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+        let igvm_path_exist = Path::new(&igvm_filepath);
+        if igvm_path_exist.exists() {
+            let path = PathBuf::from(igvm_filepath);
+
+            path
+        } else {
+            panic!(
+                "{}",
+                format!("IGVM File not found at path: {igvm_filepath}")
+            );
+        }
+    } else {
+        let path = PathBuf::from("");
+        path
+    }
+}
+
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let (rx, bandwidth) = control.net_control.unwrap();
@@ -90,19 +127,26 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
         guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
     );
 
-    let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false)
-        .spawn()
-        .unwrap();
+        .set_print_cmd(false);
 
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    let kernel = direct_kernel_boot_path();
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child = cmd.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
         measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
@@ -131,18 +175,26 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
     );
 
-    let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false)
-        .spawn()
-        .unwrap();
+        .set_print_cmd(false);
+
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    let kernel = direct_kernel_boot_path();
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
@@ -251,7 +303,11 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
         .spawn()
         .unwrap();
 
-    thread::sleep(Duration::new(test_timeout as u64, 0));
+    if is_guest_vm_type_cvm() {
+        thread::sleep(Duration::new(60 as u64, 0));
+    } else {
+        thread::sleep(Duration::new(test_timeout as u64, 0));
+    }
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();
 
@@ -275,18 +331,25 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
 
-        let c = cmd
-            .args([
-                "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-            ])
-            .args(["--memory", "size=1G"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--console", "off"])
-            .default_disks();
+        cmd.args([
+            "--cpus",
+            &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+        ])
+        .args(["--memory", "size=1G"])
+        .args(["--console", "off"])
+        .default_disks();
 
-        measure_boot_time(c, control.test_timeout).unwrap()
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        measure_boot_time(&mut cmd, control.test_timeout).unwrap()
     });
 
     match r {
@@ -346,11 +409,9 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .unwrap()
         .to_string();
 
-    let mut child = GuestCommand::new(&guest)
-        .args(["--cpus", &format!("boot={num_queues}")])
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .args([
             "--disk",
             format!(
@@ -371,10 +432,19 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .args(["--api-socket", &api_socket])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false)
-        .spawn()
-        .unwrap();
+        .set_print_cmd(false);
 
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    let kernel = direct_kernel_boot_path();
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child = cmd.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot(None).unwrap();
 
