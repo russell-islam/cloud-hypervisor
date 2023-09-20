@@ -1883,6 +1883,7 @@ impl vm::Vm for MshvVm {
                 gpa_list.as_slice(),
             )
             .unwrap();
+
             for gpa in gpa_list {
                 self.host_access_pages.set_bit((gpa >> PAGE_SHIFT) as usize);
             }

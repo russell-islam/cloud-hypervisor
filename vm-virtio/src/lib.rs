@@ -100,14 +100,14 @@ const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 #[cfg(all(feature = "mshv", feature = "snp"))]
 const VRING_USED_ELEMENT_SIZE: usize = 8;
 #[cfg(all(feature = "mshv", feature = "snp"))]
-enum VringType {
+pub enum VringType {
     VRING_DESC,
     VRING_AVAIL,
     VRING_USED,
 }
 
 #[cfg(all(feature = "mshv", feature = "snp"))]
-fn get_vring_size(t: VringType, queue_size: u16) -> usize {
+pub fn get_vring_size(t: VringType, queue_size: u16) -> usize {
     let (length_except_ring, element_size) = match t {
         VringType::VRING_DESC => (0, VRING_DESC_ELEMENT_SIZE),
         VringType::VRING_AVAIL => (6, VRING_AVAIL_ELEMENT_SIZE),
@@ -208,7 +208,6 @@ impl Translatable for GuestAddress {
 
 impl Translatable for u64 {
     fn translate_gva(&self, access_platform: Option<&Arc<dyn AccessPlatform>>, len: usize) -> Self {
-        //debug!("MUISLAM translate_gva: normal");
         if let Some(access_platform) = access_platform {
             access_platform.translate_gva(*self, len as u64).unwrap()
         } else {
