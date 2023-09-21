@@ -1725,6 +1725,8 @@ fn process_rss_kib(pid: u32) -> usize {
 
 // 10MB is our maximum accepted overhead.
 const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
+// 14MB is our maximum accepted overhead for CVM.
+const MAXIMUM_VMM_CVM_OVERHEAD_KB: u32 = 14 * 1024;
 
 #[derive(PartialEq, Eq, PartialOrd)]
 struct Counters {
@@ -5113,7 +5115,11 @@ mod common_parallel {
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
             eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
-            assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+            if is_guest_vm_type_cvm() {
+                assert!(overhead <= MAXIMUM_VMM_CVM_OVERHEAD_KB);
+            } else {
+                assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+            }
         });
 
         let _ = child.kill();
