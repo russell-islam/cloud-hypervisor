@@ -7290,6 +7290,122 @@ mod common_parallel {
         let output = child.wait_with_output().unwrap();
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_multi_pci_disks_with_16_vcpu() {
+        test_multi_pci_disks(16, 32, 186)
+    }
+
+    fn test_multi_pci_disks(vcpus: u32, memory_gb: u32, total_pci_disk: u32) {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", format!("boot={}", vcpus).as_str()])
+            .args(["--memory", format!("size={}G", memory_gb).as_str()])
+            .default_disks()
+            .default_net()
+            .verbosity(VerbosityLevel::Info)
+            .capture_output();
+
+        // Attach 186 disk with readonly mode
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let mut blk_file_path = workload_path;
+        blk_file_path.push("blk.img");
+
+        let mut total_segments = total_pci_disk / 31;
+        total_segments = total_segments + 1;
+
+        if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
+            panic!(
+                "{}",
+                format!(
+                    "Number of disks are {} overflows the total PCI segment",
+                    total_pci_disk
+                )
+            );
+        }
+
+        let remaining_disk_count = total_pci_disk % 31;
+        for segment in 1..total_segments {
+            for id in 0..31 {
+                let dev_id = format!("{}{}", segment, id);
+                cmd.args([
+                    "--disk",
+                    format!(
+                        "path={},readonly=true,pci_segment={},id={}",
+                        blk_file_path.to_str().unwrap(),
+                        segment,
+                        dev_id,
+                    )
+                    .as_str(),
+                ]);
+            }
+        }
+
+        let last_segment = total_segments;
+        for id in 0..remaining_disk_count {
+            let dev_id = format!("{}{}", last_segment, id);
+            cmd.args([
+                "--disk",
+                format!(
+                    "path={},readonly=true,pci_segment={},id={}",
+                    blk_file_path.to_str().unwrap(),
+                    last_segment,
+                    dev_id,
+                )
+                .as_str(),
+            ]);
+        }
+
+        let platform_string = format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
+        let platform = platform_string.as_str();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        // Increase open files to test large num of PCI disk device attachment
+        exec_host_command_output("ulimit -n 65536");
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(Some(200)).unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lspci | grep 'Mass storage controller' | grep -v 0000 | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                total_pci_disk
+            );
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vd.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                total_pci_disk
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod common_sequential {
