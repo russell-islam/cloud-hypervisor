@@ -540,7 +540,7 @@ impl VirtioPciDevice {
                     e
                 ))
             })?;
-        //info!("MUISLAM ------------------------- VirtioPciDevice");
+
         let (device_activated, interrupt_status) = if let Some(state) = state {
             // Update virtqueues indexes for both available and used rings.
             for (i, queue) in queues.iter_mut().enumerate() {
