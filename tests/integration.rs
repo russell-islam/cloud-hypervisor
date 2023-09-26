@@ -191,21 +191,13 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
             );
         }
 
-        // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
-        // Please add directory as volume to docker container as /igvm_files
-        // Refer ./scripts/dev_cli.sh for this
-        let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
-        let igvm_path_exist = Path::new(&igvm_filepath);
-        if igvm_path_exist.exists() {
-            let path = PathBuf::from(igvm_filepath);
-
-            path
-        } else {
-            panic!(
-                "{}",
-                format!("IGVM File not found at path: {igvm_filepath}")
-            );
-        }
+    // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+    // Please add directory as volume to docker container as /igvm_files
+    // Refer ./scripts/dev_cli.sh for this
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
     } else {
         let path = PathBuf::from("");
         path
