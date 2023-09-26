@@ -188,7 +188,6 @@ pub struct MemoryManager {
     pub acpi_address: Option<GuestAddress>,
     #[cfg(target_arch = "aarch64")]
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    #[cfg(feature = "snp")]
     snp_enabled: bool,
 }
 
@@ -501,7 +500,6 @@ impl MemoryManager {
                     zone.host_numa_node,
                     None,
                     thp,
-                    #[cfg(feature = "snp")]
                     snp_enabled,
                 )?;
 
@@ -556,7 +554,7 @@ impl MemoryManager {
         prefault: Option<bool>,
         mut existing_memory_files: HashMap<u32, File>,
         thp: bool,
-        snp_enabled: bool,
+        _snp_enabled: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
         let mut memory_regions = Vec::new();
         let mut memory_zones = HashMap::new();
@@ -583,7 +581,6 @@ impl MemoryManager {
                         zone_config.host_numa_node,
                         existing_memory_files.remove(&guest_ram_mapping.slot),
                         thp,
-                        #[cfg(feature = "snp")]
                         false,
                     )?;
                     memory_regions.push(Arc::clone(&region));
@@ -1016,7 +1013,6 @@ impl MemoryManager {
                                 zone.host_numa_node,
                                 None,
                                 config.thp,
-                                #[cfg(feature = "snp")]
                                 snp_enabled,
                             )?;
 
@@ -1147,7 +1143,6 @@ impl MemoryManager {
             #[cfg(target_arch = "aarch64")]
             uefi_flash: None,
             thp: config.thp,
-            #[cfg(feature = "snp")]
             snp_enabled,
         };
 
@@ -1315,21 +1310,9 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
-        #[cfg(feature = "snp")] snp_enabled: bool,
+        snp_enabled: bool,
     ) -> Result<Arc<GuestRegionMmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "snp")] {
-                let snp = if snp_enabled {
-                        true
-                    } else {
-                        false
-                    };
-            } else {
-                let snp = false;
-            }
-        }
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
@@ -1344,7 +1327,7 @@ impl MemoryManager {
                 mmap_flags |= libc::MAP_PRIVATE;
             }
             Some(Self::open_backing_file(backing_file, file_offset)?)
-        } else if shared || hugepages || snp {
+        } else if shared || hugepages || snp_enabled {
             // For hugepages we must also MAP_SHARED otherwise we will trigger #4805
             // because the MAP_PRIVATE will trigger CoW against the backing file with
             // the VFIO pinning. For Sev-Snp we do MAP_SHARED as pages are shared with
@@ -1471,7 +1454,6 @@ impl MemoryManager {
             None,
             None,
             self.thp,
-            #[cfg(feature = "snp")]
             self.snp_enabled,
         )?;
 
