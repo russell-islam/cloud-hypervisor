@@ -1213,15 +1213,13 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        let ret = self.create_vcpus(self.boot_vcpus(), snapshot);
-
         #[cfg(feature = "snp")]
         if self.snp_enabled {
             self.vm
                 .snp_init()
                 .map_err(|e| Error::InitializeSnp(e.into()))?;
         }
-        ret
+        self.create_vcpus(self.boot_vcpus(), snapshot)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
