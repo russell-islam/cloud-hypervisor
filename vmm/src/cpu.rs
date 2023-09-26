@@ -79,11 +79,11 @@ use tracer::trace_scoped;
 use vm_device::BusDevice;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use vm_memory::ByteValued;
-#[cfg(feature = "igvm")]
-use vm_memory::GuestAddressSpace;
 #[cfg(feature = "guest_debug")]
 use vm_memory::{Bytes, GuestAddressSpace};
-use vm_memory::{GuestAddress, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestMemoryAtomic};
+#[cfg(feature = "snp")]
+use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable,
     Transportable,
