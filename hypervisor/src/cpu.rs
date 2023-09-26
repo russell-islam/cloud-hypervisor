@@ -20,8 +20,8 @@ use crate::CpuState;
 use crate::MpState;
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::GuestMemoryAtomic;
 use vm_memory::GuestAddress;
+use vm_memory::GuestMemoryAtomic;
 
 #[derive(Error, Debug)]
 ///
@@ -462,7 +462,13 @@ pub trait Vcpu: Send + Sync {
     fn tsc_khz(&self) -> Result<Option<u32>> {
         Ok(None)
     }
-    fn get_cpuid_values(&self, _function: u32, _index: u32, _xfem: u64, _xss: u64) -> Result<[u32; 4]> {
+    fn get_cpuid_values(
+        &self,
+        _function: u32,
+        _index: u32,
+        _xfem: u64,
+        _xss: u64,
+    ) -> Result<[u32; 4]> {
         unimplemented!()
     }
     #[cfg(feature = "snp")]
