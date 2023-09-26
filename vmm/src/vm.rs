@@ -20,7 +20,9 @@ use crate::config::{NumaConfig, PayloadConfig};
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
-use crate::cpu::{self, CpuManager};
+use crate::cpu;
+#[cfg(feature = "igvm")]
+use crate::cpu::CpuManager;
 use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -572,7 +574,12 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &cpu_manager, &config)?
+            Self::load_payload_async(
+                &memory_manager,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                &config,
+            )?
         } else {
             None
         };
@@ -1083,7 +1090,7 @@ impl Vm {
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        cpu_manager: Arc<Mutex<CpuManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<CpuManager>>,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         let firmware = &payload.firmware;
@@ -1146,7 +1153,7 @@ impl Vm {
 
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        cpu_manager: &Arc<Mutex<CpuManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<CpuManager>>,
         config: &Arc<Mutex<VmConfig>>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
@@ -1162,12 +1169,20 @@ impl Vm {
             .as_ref()
             .map(|payload| {
                 let memory_manager = memory_manager.clone();
+                #[cfg(feature = "igvm")]
                 let cpu_manager = cpu_manager.clone();
                 let payload = payload.clone();
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
-                    .spawn(move || Self::load_payload(&payload, memory_manager, cpu_manager))
+                    .spawn(move || {
+                        Self::load_payload(
+                            &payload,
+                            memory_manager,
+                            #[cfg(feature = "igvm")]
+                            cpu_manager,
+                        )
+                    })
                     .map_err(Error::KernelLoadThreadSpawn)
             })
             .transpose()
