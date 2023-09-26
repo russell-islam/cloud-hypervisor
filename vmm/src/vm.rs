@@ -3257,8 +3257,9 @@ pub fn test_vm() {
     vcpu_regs.rflags = 2;
     vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
+    let gm = GuestMemoryAtomic::new(mem);
     loop {
-        match vcpu.run().expect("run failed") {
+        match vcpu.run(&gm).expect("run failed") {
             VmExit::IoOut(addr, data) => {
                 println!(
                     "IO out -- addr: {:#x} data [{:?}]",
