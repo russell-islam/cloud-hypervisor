@@ -163,7 +163,7 @@ pub fn load_igvm(
     let max_vtl = max_vtl
         .try_into()
         .expect("igvm file should be valid after new_from_binary");
-    let mut loader = Loader::new(memory.clone(), max_vtl);
+    let mut loader = Loader::new(memory, max_vtl);
 
     #[derive(Debug)]
     enum ParameterAreaState {
