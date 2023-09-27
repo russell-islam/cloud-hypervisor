@@ -873,18 +873,22 @@ impl cpu::Vcpu for MshvVcpu {
                                     self.fd.get_reg(&mut reg_assocs).unwrap();
                                     let value = unsafe { reg_assocs[0].value.reg64 };
                                     let mut arg: mshv_read_write_gpa =
-                                        mshv_read_write_gpa::default();
-                                    arg.base_gpa = gpa + 0x3a0;
-                                    arg.byte_count = 8;
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: gpa + 0x3a0,
+                                            byte_count: 8,
+                                            ..Default::default()
+                                        };
                                     arg.data.copy_from_slice(&value.to_le_bytes());
                                     self.fd.gpa_write(&mut arg).unwrap();
                                 }
                                 SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
                                     let value: u64 = 0;
                                     let mut arg: mshv_read_write_gpa =
-                                        mshv_read_write_gpa::default();
-                                    arg.base_gpa = gpa + 0x3a0;
-                                    arg.byte_count = 8;
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: gpa + 0x3a0,
+                                            byte_count: 8,
+                                            ..Default::default()
+                                        };
                                     arg.data.copy_from_slice(&value.to_le_bytes());
                                     self.fd.gpa_write(&mut arg).unwrap();
                                 }
@@ -964,9 +968,12 @@ impl cpu::Vcpu for MshvVcpu {
                                 let is_write =
                                     unsafe { port_into.__bindgen_anon_1.access_type() == 0 };
 
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = gpa + 0x01F8;
-                                arg.byte_count = 8;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: gpa + 0x01F8,
+                                        byte_count: 8,
+                                        ..Default::default()
+                                    };
                                 self.fd.gpa_read(&mut arg).unwrap();
                                 let mut bytes: [u8; 8] = [0u8; 8];
                                 bytes.copy_from_slice(&arg.data[0..8]);
@@ -1018,9 +1025,12 @@ impl cpu::Vcpu for MshvVcpu {
                                         .mmio_read(src_gpa, &mut data[0..data_len])
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                                 }
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = dst_gpa;
-                                arg.byte_count = data_len as u32;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: dst_gpa,
+                                        byte_count: data_len as u32,
+                                        ..Default::default()
+                                    };
                                 arg.data[0..data_len].copy_from_slice(&data);
                                 // Limitation of gpa_read/write
                                 assert!(data_len <= 16);
@@ -1043,9 +1053,12 @@ impl cpu::Vcpu for MshvVcpu {
                                 let data_len = exit_info2 as usize;
                                 // According to SPEC
                                 assert!(data_len <= 0x8);
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = src_gpa;
-                                arg.byte_count = data_len as u32;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: src_gpa,
+                                        byte_count: data_len as u32,
+                                        ..Default::default()
+                                    };
                                 // Limitation of gpa_read/write
                                 assert!(data_len <= 16);
                                 self.fd.gpa_read(&mut arg).unwrap();
