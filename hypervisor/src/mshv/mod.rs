@@ -1782,7 +1782,7 @@ impl vm::Vm for MshvVm {
         page_size: u32,
         pages: &[u64],
     ) -> vm::Result<()> {
-        if pages.len() == 0 {
+        if pages.is_empty() {
             return Ok(());
         }
 
@@ -1873,7 +1873,7 @@ impl vm::Vm for MshvVm {
             .map(|x| x << PAGE_SHIFT)
             .collect();
 
-        if gpa_list.len() > 0 {
+        if !gpa_list.is_empty() {
             _modify_gpa_host_access(
                 self.fd.clone(),
                 HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE,
