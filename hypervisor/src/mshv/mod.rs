@@ -1796,7 +1796,7 @@ impl vm::Vm for MshvVm {
         // everything from pages.
         unsafe {
             let pages_slice: &mut [u64] = isolated_pages[0].page_number.as_mut_slice(pages.len());
-            pages_slice.copy_from_slice(&pages);
+            pages_slice.copy_from_slice(pages);
         }
         self.fd
             .import_isolated_pages(&isolated_pages[0])
@@ -1917,7 +1917,7 @@ fn _modify_gpa_host_access(
     // everything from gpas.
     unsafe {
         let gpas_slice: &mut [u64] = gpa_list[0].gpa_list.as_mut_slice(gpas.len());
-        gpas_slice.copy_from_slice(&gpas);
+        gpas_slice.copy_from_slice(gpas);
     }
 
     fd.modify_gpa_host_access(&gpa_list[0])
