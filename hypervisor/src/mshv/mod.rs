@@ -988,7 +988,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         )?;
                                     }
 
-                                    let mut v = u32::from_le_bytes(data);
+                                    let v = u32::from_le_bytes(data);
                                     //v =  ((v) & ((1u64 << ((len) * 8)) - 1) as u32);
                                     // /* Preserve high bits in EAX but clear out high bits in RAX */
                                     // let mask = 0xffffffff >> (32 - len * 8);
@@ -1053,7 +1053,7 @@ impl cpu::Vcpu for MshvVcpu {
                                 self.fd.gpa_read(&mut arg).unwrap();
                                 if let Some(vm_ops) = &self.vm_ops {
                                     vm_ops
-                                        .mmio_write(dst_gpa, &mut arg.data[0..data_len])
+                                        .mmio_write(dst_gpa, &arg.data[0..data_len])
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                                 }
 
