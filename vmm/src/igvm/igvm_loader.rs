@@ -114,6 +114,7 @@ pub struct AcpiTables<'a> {
 struct GpaPages {
     pub gpa: u64,
     pub page_type: u32,
+    #[allow(dead_code)]
     pub page_size: u32,
 }
 /// Load the given IGVM file.
