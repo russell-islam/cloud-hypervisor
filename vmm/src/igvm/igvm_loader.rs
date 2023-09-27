@@ -326,7 +326,7 @@ pub fn load_igvm(
 
                 for mem in mem_regions.iter() {
                     if mem.r_type == RegionType::Ram {
-                        memory_map.push(memory_map_entry(&mem));
+                        memory_map.push(memory_map_entry(mem));
                     }
                 }
                 import_parameter(&mut parameter_areas, info, memory_map.as_bytes())?;
