@@ -271,27 +271,30 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
         let mut snp_enabled = false;
-        match vm_type {
-            1 /* SEV-SNP VM */ => {
-                let snp_policy = snp::get_default_snp_guest_policy();
-                snp_enabled = true;
-                let offloaded_features = snp::get_default_vmgexit_offload_features();
-                unsafe {
-                    debug!("Setting the partition isolation policy as: 0x{:x}", snp_policy.as_uint64);
-                    fd.set_partition_property(
-                        hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
-                        snp_policy.as_uint64,
-                    )
-                    .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                    debug!("Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",offloaded_features.as_uint64);
-                    fd.set_partition_property(
-                        hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
-                        offloaded_features.as_uint64,
-                    )
-                    .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                }
-            },
-            _ => { /* Do not need to do anything special for other VM types. */ },
+        if 1 == vm_type {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            snp_enabled = true;
+            let offloaded_features = snp::get_default_vmgexit_offload_features();
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                    snp_policy.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    offloaded_features.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                    offloaded_features.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+            }
         }
 
         let msr_list = self.get_msr_list()?;
