@@ -949,7 +949,7 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             // IPPROT Handle
                             0x7b => {
-                                let addr = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
+                                let _addr = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                 let port_into = hv_sev_vmgexit_port_info {
                                     as_uint32: (exit_info1 & 0xFFFFFFFF) as u32,
                                 };
