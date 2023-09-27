@@ -75,12 +75,15 @@ impl QueueAdresses {
             self.used_size = size;
         }
     }
+    #[allow(dead_code)]
     fn set_desc_size(&mut self, sz: u32) {
         self.desc_size = sz;
     }
+    #[allow(dead_code)]
     fn set_avail_size(&mut self, sz: u32) {
         self.avail_size = sz;
     }
+    #[allow(dead_code)]
     fn set_ring_size(&mut self, sz: u32) {
         self.used_size = sz;
     }
