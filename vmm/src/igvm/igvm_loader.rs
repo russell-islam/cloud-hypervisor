@@ -249,6 +249,7 @@ pub fn load_igvm(
                         BootPageAcceptance::SecretsPage
                     }
                     IgvmPageDataType::CPUID_DATA => {
+                        // SAFETY: CPUID is readonly
                         unsafe {
                             let cpuid_page_p: *mut hv_psp_cpuid_page =
                                 data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
