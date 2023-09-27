@@ -51,12 +51,7 @@ pub struct SimpleAtomicBitmap {
 #[allow(clippy::len_without_is_empty)]
 impl SimpleAtomicBitmap {
     pub fn new(size: usize) -> Self {
-        let map_size = size / AtomicU64::capacity()
-            + if size % AtomicU64::capacity() > 0 {
-                1
-            } else {
-                0
-            };
+        let map_size = size / AtomicU64::capacity() + usize::from(size % AtomicU64::capacity() > 0);
         let map: Vec<AtomicU64> = (0..map_size).map(|_| AtomicU64::new(0)).collect();
         SimpleAtomicBitmap {
             map,
