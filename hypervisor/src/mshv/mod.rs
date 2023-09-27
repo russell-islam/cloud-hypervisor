@@ -805,14 +805,12 @@ impl cpu::Vcpu for MshvVcpu {
                         //     print!("{}", s);
                         // }
                     } else if op == GHCB_INFO_NORMAL as u64 {
-                        // SAFETY: access_info is valid, otherwise we won't be here
-                        let _exit_code =
-                            unsafe { info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code } as u64;
+                        let _exit_code = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u64;
                         let exit_info1 =
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u64;
 
                         let _exit_code_u32 =
-                            unsafe { info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code } as u32;
+                            info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
                         let exit_info1_u32 =
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
                         let exit_info2 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
