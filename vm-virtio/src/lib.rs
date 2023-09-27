@@ -267,17 +267,17 @@ pub fn clone_queue(
 
         desc_a = desc_a.translate_gva_with_vmfd(
             None,
-            get_vring_size(VringType::VRING_DESC, queue.size()) as usize,
+            get_vring_size(VringType::VRING_DESC, queue.size()),
             vm,
         );
         avail_a = avail_a.translate_gva_with_vmfd(
             None,
-            get_vring_size(VringType::VRING_AVAIL, queue.size()) as usize,
+            get_vring_size(VringType::VRING_AVAIL, queue.size()),
             vm,
         );
         ring_a = ring_a.translate_gva_with_vmfd(
             None,
-            get_vring_size(VringType::VRING_USED, queue.size()) as usize,
+            get_vring_size(VringType::VRING_USED, queue.size()),
             vm,
         );
     }
