@@ -877,12 +877,10 @@ impl Vm {
                     })
                     .unwrap();
             } else if #[cfg(feature = "snp")] {
+                // 1 - SNP_ENABLED
+                // 0 - SNP_DISABLED
                 let vm = hypervisor
-                    .create_vm_with_type(if snp_enabled {
-                        1 // SNP_ENABLED
-                    } else {
-                        0 // SNP_DISABLED
-                    }, mem_size)
+                    .create_vm_with_type(u64::from(snp_enabled), mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
