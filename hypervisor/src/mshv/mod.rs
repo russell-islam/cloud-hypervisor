@@ -732,6 +732,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
+                    // SAFETY: Functionality implemented in mshv crate
                     let op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() };
 
                     // Don't understand the need for this check????
@@ -740,6 +741,7 @@ impl cpu::Vcpu for MshvVcpu {
                     // debug!("VMG Exit Intercept: op: {:0x}", op);
                     if op == GHCB_INFO_REGISTER_REQUEST as u64 {
                         let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
+                        // SAFETY: Functionality implemented in mshv crate
                         unsafe {
                             ghcb_gpa.__bindgen_anon_1.set_enabled(1);
                             ghcb_gpa
@@ -756,6 +758,7 @@ impl cpu::Vcpu for MshvVcpu {
                         }
 
                         let mut resp_ghcb_msr = svm_ghcb_msr::default();
+                        // SAFETY: Functionality implemented in mshv crate
                         unsafe {
                             resp_ghcb_msr
                                 .__bindgen_anon_2
@@ -814,6 +817,7 @@ impl cpu::Vcpu for MshvVcpu {
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
                         let exit_info2 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
                         let sw_scratch = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
+                        // SAFETY: Functionality implemented in mshv crate
                         let pfn: u64 = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
                         let gpa: u64 = pfn << GHCB_INFO_BIT_WIDTH;
                         match _exit_code_u32 {
@@ -830,12 +834,14 @@ impl cpu::Vcpu for MshvVcpu {
                                 SVM_NAE_HV_DOORBELL_PAGE_SET => {
                                     let mut ghcb_doorbell_gpa =
                                         hv_x64_register_sev_hv_doorbell::default();
+                                    // SAFETY: Functionality implemented in mshv crate
                                     unsafe {
                                         ghcb_doorbell_gpa.__bindgen_anon_1.set_enabled(1);
                                         ghcb_doorbell_gpa
                                             .__bindgen_anon_1
                                             .set_page_number(exit_info2 >> 12);
                                     }
+                                    // SAFETY: R/O value
                                     let write_msr = unsafe { ghcb_doorbell_gpa.as_uint64 };
                                     let arr_reg_name_value = [(
                                         hv_register_name_HV_X64_REGISTER_SEV_DOORBELL_GPA,
@@ -869,6 +875,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         })
                                         .collect();
                                     self.fd.get_reg(&mut reg_assocs).unwrap();
+                                    // SAFETY: R/O values initialized
                                     let value = unsafe { reg_assocs[0].value.reg64 };
                                     let mut arg: mshv_read_write_gpa =
                                         mshv_bindings::mshv_read_write_gpa {
@@ -953,9 +960,11 @@ impl cpu::Vcpu for MshvVcpu {
                                 let port_into = hv_sev_vmgexit_port_info {
                                     as_uint32: (exit_info1 & 0xFFFFFFFF) as u32,
                                 };
+                                // SAFETY: Logic implemented in mshv crate
                                 let port = unsafe { port_into.__bindgen_anon_1.intercepted_port() };
 
                                 let mut len = 4;
+                                // SAFETY: Logic implemented in mshv crate
                                 unsafe {
                                     if port_into.__bindgen_anon_1.operand_size_16bit() == 1 {
                                         len = 2;
@@ -964,6 +973,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
                                 }
                                 let is_write =
+                                    // SAFETY: port_info is read through mshv crate
                                     unsafe { port_into.__bindgen_anon_1.access_type() == 0 };
 
                                 let mut arg: mshv_read_write_gpa =
