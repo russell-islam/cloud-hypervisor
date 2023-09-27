@@ -64,6 +64,7 @@ pub struct Blk {
     exit_evt: EventFd,
     iommu: bool,
     #[cfg(all(feature = "mshv", feature = "snp"))]
+    #[allow(dead_code)]
     vm: Arc<dyn hypervisor::Vm>,
 }
 
