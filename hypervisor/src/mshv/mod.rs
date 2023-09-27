@@ -372,6 +372,7 @@ pub struct MshvVcpu {
     cpuid: Vec<CpuIdEntry>,
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
+    #[cfg(feature = "snp")]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "snp")]
     host_access_pages: Arc<SimpleAtomicBitmap>,
@@ -1535,6 +1536,7 @@ impl vm::Vm for MshvVm {
             cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,
+            #[cfg(feature = "snp")]
             vm_fd: self.fd.clone(),
             #[cfg(feature = "snp")]
             host_access_pages: self.host_access_pages.clone(),
