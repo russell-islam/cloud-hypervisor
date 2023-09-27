@@ -324,7 +324,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
             host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(
-                mem_size_for_bitmap as usize,
+                mem_size_for_bitmap,
                 HV_PAGE_SIZE as usize,
             )),
             snp_enabled,
@@ -728,11 +728,11 @@ impl cpu::Vcpu for MshvVcpu {
                 #[cfg(feature = "snp")]
                 hv_message_type_HVMSG_X64_SEV_VMGEXIT_INTERCEPT => {
                     let info = x.to_vmg_intercept_info().unwrap();
-                    let ghcb_data = (info.ghcb_msr >> GHCB_INFO_BIT_WIDTH) as u64;
+                    let ghcb_data = info.ghcb_msr >> GHCB_INFO_BIT_WIDTH;
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
-                    let op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u64 };
+                    let op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() };
 
                     // Don't understand the need for this check????
                     // assert!(info.__bindgen_anon_1.ghcb_page_valid() != 1);
@@ -805,9 +805,8 @@ impl cpu::Vcpu for MshvVcpu {
                         //     print!("{}", s);
                         // }
                     } else if op == GHCB_INFO_NORMAL as u64 {
-                        let _exit_code = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u64;
-                        let exit_info1 =
-                            info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u64;
+                        let _exit_code = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code;
+                        let exit_info1 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
 
                         let _exit_code_u32 =
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
@@ -815,8 +814,7 @@ impl cpu::Vcpu for MshvVcpu {
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
                         let exit_info2 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
                         let sw_scratch = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
-                        let pfn: u64 =
-                            unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() as u64 };
+                        let pfn: u64 = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
                         let gpa: u64 = pfn << GHCB_INFO_BIT_WIDTH;
                         match _exit_code_u32 {
                             SVM_EXITCODE_HV_DOORBELL_PAGE => match exit_info1_u32 {
@@ -900,8 +898,8 @@ impl cpu::Vcpu for MshvVcpu {
                                 }
                             },
                             SVM_EXITCODE_SNP_GUEST_REQUEST => {
-                                let req_gpa = exit_info1 as u64;
-                                let rsp_gpa = exit_info2 as u64;
+                                let req_gpa = exit_info1;
+                                let rsp_gpa = exit_info2;
 
                                 _psp_issue_guest_request(self.vm_fd.clone(), req_gpa, rsp_gpa)
                                     .unwrap();
