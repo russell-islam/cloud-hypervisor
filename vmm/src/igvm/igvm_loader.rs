@@ -187,7 +187,7 @@ pub fn load_igvm(
             ParameterAreaState::Inserted => panic!("igvmfile is not valid"),
         };
         let offset = info.byte_offset as usize;
-        let end_of_parameter = offset as usize + parameter.len();
+        let end_of_parameter = offset + parameter.len();
 
         if end_of_parameter > *max_size as usize {
             // TODO: tracing for which parameter was too big?
