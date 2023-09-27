@@ -23,9 +23,7 @@ use std::sync::{Arc, RwLock};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::GuestAddress;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemory;
+#[allow(unused_imports)] // MshvVcpu::run() needs this for an unused argument
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
