@@ -57,7 +57,6 @@ use bitmap::SimpleAtomicBitmap;
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
-#[cfg(feature = "snp")]
 const ONE_GB: usize = 1024 * 1024 * 1024;
 
 ///
@@ -667,10 +666,10 @@ impl cpu::Vcpu for MshvVcpu {
                     let info = x.to_memory_info().unwrap();
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
-                    let GB = gpa / (1024 * 1024 * 1024);
+                    let gb = gpa / (ONE_GB as u64);
                     debug!(
                         "Unaccepted GPA: GVA: {:x}, GPA: {:x} Gigabyte: {:?}",
-                        gva, gpa, GB
+                        gva, gpa, gb
                     );
                     Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                         "Unhandled VCPU exit: Unaccepted GPA"
