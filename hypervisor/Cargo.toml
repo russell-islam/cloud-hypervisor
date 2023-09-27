@@ -9,7 +9,7 @@ license = "Apache-2.0 OR BSD-3-Clause"
 kvm = ["kvm-ioctls", "kvm-bindings", "vfio-ioctls/kvm"]
 mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv"]
 tdx = []
-snp = ["igvm-parser"]
+snp = ["igvm_parser", "igvm_defs"]
 
 [dependencies]
 anyhow = "1.0.70"
@@ -26,7 +26,8 @@ serde_with = { version = "2.3.2", default-features = false, features = ["macros"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.10.0", features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { version = "0.11.0", features = ["with-serde"] }
-igvm-parser = { path = "../../igvm-parser", optional  = true }
+igvm_parser = { version = "0.1.0", package = "igvm", optional  = true }
+igvm_defs = { version = "0.1.0", optional  = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 version = "1.18.0"

@@ -1,9 +1,8 @@
-use igvm_parser::hvdef::Vtl;
-use igvm_parser::igvm::IgvmParameterPageType;
-use igvm_parser::importer::{
-    BootPageAcceptance, IsolationConfig, IsolationType, Register, StartupMemoryType, HV_PAGE_SIZE,
-};
-use igvm_parser::map_range::{Entry, RangeMap};
+use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
+use igvm_defs::IgvmVariableHeaderType;
+use igvm_parser::hv_defs::Vtl;
+use igvm_parser::registers::X86Register;
+use range_map_vec::{Entry, RangeMap};
 use vm_memory::GuestMemoryMmap;
 
 use std::collections::HashMap;
@@ -58,104 +57,10 @@ pub enum Error {
 #[derive(Debug, Clone, Copy)]
 pub struct ParameterAreaIndex(pub u32);
 
-pub trait ImageLoad {
-    /// Get the isolation configuration for this loader. This can be used by loaders
-    /// to load different state depening on the platform.
-    fn get_isolation_config(&self) -> IsolationConfig;
-
-    /// Create a parameter area for the given page_base and page_count,
-    /// which can be used to import parameters.
-    fn create_parameter_area(
-        &mut self,
-        page_base: u64,
-        page_count: u32,
-    ) -> Result<ParameterAreaIndex, Error>;
-
-    /// Create a parameter area for the given page_base, page_count, and initial_data
-    /// which can be used to import parameters.
-    fn create_parameter_area_with_data(
-        &mut self,
-        page_base: u64,
-        page_count: u32,
-        initial_data: &[u8],
-    ) -> Result<ParameterAreaIndex, Error>;
-
-    /// Import an IGVM parameter into the given parameter area index at the given offset.
-    ///
-    /// IGVM Parameters are used to specify where OS agnostic runtime dynamic information
-    /// should be loaded into the guest memory space. This allows loaders to load a base IGVM
-    /// file with a given measurement that can be specialized with runtime unmeasured parameters.
-    fn import_parameter(
-        &mut self,
-        parameter_area: ParameterAreaIndex,
-        byte_offset: u32,
-        parameter_type: IgvmParameterPageType,
-    ) -> Result<(), Error>;
-
-    /// Import data into the guest address space with the given acceptance type.
-    /// data.len() must be smaller than or equal to the number of pages being imported.
-    fn import_pages(
-        &mut self,
-        page_base: u64,
-        page_count: u64,
-        acceptance: BootPageAcceptance,
-        data: &[u8],
-    ) -> Result<(), Error>;
-
-    /// Import a register into the BSP at the given VTL.
-    fn import_vp_register(&mut self, vtl: Vtl, register: Register) -> Result<(), Error>;
-
-    /// Verify with the loader that memory is available in guest address space with the given type.
-    fn verify_startup_memory_available(
-        &mut self,
-        page_base: u64,
-        page_count: u64,
-        memory_type: StartupMemoryType,
-    ) -> Result<(), Error>;
-
-    /// Notify the loader to deposit architecture specific VP context information at the given page.
-    ///
-    /// TODO: It probably makes sense to use a different acceptance type than the default one?
-    fn set_vp_context_page(
-        &mut self,
-        vtl: Vtl,
-        page_base: u64,
-        acceptance: BootPageAcceptance,
-    ) -> Result<(), Error>;
-
-    /// Obtain the page base of the GPA range to be used for architecture specific VP context data.
-    fn vp_context_page(&self, vtl: Vtl) -> Result<u64, Error>;
-
-    /// Specify this region as relocatable.
-    fn relocation_region(
-        &mut self,
-        gpa: u64,
-        size_bytes: u64,
-        relocation_alignment: u64,
-        minimum_relocation_gpa: u64,
-        maximum_relocation_gpa: u64,
-        is_vtl2: bool,
-        apply_rip_offset: bool,
-        apply_gdtr_offset: bool,
-        vp_index: u16,
-        vtl: Vtl,
-    ) -> Result<(), Error>;
-
-    /// Specify a region as relocatable page table memory.
-    fn page_table_relocation(
-        &mut self,
-        page_table_gpa: u64,
-        size_pages: u64,
-        used_pages: u64,
-        vp_index: u16,
-        vtl: Vtl,
-    ) -> Result<(), Error>;
-}
-
 #[derive(Debug)]
 pub struct Loader {
     memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
-    regs: HashMap<Discriminant<Register>, Register>,
+    regs: HashMap<Discriminant<X86Register>, X86Register>,
     accepted_ranges: RangeMap<u64, BootPageAcceptance>,
     max_vtl: Vtl,
     bytes_written: u64,
@@ -172,7 +77,7 @@ impl Loader {
         }
     }
 
-    pub fn get_initial_regs(self) -> Vec<Register> {
+    pub fn get_initial_regs(self) -> Vec<X86Register> {
         self.regs.into_values().collect()
     }
     /// Accept a new page range with a given acceptance into the map of accepted ranges.
@@ -183,7 +88,7 @@ impl Loader {
         acceptance: BootPageAcceptance,
     ) -> Result<(), Error> {
         let page_end = page_base + page_count - 1;
-        match self.accepted_ranges.entry(page_base, page_end) {
+        match self.accepted_ranges.entry(page_base..=page_end) {
             Entry::Overlapping(entry) => {
                 let &(overlap_start, overlap_end, overlap_acceptance) = entry.get();
 
@@ -202,18 +107,8 @@ impl Loader {
     pub fn gets_total_bytes_written(self) -> u64 {
         self.bytes_written
     }
-}
 
-impl ImageLoad for Loader {
-    fn get_isolation_config(&self) -> IsolationConfig {
-        IsolationConfig {
-            paravisor_present: false,
-            isolation_type: IsolationType::None,
-            shared_gpa_boundary_bits: None,
-        }
-    }
-
-    fn import_pages(
+    pub fn import_pages(
         &mut self,
         page_base: u64,
         page_count: u64,
@@ -239,7 +134,7 @@ impl ImageLoad for Loader {
         Ok(())
     }
 
-    fn import_vp_register(&mut self, vtl: Vtl, register: Register) -> Result<(), Error> {
+    pub fn import_vp_register(&mut self, vtl: Vtl, register: X86Register) -> Result<(), Error> {
         // Only importing to the max VTL for registers is currently allowed, as only one set of registers is stored.
         if vtl != self.max_vtl {
             return Err(Error::InvalidVtl);
@@ -256,7 +151,7 @@ impl ImageLoad for Loader {
         Ok(())
     }
 
-    fn verify_startup_memory_available(
+    pub fn verify_startup_memory_available(
         &mut self,
         page_base: u64,
         page_count: u64,
@@ -303,71 +198,5 @@ impl ImageLoad for Loader {
             debug!("no valid memory range available for startup memory verify");
             Err(Error::MemoryUnavailable)
         }
-    }
-
-    fn set_vp_context_page(
-        &mut self,
-        _vtl: Vtl,
-        _page_base: u64,
-        _acceptance: BootPageAcceptance,
-    ) -> Result<(), Error> {
-        unimplemented!()
-    }
-
-    fn vp_context_page(&self, _vtl: Vtl) -> Result<u64, Error> {
-        unimplemented!()
-    }
-
-    fn create_parameter_area(
-        &mut self,
-        _page_base: u64,
-        _page_count: u32,
-    ) -> Result<ParameterAreaIndex, Error> {
-        unimplemented!()
-    }
-
-    fn create_parameter_area_with_data(
-        &mut self,
-        _page_base: u64,
-        _page_count: u32,
-        _initial_data: &[u8],
-    ) -> Result<ParameterAreaIndex, Error> {
-        unimplemented!()
-    }
-
-    fn import_parameter(
-        &mut self,
-        _parameter_area: ParameterAreaIndex,
-        _byte_offset: u32,
-        _parameter_type: IgvmParameterPageType,
-    ) -> Result<(), Error> {
-        unimplemented!()
-    }
-
-    fn relocation_region(
-        &mut self,
-        _gpa: u64,
-        _size_bytes: u64,
-        _relocation_alignment: u64,
-        _minimum_relocation_gpa: u64,
-        _maximum_relocation_gpa: u64,
-        _is_vtl2: bool,
-        _apply_rip_offset: bool,
-        _apply_gdtr_offset: bool,
-        _vp_index: u16,
-        _vtl: Vtl,
-    ) -> Result<(), Error> {
-        unimplemented!()
-    }
-
-    fn page_table_relocation(
-        &mut self,
-        _page_table_gpa: u64,
-        _size_pages: u64,
-        _used_pages: u64,
-        _vp_index: u16,
-        _vtl: Vtl,
-    ) -> Result<(), Error> {
-        unimplemented!()
     }
 }

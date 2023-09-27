@@ -12,7 +12,7 @@ use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
 use hypervisor::arch::x86::{FpuState, SegmentRegister, SpecialRegisters, StandardRegisters};
 #[cfg(feature = "igvm")]
-use igvm_parser::snp::{SEV_SELECTOR, SEV_VMSA};
+use igvm_parser::snp_defs::{SevSelector, SevVmsa};
 use std::sync::Arc;
 use std::{mem, result};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
@@ -54,7 +54,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_fpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+    #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> Result<()> {
     let mut fpu: FpuState = FpuState {
         fcw: 0x37f,
@@ -94,7 +94,7 @@ pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 pub fn setup_regs(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     boot_ip: u64,
-    #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+    #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> Result<()> {
     let mut regs = StandardRegisters {
         rflags: 0x0000000000000002u64,
@@ -128,7 +128,7 @@ pub fn setup_regs(
 pub fn setup_sregs(
     mem: &GuestMemoryMmap,
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+    #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> Result<()> {
     let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
     configure_segments_and_sregs(mem, &mut sregs)?;
@@ -163,9 +163,9 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
 #[cfg(feature = "igvm")]
 pub fn configure_segments_and_sregs_for_igvm(
     sregs: &mut SpecialRegisters,
-    vmsa: Option<SEV_VMSA>,
+    vmsa: Option<SevVmsa>,
 ) -> Result<()> {
-    let to_segment = |reg: SEV_SELECTOR| -> SegmentRegister {
+    let to_segment = |reg: SevSelector| -> SegmentRegister {
         SegmentRegister {
             base: reg.base,
             limit: reg.limit,
