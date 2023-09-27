@@ -73,6 +73,7 @@ impl SimpleAtomicBitmap {
         self.map[index >> 6].get_bit(index & INDEX_MASK)
     }
 
+    #[allow(dead_code)]
     pub fn set_bits_range(&self, start_bit: usize, len: usize) {
         if len == 0 {
             return;
@@ -111,12 +112,15 @@ impl SimpleAtomicBitmap {
         self.map[index >> 6].reset_bit(index & INDEX_MASK)
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.size
     }
+    #[allow(dead_code)]
     pub fn size_in_bytes(&self) -> usize {
         self.map_size * 8
     }
+    #[allow(dead_code)]
     pub fn reset(&self) {
         for it in self.map.iter() {
             it.store(0, Ordering::Release);
