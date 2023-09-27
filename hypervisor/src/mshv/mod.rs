@@ -799,8 +799,8 @@ impl cpu::Vcpu for MshvVcpu {
                         set_registers_64!(self.fd, arr_reg_name_value)
                             .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                     } else if op == GHCB_INFO_SPECIAL_DBGPRINT as u64 {
-                        let data = unsafe { ghcb_msr.as_uint64 } >> 16;
-                        let bytes = data.to_le_bytes();
+                        //let data = unsafe { ghcb_msr.as_uint64 } >> 16;
+                        //let bytes = data.to_le_bytes();
                         // if let Ok(s) = std::str::from_utf8(bytes.as_slice()) {
                         //     print!("{}", s);
                         // }
