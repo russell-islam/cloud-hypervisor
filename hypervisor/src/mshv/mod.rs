@@ -13,7 +13,6 @@ use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
-use byteorder::BigEndian;
 #[cfg(feature = "snp")]
 use igvm_parser::page_table::X64_PAGE_SIZE as HV_PAGE_SIZE;
 pub use mshv_bindings::*;
