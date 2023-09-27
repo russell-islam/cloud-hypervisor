@@ -1215,9 +1215,7 @@ impl CpuManager {
 
         #[cfg(feature = "snp")]
         if self.snp_enabled {
-            self.vm
-                .snp_init()
-                .map_err(|e| Error::InitializeSnp(e.into()))?;
+            self.vm.snp_init().map_err(Error::InitializeSnp)?;
         }
         self.create_vcpus(self.boot_vcpus(), snapshot)
     }
