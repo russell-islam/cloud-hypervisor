@@ -1006,8 +1006,8 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             0x8000_0001 => {
                                 // MMIO READ
-                                let src_gpa = exit_info1 as u64;
-                                let dst_gpa = sw_scratch as u64;
+                                let src_gpa = exit_info1;
+                                let dst_gpa = sw_scratch;
                                 let data_len = exit_info2 as usize;
                                 // According to SPEC
                                 assert!(data_len <= 0x8);
@@ -1038,8 +1038,8 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             0x8000_0002 => {
                                 // MMIO WRITE
-                                let dst_gpa = exit_info1 as u64;
-                                let src_gpa = sw_scratch as u64;
+                                let dst_gpa = exit_info1;
+                                let src_gpa = sw_scratch;
                                 let data_len = exit_info2 as usize;
                                 // According to SPEC
                                 assert!(data_len <= 0x8);
