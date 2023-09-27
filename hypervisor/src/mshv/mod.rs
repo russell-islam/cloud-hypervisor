@@ -274,6 +274,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             let snp_policy = snp::get_default_snp_guest_policy();
             snp_enabled = true;
             let offloaded_features = snp::get_default_vmgexit_offload_features();
+            // SAFETY: Using pre-defined hypercall
             unsafe {
                 debug!(
                     "Setting the partition isolation policy as: 0x{:x}",
