@@ -679,9 +679,7 @@ impl cpu::Vcpu for MshvVcpu {
                 #[cfg(feature = "snp")]
                 hv_message_type_HVMSG_GPA_ATTRIBUTE_INTERCEPT => {
                     let info = x.to_gpa_attribute_info().unwrap();
-                    let vp_index = info.vp_index;
                     let host_vis = info.__bindgen_anon_1.host_visibility();
-                    // debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
                     if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
                         warn!("Ignored attribute intercept with full host vis");
                         return Ok(cpu::VmExit::Ignore);
