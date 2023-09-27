@@ -632,6 +632,7 @@ fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
 impl VersionMapped for ConsoleState {}
 
 impl Console {
+    #[allow(clippy::too_many_arguments)]
     /// Create a new virtio console device
     pub fn new(
         id: String,
