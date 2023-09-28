@@ -40,8 +40,6 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::GuestMemoryAtomic;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap};
 use zerocopy::AsBytes;
 
 #[derive(Debug, Error)]
