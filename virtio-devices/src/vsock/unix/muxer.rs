@@ -825,8 +825,6 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
-    use virtio_queue::QueueOwnedT;
-
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
