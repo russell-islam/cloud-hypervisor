@@ -825,6 +825,8 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
+    use virtio_queue::QueueOwnedT;
+
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
@@ -832,18 +834,21 @@ mod tests {
     const PEER_CID: u64 = 3;
     const PEER_BUF_ALLOC: u32 = 64 * 1024;
 
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     struct MuxerTestContext {
         _vsock_test_ctx: VsockTestContext,
         pkt: VsockPacket,
         muxer: VsockMuxer,
     }
 
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     impl Drop for MuxerTestContext {
         fn drop(&mut self) {
             std::fs::remove_file(self.muxer.host_sock_path.as_str()).unwrap();
         }
     }
 
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     impl MuxerTestContext {
         fn new(name: &str) -> Self {
             let vsock_test_ctx = VsockTestContext::new();

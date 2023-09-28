@@ -253,6 +253,7 @@ mod tests {
     }
     impl VsockBackend for TestBackend {}
 
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     pub struct TestContext {
         pub cid: u64,
         pub mem: GuestMemoryMmap,
@@ -260,6 +261,7 @@ mod tests {
         pub device: Vsock<TestBackend>,
     }
 
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     impl TestContext {
         pub fn new() -> Self {
             const CID: u64 = 52;

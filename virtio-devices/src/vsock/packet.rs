@@ -400,6 +400,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 #[allow(clippy::undocumented_unsafe_blocks)]
+#[cfg(not(all(feature = "mshv", feature = "snp")))]
 mod tests {
     use super::super::tests::TestContext;
     use super::*;
@@ -596,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     fn test_packet_hdr_accessors() {
         const SRC_CID: u64 = 1;
         const DST_CID: u64 = 2;
@@ -698,6 +700,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(all(feature = "mshv", feature = "snp")))]
     fn test_packet_buf() {
         create_context!(test_ctx, handler_ctx);
         let mut pkt = VsockPacket::from_rx_virtq_head(
