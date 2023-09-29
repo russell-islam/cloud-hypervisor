@@ -298,7 +298,7 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
         .unwrap();
 
     if is_guest_vm_type_cvm() {
-        thread::sleep(Duration::new(60 as u64, 0));
+        thread::sleep(Duration::new(60_u64, 0));
     } else {
         thread::sleep(Duration::new(test_timeout as u64, 0));
     }
