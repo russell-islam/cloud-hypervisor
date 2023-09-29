@@ -819,6 +819,7 @@ impl VsockMuxer {
 }
 
 #[cfg(test)]
+#[cfg(not(all(feature = "mshv", feature = "snp")))]
 mod tests {
     use std::io::{Read, Write};
     use std::ops::Drop;

@@ -671,6 +671,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(not(all(feature = "mshv", feature = "snp")))]
 mod tests {
     use libc::EFD_NONBLOCK;
     use virtio_queue::QueueOwnedT;

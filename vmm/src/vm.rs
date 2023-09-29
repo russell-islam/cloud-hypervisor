@@ -3218,8 +3218,8 @@ mod tests {
     }
 }
 
-#[cfg(not(all(feature = "kvm", target_arch = "x86_64")))]
 #[test]
+#[cfg(not(all(feature = "mshv", feature = "snp")))]
 pub fn test_vm() {
     use hypervisor::VmExit;
     use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
