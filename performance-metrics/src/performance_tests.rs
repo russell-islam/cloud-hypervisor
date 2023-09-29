@@ -95,9 +95,7 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
         let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
         let igvm_path_exist = Path::new(&igvm_filepath);
         if igvm_path_exist.exists() {
-            let path = PathBuf::from(igvm_filepath);
-
-            path
+            PathBuf::from(igvm_filepath)
         } else {
             panic!(
                 "{}",
@@ -105,8 +103,7 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
             );
         }
     } else {
-        let path = PathBuf::from("");
-        path
+        PathBuf::from("")
     }
 }
 
