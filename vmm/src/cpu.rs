@@ -2660,7 +2660,7 @@ impl CpuElf64Writable for CpuManager {
     }
 }
 
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(not(all(feature = "kvm", target_arch = "x86_64")))]
 #[cfg(test)]
 mod tests {
     use arch::x86_64::interrupts::*;
