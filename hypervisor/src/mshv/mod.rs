@@ -1889,7 +1889,6 @@ impl vm::Vm for MshvVm {
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
         let gpa_list: Vec<u64> = (start_gpfn..=end_gpfn)
-            .into_iter()
             .filter(|x| !self.host_access_pages.is_bit_set(*x as usize))
             .map(|x| x << PAGE_SHIFT)
             .collect();
