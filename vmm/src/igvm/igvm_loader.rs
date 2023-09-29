@@ -509,7 +509,7 @@ pub fn load_igvm(
                 group.len(),
                 if group.len() > 1 { "s" } else { "" }
             );
-            let mut v: Vec<u64> = group.iter().map(|gpa| gpa.gpa >> 12).collect();
+            let v: Vec<u64> = group.iter().map(|gpa| gpa.gpa >> 12).collect();
             memory_manager
                 .lock()
                 .unwrap()
