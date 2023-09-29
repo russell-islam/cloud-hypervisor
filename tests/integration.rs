@@ -199,8 +199,7 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     if igvm_path_exist.exists() {
         PathBuf::from(igvm_filepath)
     } else {
-        let path = PathBuf::from("");
-        path
+        PathBuf::from("")
     }
 }
 
@@ -7310,7 +7309,7 @@ mod common_parallel {
         blk_file_path.push("blk.img");
 
         let mut total_segments = total_pci_disk / 31;
-        total_segments = total_segments + 1;
+        total_segments += 1;
 
         if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
             panic!(
