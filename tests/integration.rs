@@ -184,12 +184,12 @@ fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     // get the default hvc0 igvm file if console string is not passed
     let console_str = console.unwrap_or("hvc0");
 
-        if console_str != "hvc0" && console_str != "ttyS0" {
-            panic!(
-                "{}",
-                format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
-            );
-        }
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
 
     // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
     // Please add directory as volume to docker container as /igvm_files
