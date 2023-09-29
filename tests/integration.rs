@@ -4271,24 +4271,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
         std::fs::write(&temp_config_path, http_body).unwrap();
@@ -4351,24 +4350,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let r = std::panic::catch_unwind(|| {
             // socket has to be created again inside catch_unwind block to avoid errors
@@ -4447,24 +4445,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let r = std::panic::catch_unwind(|| {
             // socket has to be created again inside catch_unwind block to avoid errors
@@ -4546,24 +4543,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
         simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
         // Then boot it
