@@ -80,10 +80,7 @@ fn direct_kernel_boot_path() -> PathBuf {
 fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
     if is_guest_vm_type_cvm() {
         // get the default hvc0 igvm file if console string is not passed
-        let console_str = match console {
-            Some(t) => t,
-            None => "hvc0",
-        };
+        let console_str = console.unwrap_or("hvc0");
 
         if console_str != "hvc0" && console_str != "ttyS0" {
             panic!(
