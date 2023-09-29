@@ -98,7 +98,7 @@ const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 #[cfg(all(feature = "mshv", feature = "snp"))]
 const VRING_USED_ELEMENT_SIZE: usize = 8;
 #[cfg(all(feature = "mshv", feature = "snp"))]
-enum VringType {
+pub enum VringType {
     Desc,
     Avail,
     Used,

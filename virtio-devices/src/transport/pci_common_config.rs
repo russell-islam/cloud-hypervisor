@@ -344,7 +344,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.desc_table_address,
-                            get_vring_size(VringType::VRING_DESC, qs) as u32,
+                            get_vring_size(VringType::Desc, qs) as u32,
                         )
                         .unwrap()
                 }
@@ -364,7 +364,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.avail_ring_address,
-                            get_vring_size(VringType::VRING_AVAIL, qs) as u32,
+                            get_vring_size(VringType::Avail, qs) as u32,
                         )
                         .unwrap()
                 }
@@ -384,7 +384,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.used_ring_address,
-                            get_vring_size(VringType::VRING_USED, qs) as u32,
+                            get_vring_size(VringType::Used, qs) as u32,
                         )
                         .unwrap()
                 }
