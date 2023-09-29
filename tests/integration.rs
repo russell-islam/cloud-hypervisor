@@ -633,9 +633,6 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
     let igvm = direct_igvm_boot_path(Some("hvc0"));
     cmd = extend_guest_cmd(
         cmd,
-        #[cfg(target_arch = "x86_64")]
-        direct_kernel_boot_path.to_str().unwrap(),
-        #[cfg(target_arch = "aarch64")]
         kernel_path,
         Some(DIRECT_KERNEL_BOOT_CMDLINE),
         igvm.to_str().unwrap(),
@@ -2659,8 +2656,6 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
@@ -2723,8 +2718,6 @@ mod common_parallel {
 
         let mut blk_file_path = workload_path;
         blk_file_path.push("blk.img");
-
-        let kernel_path = direct_kernel_boot_path();
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
