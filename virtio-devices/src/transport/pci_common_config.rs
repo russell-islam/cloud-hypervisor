@@ -308,6 +308,7 @@ impl VirtioPciCommonConfig {
         queues: &mut [Queue],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         // Asumption: All the queues have the same size
         let qs = queues[0].size();
 
