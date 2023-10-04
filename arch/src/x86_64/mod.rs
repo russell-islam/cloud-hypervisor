@@ -32,7 +32,7 @@ use std::arch::x86_64;
 #[cfg(feature = "tdx")]
 pub mod tdx;
 #[cfg(feature = "igvm")]
-use igvm_parser::snp::SEV_VMSA;
+use igvm_parser::snp_defs::SevVmsa;
 
 // CPUID feature bits
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
@@ -65,7 +65,7 @@ pub struct EntryPoint {
     /// Address in guest memory where the guest must start execution
     pub entry_addr: Option<GuestAddress>,
     #[cfg(feature = "igvm")]
-    pub vmsa: Option<SEV_VMSA>,
+    pub vmsa: Option<SevVmsa>,
     #[cfg(feature = "snp")]
     pub vmsa_pfn: u64,
 }
@@ -775,7 +775,7 @@ pub fn configure_vcpu(
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
-    #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+    #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
 ) -> super::Result<()> {
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;

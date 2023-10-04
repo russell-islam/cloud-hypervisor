@@ -15,7 +15,7 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 use byteorder::BigEndian;
 #[cfg(feature = "snp")]
-use igvm_parser::importer::HV_PAGE_SIZE;
+use igvm_parser::page_table::X64_PAGE_SIZE as HV_PAGE_SIZE;
 pub use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
@@ -52,7 +52,7 @@ use crate::arch::x86::{
 };
 
 #[cfg(feature = "snp")]
-use igvm_parser::igvm::IgvmVhsSnpIdBlock;
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "snp")]
 mod bitmap;
 #[cfg(feature = "snp")]
@@ -1818,7 +1818,7 @@ impl vm::Vm for MshvVm {
     #[cfg(feature = "snp")]
     fn complete_isolated_import(
         &self,
-        snp_id_block: IgvmVhsSnpIdBlock,
+        snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
         host_data: &[u8],
         id_block_enabled: u8,
     ) -> vm::Result<()> {

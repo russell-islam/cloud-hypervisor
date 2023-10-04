@@ -58,9 +58,9 @@ use hypervisor::kvm::kvm_ioctls::Cap;
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::{CpuState, HypervisorCpuError, HypervisorType, VmExit, VmOps};
 #[cfg(feature = "igvm")]
-use igvm_parser::importer::HV_PAGE_SIZE;
+use igvm_parser::page_table::X64_PAGE_SIZE as HV_PAGE_SIZE;
 #[cfg(feature = "igvm")]
-use igvm_parser::snp::SEV_VMSA;
+use igvm_parser::snp_defs::SevVmsa;
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
@@ -353,7 +353,7 @@ impl Vcpu {
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
-        #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+        #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -793,7 +793,7 @@ impl CpuManager {
         &self,
         vcpu: Arc<Mutex<Vcpu>>,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
-        #[cfg(feature = "igvm")] vmsa: Option<SEV_VMSA>,
+        #[cfg(feature = "igvm")] vmsa: Option<SevVmsa>,
         #[cfg(feature = "snp")] vmsa_pfn: u64,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
