@@ -387,6 +387,7 @@ pub struct VmParams<'a> {
     pub gdb: bool,
     pub platform: Option<&'a str>,
     pub tpm: Option<&'a str>,
+    pub igvm: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -2080,12 +2081,16 @@ impl VmConfig {
             numa = Some(numa_config_list);
         }
 
-        let payload = if vm_params.kernel.is_some() || vm_params.firmware.is_some() {
+        let payload_present =
+            vm_params.kernel.is_some() || vm_params.firmware.is_some() || vm_params.igvm.is_some();
+
+        let payload = if payload_present {
             Some(PayloadConfig {
                 kernel: vm_params.kernel.map(PathBuf::from),
                 initramfs: vm_params.initramfs.map(PathBuf::from),
                 cmdline: vm_params.cmdline.map(|s| s.to_string()),
                 firmware: vm_params.firmware.map(PathBuf::from),
+                igvm: vm_params.igvm.map(PathBuf::from),
             })
         } else {
             None
