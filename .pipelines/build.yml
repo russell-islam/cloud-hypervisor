@@ -113,18 +113,12 @@ stages:
         steps:
         - checkout: self
           persistCredentials: true
-        - checkout: igvm-parser
-          persistCredentials: true
-          fetchTags: false
-          clean: true
         - template: templates/ubuntu-20.04-build.yml
         - bash: |
             set -e
             set -x
 
-            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
             cargo clippy $(CLIPPY_ARGS)
-            popd
 
         - bash: test -z "$(git status --porcelain)"
 
