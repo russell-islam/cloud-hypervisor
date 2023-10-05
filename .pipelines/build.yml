@@ -3,13 +3,6 @@ variables:
   DEFAULT_BRANCH: msft-main
   RUST_VERSION: 1.68.1
 
-resources:
-  repositories:
-    - repository: igvm-parser
-      type: git
-      name: LSG/igvm-parser
-      ref: refs/heads/main
-
 trigger:
   batch: false
   tags:
@@ -70,10 +63,6 @@ stages:
         steps:
         - checkout: self
           persistCredentials: true
-        - checkout: igvm-parser
-          persistCredentials: true
-          fetchTags: false
-          clean: true
         - template: templates/ubuntu-20.04-build.yml
         - bash: |
             set -e
@@ -93,10 +82,6 @@ stages:
         steps:
         - checkout: self
           persistCredentials: true
-        - checkout: igvm-parser
-          persistCredentials: true
-          fetchTags: false
-          clean: true
         - template: templates/ubuntu-20.04-build.yml
         - bash: |
             set -e
