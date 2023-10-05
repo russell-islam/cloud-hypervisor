@@ -93,7 +93,7 @@ pub use kvm_ioctls::{Cap, Kvm};
 use std::mem;
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::GuestMemoryAtomic;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 ///
@@ -833,7 +833,7 @@ impl vm::Vm for KvmVm {
         self
     }
     #[cfg(feature = "snp")]
-    fn gain_page_access(&self, gpa: u64, size: u32) -> vm::Result<()> {
+    fn gain_page_access(&self, _gpa: u64, _size: u32) -> vm::Result<()> {
         Ok(())
     }
 }
@@ -1545,7 +1545,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn run(
         &self,
-        guest_memory: &GuestMemoryAtomic<vm_memory::GuestMemoryMmap<AtomicBitmap>>,
+        _guest_memory: &GuestMemoryAtomic<vm_memory::GuestMemoryMmap<AtomicBitmap>>,
     ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(run) => match run {

@@ -51,12 +51,7 @@ pub struct SimpleAtomicBitmap {
 #[allow(clippy::len_without_is_empty)]
 impl SimpleAtomicBitmap {
     pub fn new(size: usize) -> Self {
-        let map_size = size / AtomicU64::capacity()
-            + if size % AtomicU64::capacity() > 0 {
-                1
-            } else {
-                0
-            };
+        let map_size = size / AtomicU64::capacity() + usize::from(size % AtomicU64::capacity() > 0);
         let map: Vec<AtomicU64> = (0..map_size).map(|_| AtomicU64::new(0)).collect();
         SimpleAtomicBitmap {
             map,
@@ -78,6 +73,7 @@ impl SimpleAtomicBitmap {
         self.map[index >> 6].get_bit(index & INDEX_MASK)
     }
 
+    #[allow(dead_code)]
     pub fn set_bits_range(&self, start_bit: usize, len: usize) {
         if len == 0 {
             return;
@@ -116,12 +112,15 @@ impl SimpleAtomicBitmap {
         self.map[index >> 6].reset_bit(index & INDEX_MASK)
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.size
     }
+    #[allow(dead_code)]
     pub fn size_in_bytes(&self) -> usize {
         self.map_size * 8
     }
+    #[allow(dead_code)]
     pub fn reset(&self) {
         for it in self.map.iter() {
             it.store(0, Ordering::Release);

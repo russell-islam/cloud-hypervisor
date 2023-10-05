@@ -17,8 +17,6 @@ use vm_memory::GuestAddress;
 
 pub mod queue;
 pub use queue::*;
-#[macro_use]
-extern crate log;
 
 pub const VIRTIO_MSI_NO_VECTOR: u16 = 0xffff;
 
@@ -101,17 +99,17 @@ const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 const VRING_USED_ELEMENT_SIZE: usize = 8;
 #[cfg(all(feature = "mshv", feature = "snp"))]
 pub enum VringType {
-    VRING_DESC,
-    VRING_AVAIL,
-    VRING_USED,
+    Desc,
+    Avail,
+    Used,
 }
 
 #[cfg(all(feature = "mshv", feature = "snp"))]
 pub fn get_vring_size(t: VringType, queue_size: u16) -> usize {
     let (length_except_ring, element_size) = match t {
-        VringType::VRING_DESC => (0, VRING_DESC_ELEMENT_SIZE),
-        VringType::VRING_AVAIL => (6, VRING_AVAIL_ELEMENT_SIZE),
-        VringType::VRING_USED => (6, VRING_USED_ELEMENT_SIZE),
+        VringType::Desc => (0, VRING_DESC_ELEMENT_SIZE),
+        VringType::Avail => (6, VRING_AVAIL_ELEMENT_SIZE),
+        VringType::Used => (6, VRING_USED_ELEMENT_SIZE),
     };
     length_except_ring + element_size * queue_size as usize
 }
@@ -261,27 +259,15 @@ pub fn clone_queue(
     q.set_size(queue.size());
     q.set_ready(queue.ready());
 
-    let mut desc_a = GuestAddress(queue.desc_table());
-    let mut avail_a = GuestAddress(queue.avail_ring());
-    let mut ring_a = GuestAddress(queue.used_ring());
-
     #[cfg(all(feature = "mshv", feature = "snp"))]
     if let Some(_vm) = vm {
-        desc_a = desc_a.translate_gva_with_vmfd(
-            None,
-            get_vring_size(VringType::VRING_DESC, queue.size()) as usize,
-            vm,
-        );
-        avail_a = avail_a.translate_gva_with_vmfd(
-            None,
-            get_vring_size(VringType::VRING_AVAIL, queue.size()) as usize,
-            vm,
-        );
-        ring_a = ring_a.translate_gva_with_vmfd(
-            None,
-            get_vring_size(VringType::VRING_USED, queue.size()) as usize,
-            vm,
-        );
+        let desc_a = GuestAddress(queue.desc_table());
+        let avail_a = GuestAddress(queue.avail_ring());
+        let ring_a = GuestAddress(queue.used_ring());
+
+        desc_a.translate_gva_with_vmfd(None, get_vring_size(VringType::Desc, queue.size()), vm);
+        avail_a.translate_gva_with_vmfd(None, get_vring_size(VringType::Avail, queue.size()), vm);
+        ring_a.translate_gva_with_vmfd(None, get_vring_size(VringType::Used, queue.size()), vm);
     }
     q.try_set_desc_table_address(GuestAddress(queue.desc_table()))
         .unwrap();

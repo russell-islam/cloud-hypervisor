@@ -18,6 +18,7 @@ pub struct IgvmLoadedInfo {
 impl Default for IgvmLoadedInfo {
     fn default() -> Self {
         let ret = MaybeUninit::<IgvmLoadedInfo>::zeroed();
+        // SAFETY: RAM is expected zeroed by default
         unsafe { ret.assume_init() }
     }
 }

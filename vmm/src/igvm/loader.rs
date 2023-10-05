@@ -1,5 +1,4 @@
 use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
-use igvm_defs::IgvmVariableHeaderType;
 use igvm_parser::hv_defs::Vtl;
 use igvm_parser::registers::X86Register;
 use range_map_vec::{Entry, RangeMap};
@@ -77,6 +76,7 @@ impl Loader {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_initial_regs(self) -> Vec<X86Register> {
         self.regs.into_values().collect()
     }
@@ -126,7 +126,7 @@ impl Loader {
         self.memory
             .memory()
             .write(data, GuestAddress(page_base * HV_PAGE_SIZE))
-            .map_err(|e| {
+            .map_err(|_e| {
                 debug!("Importing pages failed due to MemoryError");
                 Error::MemoryUnavailable
             })?;
@@ -134,6 +134,7 @@ impl Loader {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn import_vp_register(&mut self, vtl: Vtl, register: X86Register) -> Result<(), Error> {
         // Only importing to the max VTL for registers is currently allowed, as only one set of registers is stored.
         if vtl != self.max_vtl {

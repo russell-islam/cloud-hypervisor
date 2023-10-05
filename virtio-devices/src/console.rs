@@ -4,8 +4,8 @@
 use super::Error as DeviceError;
 use super::{
     ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_ACCESS_PLATFORM,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -632,6 +632,7 @@ fn get_win_size(tty: &dyn AsRawFd) -> (u16, u16) {
 impl VersionMapped for ConsoleState {}
 
 impl Console {
+    #[allow(clippy::too_many_arguments)]
     /// Create a new virtio console device
     pub fn new(
         id: String,

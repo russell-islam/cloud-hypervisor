@@ -19,7 +19,6 @@ use vm_virtio::AccessPlatform;
 use vm_virtio::{get_vring_size, VringType};
 
 pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
-pub const MAX_QUEUE_SIZE: u32 = 32768;
 
 #[derive(Clone, Versionize)]
 pub struct VirtioPciCommonConfigState {
@@ -54,8 +53,8 @@ impl QueueAdresses {
         let high = high.unwrap_or((self.desc_table_address >> 32) as u32) as u64;
 
         self.desc_table_address = (high << 32) | low;
-        if size.is_some() {
-            self.desc_size = size.unwrap();
+        if let Some(size) = size {
+            self.desc_size = size;
         }
     }
     fn set_avail_ring_address(&mut self, low: Option<u32>, high: Option<u32>, size: Option<u32>) {
@@ -63,8 +62,8 @@ impl QueueAdresses {
         let high = high.unwrap_or((self.avail_ring_address >> 32) as u32) as u64;
 
         self.avail_ring_address = (high << 32) | low;
-        if size.is_some() {
-            self.avail_size = size.unwrap();
+        if let Some(size) = size {
+            self.avail_size = size;
         }
     }
     fn set_used_ring_address(&mut self, low: Option<u32>, high: Option<u32>, size: Option<u32>) {
@@ -72,16 +71,19 @@ impl QueueAdresses {
         let high = high.unwrap_or((self.used_ring_address >> 32) as u32) as u64;
 
         self.used_ring_address = (high << 32) | low;
-        if size.is_some() {
-            self.used_size = size.unwrap();
+        if let Some(size) = size {
+            self.used_size = size;
         }
     }
+    #[allow(dead_code)]
     fn set_desc_size(&mut self, sz: u32) {
         self.desc_size = sz;
     }
+    #[allow(dead_code)]
     fn set_avail_size(&mut self, sz: u32) {
         self.avail_size = sz;
     }
+    #[allow(dead_code)]
     fn set_ring_size(&mut self, sz: u32) {
         self.used_size = sz;
     }
@@ -306,6 +308,7 @@ impl VirtioPciCommonConfig {
         queues: &mut [Queue],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
+        #[cfg(all(feature = "mshv", feature = "snp"))]
         // Asumption: All the queues have the same size
         let qs = queues[0].size();
 
@@ -342,7 +345,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.desc_table_address,
-                            get_vring_size(VringType::VRING_DESC, qs) as u32,
+                            get_vring_size(VringType::Desc, qs) as u32,
                         )
                         .unwrap()
                 }
@@ -362,7 +365,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.avail_ring_address,
-                            get_vring_size(VringType::VRING_AVAIL, qs) as u32,
+                            get_vring_size(VringType::Avail, qs) as u32,
                         )
                         .unwrap()
                 }
@@ -382,7 +385,7 @@ impl VirtioPciCommonConfig {
                     self.vm
                         .gain_page_access(
                             self.queue_addresses.used_ring_address,
-                            get_vring_size(VringType::VRING_USED, qs) as u32,
+                            get_vring_size(VringType::Used, qs) as u32,
                         )
                         .unwrap()
                 }

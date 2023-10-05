@@ -181,38 +181,25 @@ fn direct_kernel_boot_path() -> PathBuf {
 }
 
 fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
-    if is_guest_vm_type_cvm() {
-        // get the default hvc0 igvm file if console string is not passed
-        let console_str = match console {
-            Some(t) => t,
-            None => "hvc0",
-        };
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
 
-        if console_str != "hvc0" && console_str != "ttyS0" {
-            panic!(
-                "{}",
-                format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
-            );
-        }
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
 
-        // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
-        // Please add directory as volume to docker container as /igvm_files
-        // Refer ./scripts/dev_cli.sh for this
-        let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
-        let igvm_path_exist = Path::new(&igvm_filepath);
-        if igvm_path_exist.exists() {
-            let path = PathBuf::from(igvm_filepath);
-
-            path
-        } else {
-            panic!(
-                "{}",
-                format!("IGVM File not found at path: {igvm_filepath}")
-            );
-        }
+    // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+    // Please add directory as volume to docker container as /igvm_files
+    // Refer ./scripts/dev_cli.sh for this
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
     } else {
-        let path = PathBuf::from("");
-        path
+        PathBuf::from("")
     }
 }
 
@@ -646,9 +633,6 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
     let igvm = direct_igvm_boot_path(Some("hvc0"));
     cmd = extend_guest_cmd(
         cmd,
-        #[cfg(target_arch = "x86_64")]
-        direct_kernel_boot_path.to_str().unwrap(),
-        #[cfg(target_arch = "aarch64")]
         kernel_path,
         Some(DIRECT_KERNEL_BOOT_CMDLINE),
         igvm.to_str().unwrap(),
@@ -2672,8 +2656,6 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let kernel_path = direct_kernel_boot_path();
-
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
@@ -2736,8 +2718,6 @@ mod common_parallel {
 
         let mut blk_file_path = workload_path;
         blk_file_path.push("blk.img");
-
-        let kernel_path = direct_kernel_boot_path();
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
@@ -4291,24 +4271,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
         std::fs::write(&temp_config_path, http_body).unwrap();
@@ -4371,24 +4350,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let r = std::panic::catch_unwind(|| {
             // socket has to be created again inside catch_unwind block to avoid errors
@@ -4467,24 +4445,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
 
         let r = std::panic::catch_unwind(|| {
             // socket has to be created again inside catch_unwind block to avoid errors
@@ -4566,24 +4543,23 @@ mod common_parallel {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let mut http_body: String = "".to_owned();
-        if is_guest_vm_type_cvm() {
-            http_body = guest.api_create_body(
+        let http_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
                 cpu_count,
                 direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 true,
                 generate_host_data().as_str(),
-            );
+            )
         } else {
-            http_body = guest.api_create_body(
+            guest.api_create_body(
                 cpu_count,
                 direct_kernel_boot_path().to_str().unwrap(),
                 DIRECT_KERNEL_BOOT_CMDLINE,
                 false,
                 "",
-            );
-        }
+            )
+        };
         simple_api_command(&mut socket, "PUT", "create", Some(&http_body)).unwrap();
 
         // Then boot it
@@ -7322,7 +7298,7 @@ mod common_parallel {
         blk_file_path.push("blk.img");
 
         let mut total_segments = total_pci_disk / 31;
-        total_segments = total_segments + 1;
+        total_segments += 1;
 
         if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
             panic!(

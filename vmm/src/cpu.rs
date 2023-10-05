@@ -81,7 +81,9 @@ use vm_device::BusDevice;
 use vm_memory::ByteValued;
 #[cfg(feature = "guest_debug")]
 use vm_memory::{Bytes, GuestAddressSpace};
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestMemoryAtomic};
+#[cfg(feature = "snp")]
+use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::{
     snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable,
     Transportable,
@@ -900,7 +902,6 @@ impl CpuManager {
             .vcpu_run_interrupted
             .clone();
         let panic_vcpu_run_interrupted = vcpu_run_interrupted.clone();
-        let vm = self.vm.clone();
 
         // Prepare the CPU set the current vCPU is expected to run onto.
         let cpuset = self.affinity.get(&vcpu_id).map(|host_cpus| {
@@ -1212,15 +1213,11 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        let ret = self.create_vcpus(self.boot_vcpus(), snapshot);
-
         #[cfg(feature = "snp")]
         if self.snp_enabled {
-            self.vm
-                .snp_init()
-                .map_err(|e| Error::InitializeSnp(e.into()))?;
+            self.vm.snp_init().map_err(Error::InitializeSnp)?;
         }
-        ret
+        self.create_vcpus(self.boot_vcpus(), snapshot)
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
@@ -1812,14 +1809,12 @@ impl CpuManager {
         xfem: u64,
         xss: u64,
     ) -> Result<[u32; 4]> {
-        let leaf_info = unsafe {
-            self.vcpus[usize::from(cpu_id)]
-                .lock()
-                .unwrap()
-                .vcpu
-                .get_cpuid_values(eax, ecx, xfem, xss)
-                .unwrap()
-        };
+        let leaf_info = self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .get_cpuid_values(eax, ecx, xfem, xss)
+            .unwrap();
         Ok(leaf_info)
     }
 }
@@ -2665,7 +2660,7 @@ impl CpuElf64Writable for CpuManager {
     }
 }
 
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(not(all(feature = "kvm", target_arch = "x86_64")))]
 #[cfg(test)]
 mod tests {
     use arch::x86_64::interrupts::*;

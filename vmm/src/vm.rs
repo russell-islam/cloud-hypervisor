@@ -20,7 +20,9 @@ use crate::config::{NumaConfig, PayloadConfig};
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
-use crate::cpu::{self, CpuManager};
+use crate::cpu;
+#[cfg(feature = "igvm")]
+use crate::cpu::CpuManager;
 use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -35,6 +37,7 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+#[cfg(feature = "igvm")]
 use crate::ArchMemRegion;
 use crate::GuestMemoryMmap;
 use crate::{
@@ -49,6 +52,7 @@ use arch::x86_64::tdx::TdvfSection;
 use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
+#[cfg(feature = "igvm")]
 use arch::RegionType;
 use arch::{NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
@@ -497,16 +501,14 @@ impl Vm {
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
-        #[cfg(feature = "snp")]
-        let mut force_iommu = true;
         #[cfg(all(not(feature = "tdx"), not(feature = "snp")))]
         let force_iommu = false;
-        let mut snp_enabled = false;
+        #[cfg(not(feature = "snp"))]
+        let snp_enabled = false;
         #[cfg(feature = "snp")]
-        {
-            snp_enabled = config.lock().unwrap().is_snp_enabled();
-            force_iommu = snp_enabled;
-        }
+        let snp_enabled = config.lock().unwrap().is_snp_enabled();
+        #[cfg(feature = "snp")]
+        let force_iommu = snp_enabled;
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -572,7 +574,12 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &cpu_manager, &config)?
+            Self::load_payload_async(
+                &memory_manager,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                &config,
+            )?
         } else {
             None
         };
@@ -779,7 +786,8 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
-        let mut snp_enabled = false;
+        #[cfg(not(feature = "snp"))]
+        let snp_enabled = false;
         #[cfg(feature = "snp")]
         let snp_enabled = if snapshot.is_some() {
             false
@@ -869,12 +877,10 @@ impl Vm {
                     })
                     .unwrap();
             } else if #[cfg(feature = "snp")] {
+                // 1 - SNP_ENABLED
+                // 0 - SNP_DISABLED
                 let vm = hypervisor
-                    .create_vm_with_type(if snp_enabled {
-                        1 // SNP_ENABLED
-                    } else {
-                        0 // SNP_DISABLED
-                    }, mem_size)
+                    .create_vm_with_type(u64::from(snp_enabled), mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
@@ -1082,13 +1088,12 @@ impl Vm {
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
-        cpu_manager: Arc<Mutex<CpuManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<CpuManager>>,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         let firmware = &payload.firmware;
         let kernel = &payload.kernel;
-        let initramfs = &payload.initramfs;
-        let cmdline = &payload.cmdline;
+        #[cfg(not(feature = "igvm"))]
         let igvm: Option<std::path::PathBuf> = None;
         #[cfg(feature = "igvm")]
         let igvm = &payload.igvm;
@@ -1147,7 +1152,7 @@ impl Vm {
 
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
-        cpu_manager: &Arc<Mutex<CpuManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<CpuManager>>,
         config: &Arc<Mutex<VmConfig>>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
@@ -1163,12 +1168,20 @@ impl Vm {
             .as_ref()
             .map(|payload| {
                 let memory_manager = memory_manager.clone();
+                #[cfg(feature = "igvm")]
                 let cpu_manager = cpu_manager.clone();
                 let payload = payload.clone();
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
-                    .spawn(move || Self::load_payload(&payload, memory_manager, cpu_manager))
+                    .spawn(move || {
+                        Self::load_payload(
+                            &payload,
+                            memory_manager,
+                            #[cfg(feature = "igvm")]
+                            cpu_manager,
+                        )
+                    })
                     .map_err(Error::KernelLoadThreadSpawn)
             })
             .transpose()
@@ -3205,8 +3218,8 @@ mod tests {
     }
 }
 
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[test]
+#[cfg(not(all(feature = "mshv", feature = "snp")))]
 pub fn test_vm() {
     use hypervisor::VmExit;
     use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
@@ -3258,8 +3271,9 @@ pub fn test_vm() {
     vcpu_regs.rflags = 2;
     vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
+    let gm = GuestMemoryAtomic::new(mem);
     loop {
-        match vcpu.run().expect("run failed") {
+        match vcpu.run(&gm).expect("run failed") {
             VmExit::IoOut(addr, data) => {
                 println!(
                     "IO out -- addr: {:#x} data [{:?}]",

@@ -13,7 +13,6 @@ use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
-use byteorder::BigEndian;
 #[cfg(feature = "snp")]
 use igvm_parser::page_table::X64_PAGE_SIZE as HV_PAGE_SIZE;
 pub use mshv_bindings::*;
@@ -24,9 +23,7 @@ use std::sync::{Arc, RwLock};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::GuestAddress;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemory;
+#[allow(unused_imports)] // MshvVcpu::run() needs this for an unused argument
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
@@ -273,27 +270,31 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
         let mut snp_enabled = false;
-        match vm_type {
-            1 /* SEV-SNP VM */ => {
-                let snp_policy = snp::get_default_snp_guest_policy();
-                snp_enabled = true;
-                let offloaded_features = snp::get_default_vmgexit_offload_features();
-                unsafe {
-                    debug!("Setting the partition isolation policy as: 0x{:x}", snp_policy.as_uint64);
-                    fd.set_partition_property(
-                        hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
-                        snp_policy.as_uint64,
-                    )
-                    .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                    debug!("Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",offloaded_features.as_uint64);
-                    fd.set_partition_property(
-                        hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
-                        offloaded_features.as_uint64,
-                    )
-                    .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                }
-            },
-            _ => { /* Do not need to do anything special for other VM types. */ },
+        if 1 == vm_type {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            snp_enabled = true;
+            let offloaded_features = snp::get_default_vmgexit_offload_features();
+            // SAFETY: Using pre-defined hypercall
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                    snp_policy.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    offloaded_features.as_uint64
+                );
+                fd.set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                    offloaded_features.as_uint64,
+                )
+                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+            }
         }
 
         let msr_list = self.get_msr_list()?;
@@ -323,7 +324,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "snp")]
             host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(
-                mem_size_for_bitmap as usize,
+                mem_size_for_bitmap,
                 HV_PAGE_SIZE as usize,
             )),
             snp_enabled,
@@ -374,6 +375,7 @@ pub struct MshvVcpu {
     cpuid: Vec<CpuIdEntry>,
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
+    #[cfg(feature = "snp")]
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "snp")]
     host_access_pages: Arc<SimpleAtomicBitmap>,
@@ -513,7 +515,7 @@ impl cpu::Vcpu for MshvVcpu {
     #[allow(non_upper_case_globals)]
     fn run(
         &self,
-        guest_memory: &GuestMemoryAtomic<vm_memory::GuestMemoryMmap<AtomicBitmap>>,
+        _guest_memory: &GuestMemoryAtomic<vm_memory::GuestMemoryMmap<AtomicBitmap>>,
     ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         let hv_message: hv_message = hv_message::default();
         match self.fd.run(hv_message) {
@@ -665,10 +667,10 @@ impl cpu::Vcpu for MshvVcpu {
                     let info = x.to_memory_info().unwrap();
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
-                    let GB = gpa / (1024 * 1024 * 1024);
+                    let gb = gpa / (ONE_GB as u64);
                     debug!(
                         "Unaccepted GPA: GVA: {:x}, GPA: {:x} Gigabyte: {:?}",
-                        gva, gpa, GB
+                        gva, gpa, gb
                     );
                     Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                         "Unhandled VCPU exit: Unaccepted GPA"
@@ -677,9 +679,7 @@ impl cpu::Vcpu for MshvVcpu {
                 #[cfg(feature = "snp")]
                 hv_message_type_HVMSG_GPA_ATTRIBUTE_INTERCEPT => {
                     let info = x.to_gpa_attribute_info().unwrap();
-                    let vp_index = info.vp_index;
                     let host_vis = info.__bindgen_anon_1.host_visibility();
-                    // debug!("Attribute intercept: vp_index: {:?}, host_vis: {:x?}", vp_index, host_vis);
                     if host_vis >= HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE {
                         warn!("Ignored attribute intercept with full host vis");
                         return Ok(cpu::VmExit::Ignore);
@@ -728,11 +728,12 @@ impl cpu::Vcpu for MshvVcpu {
                 #[cfg(feature = "snp")]
                 hv_message_type_HVMSG_X64_SEV_VMGEXIT_INTERCEPT => {
                     let info = x.to_vmg_intercept_info().unwrap();
-                    let ghcb_data = (info.ghcb_msr >> GHCB_INFO_BIT_WIDTH) as u64;
+                    let ghcb_data = info.ghcb_msr >> GHCB_INFO_BIT_WIDTH;
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
-                    let op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u64 };
+                    // SAFETY: Functionality implemented in mshv crate
+                    let op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() };
 
                     // Don't understand the need for this check????
                     // assert!(info.__bindgen_anon_1.ghcb_page_valid() != 1);
@@ -740,6 +741,7 @@ impl cpu::Vcpu for MshvVcpu {
                     // debug!("VMG Exit Intercept: op: {:0x}", op);
                     if op == GHCB_INFO_REGISTER_REQUEST as u64 {
                         let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
+                        // SAFETY: Functionality implemented in mshv crate
                         unsafe {
                             ghcb_gpa.__bindgen_anon_1.set_enabled(1);
                             ghcb_gpa
@@ -756,6 +758,7 @@ impl cpu::Vcpu for MshvVcpu {
                         }
 
                         let mut resp_ghcb_msr = svm_ghcb_msr::default();
+                        // SAFETY: Functionality implemented in mshv crate
                         unsafe {
                             resp_ghcb_msr
                                 .__bindgen_anon_2
@@ -792,33 +795,30 @@ impl cpu::Vcpu for MshvVcpu {
 
                         let mut write_msr: u64 = GHCB_INFO_HYP_FEATURE_RESPONSE as u64;
                         // Add support for AP creation
-                        write_msr = write_msr | ((0x3 << GHCB_INFO_BIT_WIDTH) as u64);
+                        write_msr |= (0x3 << GHCB_INFO_BIT_WIDTH) as u64;
                         debug!("GHCB_INFO_HYP_FEATURE_REQUEST: write msr: {:0x}", write_msr);
                         let arr_reg_name_value =
                             [(hv_register_name_HV_X64_REGISTER_GHCB, write_msr)];
                         set_registers_64!(self.fd, arr_reg_name_value)
                             .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                     } else if op == GHCB_INFO_SPECIAL_DBGPRINT as u64 {
-                        let data = unsafe { ghcb_msr.as_uint64 } >> 16;
-                        let bytes = data.to_le_bytes();
+                        //let data = unsafe { ghcb_msr.as_uint64 } >> 16;
+                        //let bytes = data.to_le_bytes();
                         // if let Ok(s) = std::str::from_utf8(bytes.as_slice()) {
                         //     print!("{}", s);
                         // }
                     } else if op == GHCB_INFO_NORMAL as u64 {
-                        // SAFETY: access_info is valid, otherwise we won't be here
-                        let _exit_code =
-                            unsafe { info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code } as u64;
-                        let exit_info1 =
-                            info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u64;
+                        let _exit_code = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code;
+                        let exit_info1 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
 
                         let _exit_code_u32 =
-                            unsafe { info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code } as u32;
+                            info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
                         let exit_info1_u32 =
                             info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
                         let exit_info2 = info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2;
                         let sw_scratch = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
-                        let pfn: u64 =
-                            unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() as u64 };
+                        // SAFETY: Functionality implemented in mshv crate
+                        let pfn: u64 = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
                         let gpa: u64 = pfn << GHCB_INFO_BIT_WIDTH;
                         match _exit_code_u32 {
                             SVM_EXITCODE_HV_DOORBELL_PAGE => match exit_info1_u32 {
@@ -834,12 +834,14 @@ impl cpu::Vcpu for MshvVcpu {
                                 SVM_NAE_HV_DOORBELL_PAGE_SET => {
                                     let mut ghcb_doorbell_gpa =
                                         hv_x64_register_sev_hv_doorbell::default();
+                                    // SAFETY: Functionality implemented in mshv crate
                                     unsafe {
                                         ghcb_doorbell_gpa.__bindgen_anon_1.set_enabled(1);
                                         ghcb_doorbell_gpa
                                             .__bindgen_anon_1
                                             .set_page_number(exit_info2 >> 12);
                                     }
+                                    // SAFETY: R/O value
                                     let write_msr = unsafe { ghcb_doorbell_gpa.as_uint64 };
                                     let arr_reg_name_value = [(
                                         hv_register_name_HV_X64_REGISTER_SEV_DOORBELL_GPA,
@@ -873,20 +875,25 @@ impl cpu::Vcpu for MshvVcpu {
                                         })
                                         .collect();
                                     self.fd.get_reg(&mut reg_assocs).unwrap();
+                                    // SAFETY: R/O values initialized
                                     let value = unsafe { reg_assocs[0].value.reg64 };
                                     let mut arg: mshv_read_write_gpa =
-                                        mshv_read_write_gpa::default();
-                                    arg.base_gpa = gpa + 0x3a0;
-                                    arg.byte_count = 8;
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: gpa + 0x3a0,
+                                            byte_count: 8,
+                                            ..Default::default()
+                                        };
                                     arg.data.copy_from_slice(&value.to_le_bytes());
                                     self.fd.gpa_write(&mut arg).unwrap();
                                 }
                                 SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
                                     let value: u64 = 0;
                                     let mut arg: mshv_read_write_gpa =
-                                        mshv_read_write_gpa::default();
-                                    arg.base_gpa = gpa + 0x3a0;
-                                    arg.byte_count = 8;
+                                        mshv_bindings::mshv_read_write_gpa {
+                                            base_gpa: gpa + 0x3a0,
+                                            byte_count: 8,
+                                            ..Default::default()
+                                        };
                                     arg.data.copy_from_slice(&value.to_le_bytes());
                                     self.fd.gpa_write(&mut arg).unwrap();
                                 }
@@ -898,8 +905,8 @@ impl cpu::Vcpu for MshvVcpu {
                                 }
                             },
                             SVM_EXITCODE_SNP_GUEST_REQUEST => {
-                                let req_gpa = exit_info1 as u64;
-                                let rsp_gpa = exit_info2 as u64;
+                                let req_gpa = exit_info1;
+                                let rsp_gpa = exit_info2;
 
                                 _psp_issue_guest_request(self.vm_fd.clone(), req_gpa, rsp_gpa)
                                     .unwrap();
@@ -949,13 +956,15 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             // IPPROT Handle
                             0x7b => {
-                                let addr = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
+                                let _addr = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                 let port_into = hv_sev_vmgexit_port_info {
                                     as_uint32: (exit_info1 & 0xFFFFFFFF) as u32,
                                 };
+                                // SAFETY: Logic implemented in mshv crate
                                 let port = unsafe { port_into.__bindgen_anon_1.intercepted_port() };
 
                                 let mut len = 4;
+                                // SAFETY: Logic implemented in mshv crate
                                 unsafe {
                                     if port_into.__bindgen_anon_1.operand_size_16bit() == 1 {
                                         len = 2;
@@ -964,11 +973,15 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
                                 }
                                 let is_write =
+                                    // SAFETY: port_info is read through mshv crate
                                     unsafe { port_into.__bindgen_anon_1.access_type() == 0 };
 
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = gpa + 0x01F8;
-                                arg.byte_count = 8;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: gpa + 0x01F8,
+                                        byte_count: 8,
+                                        ..Default::default()
+                                    };
                                 self.fd.gpa_read(&mut arg).unwrap();
                                 let mut bytes: [u8; 8] = [0u8; 8];
                                 bytes.copy_from_slice(&arg.data[0..8]);
@@ -988,7 +1001,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         )?;
                                     }
 
-                                    let mut v = u32::from_le_bytes(data);
+                                    let v = u32::from_le_bytes(data);
                                     //v =  ((v) & ((1u64 << ((len) * 8)) - 1) as u32);
                                     // /* Preserve high bits in EAX but clear out high bits in RAX */
                                     // let mask = 0xffffffff >> (32 - len * 8);
@@ -1008,8 +1021,8 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             0x8000_0001 => {
                                 // MMIO READ
-                                let src_gpa = exit_info1 as u64;
-                                let dst_gpa = sw_scratch as u64;
+                                let src_gpa = exit_info1;
+                                let dst_gpa = sw_scratch;
                                 let data_len = exit_info2 as usize;
                                 // According to SPEC
                                 assert!(data_len <= 0x8);
@@ -1020,9 +1033,12 @@ impl cpu::Vcpu for MshvVcpu {
                                         .mmio_read(src_gpa, &mut data[0..data_len])
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                                 }
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = dst_gpa;
-                                arg.byte_count = data_len as u32;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: dst_gpa,
+                                        byte_count: data_len as u32,
+                                        ..Default::default()
+                                    };
                                 arg.data[0..data_len].copy_from_slice(&data);
                                 // Limitation of gpa_read/write
                                 assert!(data_len <= 16);
@@ -1040,20 +1056,23 @@ impl cpu::Vcpu for MshvVcpu {
                             }
                             0x8000_0002 => {
                                 // MMIO WRITE
-                                let dst_gpa = exit_info1 as u64;
-                                let src_gpa = sw_scratch as u64;
+                                let dst_gpa = exit_info1;
+                                let src_gpa = sw_scratch;
                                 let data_len = exit_info2 as usize;
                                 // According to SPEC
                                 assert!(data_len <= 0x8);
-                                let mut arg: mshv_read_write_gpa = mshv_read_write_gpa::default();
-                                arg.base_gpa = src_gpa;
-                                arg.byte_count = data_len as u32;
+                                let mut arg: mshv_read_write_gpa =
+                                    mshv_bindings::mshv_read_write_gpa {
+                                        base_gpa: src_gpa,
+                                        byte_count: data_len as u32,
+                                        ..Default::default()
+                                    };
                                 // Limitation of gpa_read/write
                                 assert!(data_len <= 16);
                                 self.fd.gpa_read(&mut arg).unwrap();
                                 if let Some(vm_ops) = &self.vm_ops {
                                     vm_ops
-                                        .mmio_write(dst_gpa, &mut arg.data[0..data_len])
+                                        .mmio_write(dst_gpa, &arg.data[0..data_len])
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
                                 }
 
@@ -1537,6 +1556,7 @@ impl vm::Vm for MshvVm {
             cpuid: Vec::new(),
             msrs: self.msrs.clone(),
             vm_ops,
+            #[cfg(feature = "snp")]
             vm_fd: self.fd.clone(),
             #[cfg(feature = "snp")]
             host_access_pages: self.host_access_pages.clone(),
@@ -1783,7 +1803,7 @@ impl vm::Vm for MshvVm {
         page_size: u32,
         pages: &[u64],
     ) -> vm::Result<()> {
-        if pages.len() == 0 {
+        if pages.is_empty() {
             return Ok(());
         }
 
@@ -1797,7 +1817,7 @@ impl vm::Vm for MshvVm {
         // everything from pages.
         unsafe {
             let pages_slice: &mut [u64] = isolated_pages[0].page_number.as_mut_slice(pages.len());
-            pages_slice.copy_from_slice(&pages);
+            pages_slice.copy_from_slice(pages);
         }
         self.fd
             .import_isolated_pages(&isolated_pages[0])
@@ -1869,12 +1889,11 @@ impl vm::Vm for MshvVm {
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
         let gpa_list: Vec<u64> = (start_gpfn..=end_gpfn)
-            .into_iter()
             .filter(|x| !self.host_access_pages.is_bit_set(*x as usize))
             .map(|x| x << PAGE_SHIFT)
             .collect();
 
-        if gpa_list.len() > 0 {
+        if !gpa_list.is_empty() {
             _modify_gpa_host_access(
                 self.fd.clone(),
                 HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE,
@@ -1918,7 +1937,7 @@ fn _modify_gpa_host_access(
     // everything from gpas.
     unsafe {
         let gpas_slice: &mut [u64] = gpa_list[0].gpa_list.as_mut_slice(gpas.len());
-        gpas_slice.copy_from_slice(&gpas);
+        gpas_slice.copy_from_slice(gpas);
     }
 
     fd.modify_gpa_host_access(&gpa_list[0])

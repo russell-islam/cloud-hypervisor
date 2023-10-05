@@ -2,7 +2,7 @@
 
 //! Loader implementation to load IGVM files.
 
-use crate::cpu::{CpuManager, Error as CpuManagerError};
+use crate::cpu::CpuManager;
 
 use crate::igvm::loader::Loader;
 use crate::igvm::IgvmLoadedInfo;
@@ -10,11 +10,9 @@ use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::ArchMemRegion;
 use arch::RegionType;
-use hypervisor::mshv::*;
 use igvm_defs::IgvmPageDataType;
 use igvm_defs::IgvmPlatformType;
 use igvm_defs::MemoryMapEntryType;
-use igvm_parser::hv_defs::Vtl;
 use igvm_parser::IgvmDirectiveHeader;
 use igvm_parser::IgvmFile;
 use igvm_parser::IgvmPlatformHeader;
@@ -22,13 +20,9 @@ use igvm_parser::IgvmRelocatableRegion;
 use igvm_parser::IsolationType;
 
 use igvm_defs::IGVM_VHS_MEMORY_MAP_ENTRY;
-use igvm_defs::IGVM_VHS_MEMORY_RANGE;
-use igvm_defs::IGVM_VHS_MMIO_RANGES;
 use igvm_defs::IGVM_VHS_PARAMETER;
 use igvm_defs::IGVM_VHS_PARAMETER_INSERT;
-use igvm_parser::registers::TableRegister;
 
-use igvm_parser::page_table::CpuPagingState;
 use igvm_parser::snp_defs::SevVmsa;
 pub use mshv_bindings::*;
 use std::collections::HashMap;
@@ -39,9 +33,6 @@ use std::io::SeekFrom;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::GuestMemoryAtomic;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryMmap};
 use zerocopy::AsBytes;
 
 #[derive(Debug, Error)]
@@ -114,6 +105,7 @@ pub struct AcpiTables<'a> {
 struct GpaPages {
     pub gpa: u64,
     pub page_type: u32,
+    #[allow(dead_code)]
     pub page_size: u32,
 }
 /// Load the given IGVM file.
@@ -163,7 +155,7 @@ pub fn load_igvm(
     let max_vtl = max_vtl
         .try_into()
         .expect("igvm file should be valid after new_from_binary");
-    let mut loader = Loader::new(memory.clone(), max_vtl);
+    let mut loader = Loader::new(memory, max_vtl);
 
     #[derive(Debug)]
     enum ParameterAreaState {
@@ -187,7 +179,7 @@ pub fn load_igvm(
             ParameterAreaState::Inserted => panic!("igvmfile is not valid"),
         };
         let offset = info.byte_offset as usize;
-        let end_of_parameter = offset as usize + parameter.len();
+        let end_of_parameter = offset + parameter.len();
 
         if end_of_parameter > *max_size as usize {
             // TODO: tracing for which parameter was too big?
@@ -249,11 +241,11 @@ pub fn load_igvm(
                         BootPageAcceptance::SecretsPage
                     }
                     IgvmPageDataType::CPUID_DATA => {
+                        // SAFETY: CPUID is readonly
                         unsafe {
                             let cpuid_page_p: *mut hv_psp_cpuid_page =
                                 data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
                             let cpuid_page: &mut hv_psp_cpuid_page = &mut *cpuid_page_p;
-                            let i: usize = 0; /* Type usize */
                             for i in 0..cpuid_page.count {
                                 let leaf = cpuid_page.cpuid_leaf_info[i as usize];
                                 let mut in_leaf = cpu_manager
@@ -318,7 +310,7 @@ pub fn load_igvm(
             IgvmDirectiveHeader::VpCount(info) => {
                 import_parameter(&mut parameter_areas, info, proc_count.as_bytes())?;
             }
-            IgvmDirectiveHeader::MmioRanges(info) => {
+            IgvmDirectiveHeader::MmioRanges(_info) => {
                 todo!("unsupported IgvmPageDataType");
             }
             IgvmDirectiveHeader::MemoryMap(info) => {
@@ -326,7 +318,7 @@ pub fn load_igvm(
 
                 for mem in mem_regions.iter() {
                     if mem.r_type == RegionType::Ram {
-                        memory_map.push(memory_map_entry(&mem));
+                        memory_map.push(memory_map_entry(mem));
                     }
                 }
                 import_parameter(&mut parameter_areas, info, memory_map.as_bytes())?;
@@ -360,7 +352,7 @@ pub fn load_igvm(
             }
             IgvmDirectiveHeader::SnpVpContext {
                 gpa,
-                compatibility_mask,
+                compatibility_mask: _,
                 vp_index,
                 vmsa,
             } => {
@@ -418,8 +410,8 @@ pub fn load_igvm(
                 loaded_info.snp_id_block.author_public_key = **author_public_key;
             }
             IgvmDirectiveHeader::X64VbsVpContext {
-                vtl,
-                registers,
+                vtl: _,
+                registers: _,
                 compatibility_mask: _,
             } => {
                 todo!("VbsVpContext not supported");
@@ -509,7 +501,7 @@ pub fn load_igvm(
                 group.len(),
                 if group.len() > 1 { "s" } else { "" }
             );
-            let mut v: Vec<u64> = group.iter().map(|gpa| gpa.gpa >> 12).collect();
+            let v: Vec<u64> = group.iter().map(|gpa| gpa.gpa >> 12).collect();
             memory_manager
                 .lock()
                 .unwrap()
