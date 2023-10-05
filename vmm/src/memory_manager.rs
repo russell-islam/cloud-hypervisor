@@ -149,7 +149,7 @@ struct GuestRamMapping {
 }
 
 #[derive(Clone, Serialize, Deserialize, Versionize)]
-struct ArchMemRegion {
+pub struct ArchMemRegion {
     base: u64,
     size: usize,
     r_type: RegionType,
