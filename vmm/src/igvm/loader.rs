@@ -1,5 +1,4 @@
 use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
-use igvm_defs::IgvmVariableHeaderType;
 use igvm_parser::hv_defs::Vtl;
 use igvm_parser::registers::X86Register;
 use range_map_vec::{Entry, RangeMap};
