@@ -23,6 +23,7 @@ fuzz_target!(|bytes| {
         kernel: None,
         cmdline: Some(String::from_utf8_lossy(&bytes).to_string()),
         initramfs: None,
+        igvm: None,
     };
     let kernel_cmdline = match vmm::vm::Vm::generate_cmdline(&payload_config) {
         Ok(cmdline) => cmdline,

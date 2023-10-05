@@ -295,6 +295,10 @@ pub struct TopLevel {
     #[argh(switch, short = 'V', long = "version")]
     /// print version information
     version: bool,
+
+    #[argh(option, long = "igvm")]
+    /// path to IGVM file
+    igvm: Option<String>,
 }
 
 impl TopLevel {
@@ -375,6 +379,7 @@ impl TopLevel {
         #[cfg(feature = "guest_debug")]
         let gdb = self.gdb.is_some();
         let tpm = self.tpm.as_deref();
+        let igvm = self.igvm.as_deref();
 
         config::VmParams {
             cpus,
@@ -405,6 +410,7 @@ impl TopLevel {
             gdb,
             platform,
             tpm,
+            igvm,
         }
     }
 }
