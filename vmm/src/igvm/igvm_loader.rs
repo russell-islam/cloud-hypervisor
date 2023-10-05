@@ -310,7 +310,7 @@ pub fn load_igvm(
             IgvmDirectiveHeader::VpCount(info) => {
                 import_parameter(&mut parameter_areas, info, proc_count.as_bytes())?;
             }
-            IgvmDirectiveHeader::MmioRanges(info) => {
+            IgvmDirectiveHeader::MmioRanges(_info) => {
                 todo!("unsupported IgvmPageDataType");
             }
             IgvmDirectiveHeader::MemoryMap(info) => {
@@ -352,7 +352,7 @@ pub fn load_igvm(
             }
             IgvmDirectiveHeader::SnpVpContext {
                 gpa,
-                compatibility_mask,
+                compatibility_mask: _,
                 vp_index,
                 vmsa,
             } => {
@@ -410,8 +410,8 @@ pub fn load_igvm(
                 loaded_info.snp_id_block.author_public_key = **author_public_key;
             }
             IgvmDirectiveHeader::X64VbsVpContext {
-                vtl,
-                registers,
+                vtl: _,
+                registers: _,
                 compatibility_mask: _,
             } => {
                 todo!("VbsVpContext not supported");
