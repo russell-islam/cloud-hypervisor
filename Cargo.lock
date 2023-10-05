@@ -7,7 +7,7 @@ name = "acpi_tables"
 version = "0.1.0"
 source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#1a733bf690ccc10bdfeacad33e3c9f6cce0008fd"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.7.1",
 ]
 
 [[package]]
@@ -280,6 +280,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitfield-struct"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eac32db62a43cf33353ce30b4a208b08193ea2086a1c6c004acb0073c706a29d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.31",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,6 +431,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8f48d60e5b4d2c53d5c2b1d8a58c849a70ae5e5509b08a48d047e3b65714a74"
 dependencies = [
  "rustc_version",
+]
+
+[[package]]
+name = "crc32fast"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b540bd8bc810d3885c6ea91e2018302f68baba2129ab3e88f32389ee9370880d"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -923,6 +943,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "igvm"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c258454f1d2e2e0da1429f730c830e85be856d9b3c3656f3d36f241cf96a5a6a"
+dependencies = [
+ "bitfield-struct",
+ "crc32fast",
+ "hex",
+ "igvm_defs",
+ "open-enum",
+ "range_map_vec",
+ "thiserror",
+ "tracing",
+ "zerocopy 0.6.4",
+]
+
+[[package]]
+name = "igvm_defs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2be6ad9bcd6fb6a25a03d3ca4b7195dfd3a59f0b8fd8790fb529e0c63e5be18d"
+dependencies = [
+ "bitfield-struct",
+ "open-enum",
+ "static_assertions",
+ "zerocopy 0.6.4",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,7 +1202,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "vmm-sys-util",
- "zerocopy",
+ "zerocopy 0.7.1",
 ]
 
 [[package]]
@@ -1248,6 +1297,26 @@ name = "once_cell"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd8b5dd2ae5ed71462c540258bedcb51965123ad7e7ccf4b9a8cafaa4a63576d"
+
+[[package]]
+name = "open-enum"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9807f1199cf84ec7cc801a79e5ee9aa5178e4762c6b9c7066c30b3cabdcd911e"
+dependencies = [
+ "open-enum-derive",
+]
+
+[[package]]
+name = "open-enum-derive"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "894ae443e59fecf7173ab3b963473f44193fa71b3c8953c61a5bd5f30880bb88"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "openssl-src"
@@ -1595,6 +1664,12 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
 ]
+
+[[package]]
+name = "range_map_vec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8edc89eaa583cf6bc4c6ef16a219f0a60d342ca3bf0eae793560038ac8af1795"
 
 [[package]]
 name = "rate_limiter"
@@ -2383,6 +2458,8 @@ dependencies = [
  "gdbstub",
  "gdbstub_arch",
  "hypervisor",
+ "igvm",
+ "igvm_defs",
  "libc",
  "linux-loader",
  "log",
@@ -2412,7 +2489,7 @@ dependencies = [
  "vm-virtio",
  "vmm-sys-util",
  "zbus",
- "zerocopy",
+ "zerocopy 0.7.1",
 ]
 
 [[package]]
@@ -2752,12 +2829,33 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20707b61725734c595e840fb3704378a0cd2b9c74cc9e6e20724838fc6a1e2f9"
+dependencies = [
+ "byteorder",
+ "zerocopy-derive 0.6.4",
+]
+
+[[package]]
+name = "zerocopy"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f00a66029e63d181fa590cc5694cf2afbc0974a4604824e80017b1789f99c07"
 dependencies = [
  "byteorder",
- "zerocopy-derive",
+ "zerocopy-derive 0.7.1",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56097d5b91d711293a42be9289403896b68654625021732067eac7a4ca388a1f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.31",
 ]
 
 [[package]]
