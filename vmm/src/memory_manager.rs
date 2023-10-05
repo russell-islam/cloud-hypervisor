@@ -150,9 +150,9 @@ struct GuestRamMapping {
 
 #[derive(Clone, Serialize, Deserialize, Versionize)]
 pub struct ArchMemRegion {
-    base: u64,
-    size: usize,
-    r_type: RegionType,
+    pub base: u64,
+    pub size: usize,
+    pub r_type: RegionType,
 }
 
 pub struct MemoryManager {
@@ -2152,6 +2152,9 @@ impl MemoryManager {
         }
 
         Ok(())
+    }
+    pub fn current_ram(&self) -> u64 {
+        self.current_ram
     }
 }
 

@@ -61,6 +61,8 @@ dependencies = [
  "byteorder",
  "fdt",
  "hypervisor",
+ "igvm",
+ "igvm_defs",
  "libc",
  "linux-loader",
  "log",
