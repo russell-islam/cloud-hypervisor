@@ -444,7 +444,7 @@ cmd_tests() {
                 exit 1
             fi
             echo "Using MS VMLINUX"
-            cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+            sudo cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
         fi
         mkdir -p $DEST_IGVM_FILES_PATH
 
@@ -581,7 +581,7 @@ cmd_tests() {
                 exit 1
             fi
             echo "Using MS VMLINUX"
-            cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+            sudo cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
         fi
         mkdir -p $DEST_IGVM_FILES_PATH
 
