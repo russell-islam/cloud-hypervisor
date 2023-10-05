@@ -3,13 +3,6 @@ variables:
   DEFAULT_BRANCH: msft-main
   RUST_VERSION: 1.68.1
 
-resources:
-  repositories:
-    - repository: igvm-parser
-      type: git
-      name: LSG/igvm-parser
-      ref: refs/heads/main
-
 trigger:
   batch: false
   tags:
@@ -70,18 +63,12 @@ stages:
         steps:
         - checkout: self
           persistCredentials: true
-        - checkout: igvm-parser
-          persistCredentials: true
-          fetchTags: false
-          clean: true
         - template: templates/ubuntu-20.04-build.yml
         - bash: |
             set -e
             set -x
 
-            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
             $(BUILD_CMD) --release
-            popd
           displayName: Build
 
       - job: CH_FMT
@@ -93,18 +80,12 @@ stages:
         steps:
         - checkout: self
           persistCredentials: true
-        - checkout: igvm-parser
-          persistCredentials: true
-          fetchTags: false
-          clean: true
         - template: templates/ubuntu-20.04-build.yml
         - bash: |
             set -e
             set -x
 
-            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
             cargo fmt -- --check
-            popd
 
         - bash: test -z "$(git status --porcelain)"
 
