@@ -68,9 +68,7 @@ stages:
             set -e
             set -x
 
-            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
             $(BUILD_CMD) --release
-            popd
           displayName: Build
 
       - job: CH_FMT
@@ -87,9 +85,7 @@ stages:
             set -e
             set -x
 
-            pushd "$(Agent.BuildDirectory)/s/cloud-hypervisor"
             cargo fmt -- --check
-            popd
 
         - bash: test -z "$(git status --porcelain)"
 
