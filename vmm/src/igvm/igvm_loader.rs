@@ -2,7 +2,7 @@
 
 //! Loader implementation to load IGVM files.
 
-use crate::cpu::{CpuManager, Error as CpuManagerError};
+use crate::cpu::CpuManager;
 
 use crate::igvm::loader::Loader;
 use crate::igvm::IgvmLoadedInfo;
@@ -10,11 +10,9 @@ use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 use crate::ArchMemRegion;
 use arch::RegionType;
-use hypervisor::mshv::*;
 use igvm_defs::IgvmPageDataType;
 use igvm_defs::IgvmPlatformType;
 use igvm_defs::MemoryMapEntryType;
-use igvm_parser::hv_defs::Vtl;
 use igvm_parser::IgvmDirectiveHeader;
 use igvm_parser::IgvmFile;
 use igvm_parser::IgvmPlatformHeader;
@@ -22,13 +20,9 @@ use igvm_parser::IgvmRelocatableRegion;
 use igvm_parser::IsolationType;
 
 use igvm_defs::IGVM_VHS_MEMORY_MAP_ENTRY;
-use igvm_defs::IGVM_VHS_MEMORY_RANGE;
-use igvm_defs::IGVM_VHS_MMIO_RANGES;
 use igvm_defs::IGVM_VHS_PARAMETER;
 use igvm_defs::IGVM_VHS_PARAMETER_INSERT;
-use igvm_parser::registers::TableRegister;
 
-use igvm_parser::page_table::CpuPagingState;
 use igvm_parser::snp_defs::SevVmsa;
 pub use mshv_bindings::*;
 use std::collections::HashMap;
@@ -39,7 +33,6 @@ use std::io::SeekFrom;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use vm_memory::bitmap::AtomicBitmap;
 use zerocopy::AsBytes;
 
 #[derive(Debug, Error)]
