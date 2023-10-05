@@ -17,6 +17,8 @@ use crate::InitramfsConfig;
 use crate::RegionType;
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
+#[cfg(feature = "igvm")]
+use igvm_parser::snp_defs::SevVmsa;
 use linux_loader::loader::bootparam::boot_params;
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
@@ -61,6 +63,8 @@ pub const _NSIG: i32 = 65;
 pub struct EntryPoint {
     /// Address in guest memory where the guest must start execution
     pub entry_addr: GuestAddress,
+    #[cfg(feature = "igvm")]
+    pub vmsa: Option<SevVmsa>,
 }
 
 const E820_RAM: u32 = 1;
