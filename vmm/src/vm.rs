@@ -25,6 +25,11 @@ use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
+#[cfg(feature = "igvm")]
+use crate::igvm::igvm_loader;
+#[cfg(feature = "igvm")]
+use crate::memory_manager::ArchMemRegion;
+
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -46,6 +51,8 @@ use arch::x86_64::tdx::TdvfSection;
 use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
+#[cfg(feature = "igvm")]
+use arch::RegionType;
 use arch::{NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
@@ -99,6 +106,14 @@ use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 /// Errors associated with VM management
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(feature = "igvm")]
+    #[error("Cannot open igvm file: {0}")]
+    IgvmFile(#[source] io::Error),
+
+    #[cfg(feature = "igvm")]
+    #[error("Cannot load the igvm into memory: {0}")]
+    IgvmLoad(#[source] igvm_loader::Error),
+
     #[error("Cannot open kernel file: {0}")]
     KernelFile(#[source] io::Error),
 
@@ -481,12 +496,6 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &config)?
-        } else {
-            None
-        };
-
         info!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
@@ -547,6 +556,17 @@ impl Vm {
                 tdx_enabled,
             )
             .map_err(Error::CpuManager)?;
+
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+            )?
+        } else {
+            None
+        };
 
         // The initial TDX configuration must be done before the vCPUs are
         // created
@@ -970,6 +990,62 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(feature = "igvm")]
+    fn load_igvm(
+        igvm: File,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+        cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+    ) -> Result<EntryPoint> {
+        /*
+        BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff] usable
+        BIOS-e820: [mem 0x00000000000a0000-0x00000000000fffff] reserved
+        BIOS-e820: [mem 0x0000000000100000-0x00000000001fffff] ACPI data
+        BIOS-e820: [mem 0x0000000001a00000-0x0000000003c79fff] usable
+         */
+        let cur_ram_size = memory_manager.lock().unwrap().current_ram();
+        debug!("current ram size: {:?}", cur_ram_size);
+        let num_cpus = cpu_manager.lock().unwrap().vcpus().len() as u32;
+        let mut arch_mem_regions: Vec<ArchMemRegion> = Vec::new();
+        arch_mem_regions.push(ArchMemRegion {
+            base: 0x00000000e8000000,
+            size: 0x10000000,
+            r_type: RegionType::Reserved,
+        });
+        if cur_ram_size <= 3 * 1024 * 1024 * 1024 {
+            arch_mem_regions.push(ArchMemRegion {
+                base: 0x200000,
+                size: (cur_ram_size - 0x200000) as usize,
+                r_type: RegionType::Ram,
+            });
+        } else {
+            arch_mem_regions.push(ArchMemRegion {
+                base: 0x200000,
+                size: 3 * 1024 * 1024 * 1024 - 0x200000,
+                r_type: RegionType::Ram,
+            });
+            arch_mem_regions.push(ArchMemRegion {
+                base: 0x0000000100000000,
+                size: (cur_ram_size - 3 * 1024 * 1024 * 1024) as usize,
+                r_type: RegionType::Ram,
+            });
+        }
+        let res = igvm_loader::load_igvm(
+            &igvm,
+            memory_manager,
+            cpu_manager,
+            arch_mem_regions,
+            num_cpus,
+            "",
+        )
+        .map_err(Error::IgvmLoad)?;
+
+        Ok(EntryPoint {
+            entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
+            #[cfg(feature = "sev_snp")]
+            vmsa: Some(res.vmsa),
+        })
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
@@ -998,7 +1074,11 @@ impl Vm {
         if let PvhEntryPresent(entry_addr) = entry_addr.pvh_boot_cap {
             // Use the PVH kernel entry point to boot the guest
             info!("Kernel loaded: entry_addr = 0x{:x}", entry_addr.0);
-            Ok(EntryPoint { entry_addr })
+            Ok(EntryPoint {
+                entry_addr,
+                #[cfg(feature = "igvm")]
+                vmsa: None,
+            })
         } else {
             Err(Error::KernelMissingPvhHeader)
         }
@@ -1008,6 +1088,7 @@ impl Vm {
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
+        #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         match (
@@ -1025,7 +1106,14 @@ impl Vm {
                 let cmdline = Self::generate_cmdline(payload)?;
                 Self::load_kernel(kernel, Some(cmdline), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            _ => {
+                #[cfg(feature = "igvm")]
+                if let Some(_igvm_file) = &payload.igvm {
+                    let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
+                    return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                }
+                Err(Error::InvalidPayload)
+            }
         }
     }
 
@@ -1050,6 +1138,7 @@ impl Vm {
     fn load_payload_async(
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
+        #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1065,10 +1154,19 @@ impl Vm {
             .map(|payload| {
                 let memory_manager = memory_manager.clone();
                 let payload = payload.clone();
+                #[cfg(feature = "igvm")]
+                let cpu_manager = cpu_manager.clone();
 
                 std::thread::Builder::new()
                     .name("payload_loader".into())
-                    .spawn(move || Self::load_payload(&payload, memory_manager))
+                    .spawn(move || {
+                        Self::load_payload(
+                            &payload,
+                            memory_manager,
+                            #[cfg(feature = "igvm")]
+                            cpu_manager,
+                        )
+                    })
                     .map_err(Error::KernelLoadThreadSpawn)
             })
             .transpose()

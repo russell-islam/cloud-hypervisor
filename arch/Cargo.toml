@@ -6,6 +6,7 @@ edition = "2021"
 
 [features]
 default = []
+igvm = ["igvm_defs", "igvm_parser"]
 sev_snp = []
 tdx = []
 
