@@ -76,6 +76,7 @@ impl Loader {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_initial_regs(self) -> Vec<X86Register> {
         self.regs.into_values().collect()
     }
@@ -133,6 +134,7 @@ impl Loader {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn import_vp_register(&mut self, vtl: Vtl, register: X86Register) -> Result<(), Error> {
         // Only importing to the max VTL for registers is currently allowed, as only one set of registers is stored.
         if vtl != self.max_vtl {
