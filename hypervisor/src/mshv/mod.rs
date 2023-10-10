@@ -638,6 +638,21 @@ impl cpu::Vcpu for MshvVcpu {
     }
     #[cfg(target_arch = "x86_64")]
     ///
+    /// X86 specific call to retrieve cpuid leaf
+    ///
+    fn get_cpuid_values(
+        &self,
+        function: u32,
+        index: u32,
+        xfem: u64,
+        xss: u64,
+    ) -> cpu::Result<[u32; 4]> {
+        self.fd
+            .get_cpuid_values(function, index, xfem, xss)
+            .map_err(|e| cpu::HypervisorCpuError::GetCpuidVales(e.into()))
+    }
+    #[cfg(target_arch = "x86_64")]
+    ///
     /// Returns the state of the LAPIC (Local Advanced Programmable Interrupt Controller).
     ///
     fn get_lapic(&self) -> cpu::Result<crate::arch::x86::LapicState> {
