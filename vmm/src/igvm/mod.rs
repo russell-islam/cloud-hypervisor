@@ -1,4 +1,5 @@
 pub mod igvm_loader;
+mod loader;
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use igvm_parser::snp_defs::SevVmsa;
 use std::mem::MaybeUninit;
@@ -28,4 +29,35 @@ impl IgvmLoadedInfo {
             ..Default::default()
         }
     }
+}
+pub const HV_PAGE_SIZE: u64 = 4096;
+
+/// The page acceptance used for importing pages into the initial launch context of the guest.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum BootPageAcceptance {
+    /// The page is accepted exclusive (no host visibility) and the page data is measured.
+    Exclusive,
+    /// The page is accepted exclusive (no host visibility) and the page data is unmeasured.
+    ExclusiveUnmeasured,
+    /// The page contains hardware-specific VP context information.
+    VpContext,
+    /// This page communicates error information to the host.
+    ErrorPage,
+    /// This page communicates hardware-specific secret information and the page data is unmeasured.
+    SecretsPage,
+    /// This page includes guest-specified CPUID information.
+    CpuidPage,
+    /// This page should include the enumeration of extended state CPUID leaves.
+    CpuidExtendedStatePage,
+}
+
+/// The startup memory type used to notify a well behaved host that memory should be present before attempting to
+/// start the guest.
+#[derive(Debug, PartialEq, Eq)]
+pub enum StartupMemoryType {
+    /// The range is normal memory.
+    Ram,
+    /// The range is normal memory that additionally can have VTL2 protections
+    /// applied by the guest.
+    Vtl2ProtectableRam,
 }

@@ -2470,6 +2470,7 @@ dependencies = [
  "once_cell",
  "option_parser",
  "pci",
+ "range_map_vec",
  "seccompiler",
  "serde",
  "serde_json",
