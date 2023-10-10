@@ -257,6 +257,11 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set TSC frequency: {0}")]
     SetTscKhz(#[source] anyhow::Error),
+    ///
+    /// Setting MSR entries error
+    ///
+    #[error("Failed to set CPUID entries: {0}")]
+    GetCpuidVales(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -466,5 +471,14 @@ pub trait Vcpu: Send + Sync {
     ///
     fn set_tsc_khz(&self, _freq: u32) -> Result<()> {
         Ok(())
+    }
+    fn get_cpuid_values(
+        &self,
+        _function: u32,
+        _index: u32,
+        _xfem: u64,
+        _xss: u64,
+    ) -> Result<[u32; 4]> {
+        unimplemented!()
     }
 }
