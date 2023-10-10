@@ -991,7 +991,6 @@ impl Vm {
         igvm: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "snp")] host_data: &str,
     ) -> Result<EntryPoint> {
         /*
         BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff] usable
@@ -1033,8 +1032,6 @@ impl Vm {
             arch_mem_regions,
             num_cpus,
             "",
-            #[cfg(feature = "snp")]
-            host_data,
         )
         .map_err(Error::IgvmLoad)?;
 
