@@ -802,7 +802,7 @@ impl Vm {
             #[cfg(feature = "snp")]
             snp_enabled,
             #[cfg(feature = "snp")]
-            vm_config.lock().unwrap().memory.size,
+            vm_config.lock().unwrap().memory.total_size(),
         )?;
 
         let phys_bits = physical_bits(vm_config.lock().unwrap().cpus.max_phys_bits);
