@@ -1213,11 +1213,17 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
-        #[cfg(feature = "snp")]
+        // Note: Please do not change the ordering of creation of vcpu.
+        // For SEV-SNP VM it is a requirement CPUs are created before
+        // transitioning the VM into a secure state.
+        let ret = self.create_vcpus(self.boot_vcpus(), snapshot);
+
         if self.snp_enabled {
+            #[cfg(feature = "snp")]
             self.vm.snp_init().map_err(Error::InitializeSnp)?;
         }
-        self.create_vcpus(self.boot_vcpus(), snapshot)
+
+        ret
     }
 
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
