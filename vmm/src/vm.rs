@@ -991,6 +991,7 @@ impl Vm {
         igvm: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+        #[cfg(feature = "sev_snp")] host_data: &str,
     ) -> Result<EntryPoint> {
         /*
         BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff] usable
@@ -1032,6 +1033,8 @@ impl Vm {
             arch_mem_regions,
             num_cpus,
             "",
+            #[cfg(feature = "sev_snp")]
+            host_data,
         )
         .map_err(Error::IgvmLoad)?;
 
@@ -1106,7 +1109,30 @@ impl Vm {
             #[cfg(feature = "igvm")]
             (None, None, _, _, Some(igvm)) => {
                 let igvm = File::open(igvm).map_err(Error::IgvmFile)?;
-                Self::load_igvm(igvm, memory_manager, cpu_manager)
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "sev_snp")] {
+                        let host_data = &payload.host_data;
+                    } else {
+                        let host_data: Option<&str> = None;
+                    }
+                }
+                if let Some(_host_data_str) = host_data {
+                    Self::load_igvm(
+                        igvm,
+                        memory_manager,
+                        cpu_manager,
+                        #[cfg(feature = "sev_snp")]
+                        _host_data_str,
+                    )
+                } else {
+                    Self::load_igvm(
+                        igvm,
+                        memory_manager,
+                        cpu_manager,
+                        #[cfg(feature = "sev_snp")]
+                        "",
+                    )
+                }
             }
             _ => Err(Error::InvalidPayload),
         }
