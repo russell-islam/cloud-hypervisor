@@ -108,6 +108,7 @@ pub fn load_igvm(
     mem_regions: Vec<ArchMemRegion>,
     proc_count: u32,
     cmdline: &str,
+    #[cfg(feature = "sev_snp")] host_data: &str,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let mut loaded_info: Box<IgvmLoadedInfo> = Box::new(IgvmLoadedInfo::new());
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
@@ -120,7 +121,15 @@ pub fn load_igvm(
     file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
     file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
 
-    let host_data_contents = [0; 32];
+    let mut _host_data_contents = [0; 32];
+    #[cfg(feature = "sev_snp")]
+    {
+        if !host_data.is_empty() {
+            assert_eq!(64, host_data.len());
+            hex::decode_to_slice(host_data, &mut _host_data_contents as &mut [u8])
+                .expect("Failed to decode host data");
+        }
+    }
 
     let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(Error::InvalidIgvmFile)?;
@@ -508,7 +517,7 @@ pub fn load_igvm(
             .lock()
             .unwrap()
             .vm
-            .complete_isolated_import(loaded_info.snp_id_block, &host_data_contents, 1)
+            .complete_isolated_import(loaded_info.snp_id_block, &_host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
 
         let elapsed = now.elapsed();

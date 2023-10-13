@@ -388,6 +388,8 @@ pub struct VmParams<'a> {
     pub platform: Option<&'a str>,
     pub tpm: Option<&'a str>,
     pub igvm: Option<&'a str>,
+    #[cfg(feature = "sev_snp")]
+    pub host_data: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -2091,6 +2093,8 @@ impl VmConfig {
                 cmdline: vm_params.cmdline.map(|s| s.to_string()),
                 firmware: vm_params.firmware.map(PathBuf::from),
                 igvm: vm_params.igvm.map(PathBuf::from),
+                #[cfg(feature = "sev_snp")]
+                host_data: vm_params.host_data.map(|s| s.to_string()),
             })
         } else {
             None

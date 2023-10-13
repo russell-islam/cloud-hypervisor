@@ -299,6 +299,10 @@ pub struct TopLevel {
     #[argh(option, long = "igvm")]
     /// path to IGVM file
     igvm: Option<String>,
+    #[cfg(feature = "sev_snp")]
+    #[argh(option, long = "host-data")]
+    /// host data as hex string
+    host_data: Option<String>,
 }
 
 impl TopLevel {
@@ -381,6 +385,9 @@ impl TopLevel {
         let tpm = self.tpm.as_deref();
         let igvm = self.igvm.as_deref();
 
+        #[cfg(feature = "sev_snp")]
+        let host_data = self.host_data.as_deref();
+
         config::VmParams {
             cpus,
             memory,
@@ -411,6 +418,8 @@ impl TopLevel {
             platform,
             tpm,
             igvm,
+            #[cfg(feature = "sev_snp")]
+            host_data,
         }
     }
 }
