@@ -854,20 +854,20 @@ impl Vm {
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "tdx")] {
+                let mut tdx_opt = 0; // KVM_X86_LEGACY_VM
+                if tdx_enabled {
+                    tdx_opt = 1; // KVM_X86_TDX_VM
+                }
                 let vm = hypervisor
-                    .create_vm_with_type(if tdx_enabled {
-                        1 // KVM_X86_TDX_VM
-                    } else {
-                        0 // KVM_X86_LEGACY_VM
-                    })
+                    .create_vm_with_type(tdx_opt)
                     .unwrap();
             } else if #[cfg(feature = "sev_snp")] {
+                let mut snp_opt = 0; // SEV_SNP_DISABLED
+                if sev_snp_enabled {
+                    snp_opt = 1; // SEV_SNP_ENABLED
+                }
                 let vm = hypervisor
-                    .create_vm_with_type(if sev_snp_enabled {
-                        1 // SEV_SNP_ENABLED
-                    } else {
-                        0 // SEV_SNP_DISABLED
-                    })
+                    .create_vm_with_type(snp_opt)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
