@@ -25,8 +25,9 @@ SRC_IGVM_FILES_PATH="/usr/share/cloud-hypervisor/cvm"
 DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
 
 # Host paths for MS-IGVM and MS-VMLINUX
-MS_CLH_FILES_PATH="/usr/share/cloud-hypervisor/"
-MS_VMLINUX_PATH="${MS_CLH_FILES_PATH}/vmlinux.bin"
+MS_CLH_FILES_PATH="/usr/share/cloud-hypervisor"
+# Assign VMLINUX_PATH to default MSFT kernel if unset and if USE_MS_GUEST_KERNEL is set
+VMLINUX_PATH="${VMLINUX_PATH:-${USE_MS_GUEST_KERNEL:+${MS_CLH_FILES_PATH}/vmlinux.bin}}"
 
 # Container paths
 CTR_CLH_ROOT_DIR="/cloud-hypervisor"
@@ -437,15 +438,16 @@ cmd_tests() {
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
+    if [ -n "$VMLINUX_PATH" ]; then
+	    echo "Using custom kernel: $VMLINUX_PATH"
+	    if [ ! -f "$VMLINUX_PATH" ]; then
+		    echo "File not found: $VMLINUX_PATH"
+		    exit 1
+	    fi
+	    sudo cp $VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+    fi
+
     if [ "$integration" = true ]; then
-        if [ "$USE_MS_GUEST_KERNEL" = "YES" ]; then
-            if [ ! -f "$MS_VMLINUX_PATH" ]; then
-                echo "File not found: $MS_VMLINUX_PATH"
-                exit 1
-            fi
-            echo "Using MS VMLINUX"
-            sudo cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
-        fi
         mkdir -p $DEST_IGVM_FILES_PATH
 
         # for cvm guest run please do, export GUEST_VM_TYPE=CVM
@@ -575,14 +577,6 @@ cmd_tests() {
     fi
 
     if [ "$metrics" = true ]; then
-        if [ "$USE_MS_GUEST_KERNEL" = "YES" ]; then
-            if [ ! -f "$MS_VMLINUX_PATH" ]; then
-                echo "File not found: $MS_VMLINUX_PATH"
-                exit 1
-            fi
-            echo "Using MS VMLINUX"
-            sudo cp $MS_VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
-        fi
         mkdir -p $DEST_IGVM_FILES_PATH
 
         # for cvm guest run please do, export GUEST_VM_TYPE=CVM
