@@ -97,9 +97,16 @@ fi
 
 cargo build --no-default-features --features "kvm,mshv,igvm,snp" --all --release --target $BUILD_TARGET
 
+# Get the total memory in gb
+TOTAL_MEM_GB=$(free -g | grep Mem | awk '{print $2}')
+
 # setup hugepages
 HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
-PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+if [ "$TOTAL_MEM_GB" -lt 256 ]; then
+    PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+else
+    PAGE_NUM=`echo $((128 * 1024 * 1024 / $HUGEPAGESIZE))`
+fi
 echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
