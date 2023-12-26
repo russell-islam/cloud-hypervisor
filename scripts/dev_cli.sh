@@ -15,7 +15,6 @@ DOCKER_RUNTIME="docker"
 # Host paths
 CLH_SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
 CLH_ROOT_DIR=$(cd "${CLH_SCRIPTS_DIR}/.." && pwd)
-IGVM_PARSER_ROOT_DIR=$(cd "${CLH_ROOT_DIR}/../igvm-parser" && pwd)
 CLH_BUILD_DIR="${CLH_ROOT_DIR}/build"
 CLH_CARGO_TARGET="${CLH_BUILD_DIR}/cargo_target"
 CLH_DOCKERFILE="${CLH_SCRIPTS_DIR}/../resources/Dockerfile"
@@ -31,7 +30,6 @@ VMLINUX_PATH="${VMLINUX_PATH:-${USE_MS_GUEST_KERNEL:+${MS_CLH_FILES_PATH}/vmlinu
 
 # Container paths
 CTR_CLH_ROOT_DIR="/cloud-hypervisor"
-CTR_IGVM_PARSER_ROOT_DIR="/igvm-parser"
 CTR_CLH_CARGO_BUILT_DIR="${CTR_CLH_ROOT_DIR}/build"
 CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
@@ -154,7 +152,6 @@ fix_dir_perms() {
         --rm \
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
-	    --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
         "$CTR_IMAGE" \
         chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
@@ -320,7 +317,6 @@ cmd_build() {
         --rm \
         --volume $exported_device \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
-	    --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
         --env RUSTFLAGS="$rustflags" \
         --env TARGET_CC="$target_cc" \
         "$CTR_IMAGE" \
@@ -340,7 +336,6 @@ cmd_clean() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
-	    --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
         "$CTR_IMAGE" \
         cargo clean \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -432,7 +427,6 @@ cmd_tests() {
             --device /dev/net/tun \
             --cap-add net_admin \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env BUILD_TARGET="$target" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
@@ -467,7 +461,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -489,7 +482,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
@@ -509,7 +501,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
@@ -529,7 +520,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
@@ -549,7 +539,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
@@ -569,7 +558,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
             "$CTR_IMAGE" \
@@ -596,7 +584,6 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	        --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
             --env USER="root" \
             --env CH_LIBC="${libc}" \
@@ -686,7 +673,6 @@ cmd_shell() {
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-	    --volume "$IGVM_PARSER_ROOT_DIR:$CTR_IGVM_PARSER_ROOT_DIR" \
         --env USER="root" \
         --entrypoint bash \
         "$CTR_IMAGE"
