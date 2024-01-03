@@ -10,6 +10,7 @@ use regex::Regex;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::string::String;
 use std::thread;
 use std::time::Duration;
@@ -291,12 +292,7 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
 }
 
 fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<Vec<f64>, Error> {
-    let mut child = cmd
-        .capture_output()
-        .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false)
-        .spawn()
-        .unwrap();
+    let mut child = cmd.capture_output().set_print_cmd(false).spawn().unwrap();
 
     if is_guest_vm_type_cvm() {
         thread::sleep(Duration::new(60_u64, 0));
@@ -320,18 +316,28 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<Vec<f6
             e
         })
     });
-
-    match boot_time {
-        Ok(boot_time) => Ok(Vec::from([
-            boot_time.unwrap_or_default(),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ])),
-        Err(_) => {
-            panic!("test failed!");
-        }
+    if let Ok(..) = boot_time {
+        Ok(Vec::from([
+            boot_time.unwrap().unwrap(),
+            get_cvm_boot_params(
+                "address_space_time",
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ),
+            get_cvm_boot_params(
+                "hashing_page_time",
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ),
+            get_cvm_boot_params(
+                "hashing_page_count",
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ),
+            get_cvm_boot_params(
+                "launch_command_time",
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ),
+        ]))
+    } else {
+        panic!("test failed!");
     }
 }
 
@@ -347,6 +353,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> Vec<f64> {
         ])
         .args(["--memory", "size=1G"])
         .args(["--console", "off"])
+        .verbosity(VerbosityLevel::Warn)
         .default_disks();
 
         let igvm = direct_igvm_boot_path(Some("hvc0"));
@@ -391,9 +398,67 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> Vec<f64> 
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-            ]);
+            ])
+            .verbosity(VerbosityLevel::Warn);
 
         measure_boot_time(c, control.test_timeout).unwrap()
+    });
+
+    match r {
+        Ok(r) => r,
+        Err(_) => {
+            panic!("test failed!");
+        }
+    }
+}
+
+pub fn performance_boot_time_hugepage(control: &PerformanceTestControl) -> Vec<f64> {
+    let command = Command::new("free").arg("-g").output().unwrap();
+    let output = String::from_utf8_lossy(&command.stdout).to_string();
+    // Define a regex pattern to capture the total memory value
+    let re = Regex::new(r"Mem:\s+(\d+)").unwrap();
+
+    // Extract the total memory value
+    if let Some(captures) = re.captures(&output) {
+        if let Some(total_mem) = captures.get(1) {
+            let total_mem_value: u32 = total_mem.as_str().parse().unwrap();
+            if total_mem_value < 128 {
+                println!(
+                    "SKIPPED: testcase 'boot_time_32_vcpus_hugepage_ms' required 128G to be run"
+                );
+                return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
+            }
+        }
+    }
+
+    let r = std::panic::catch_unwind(|| {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = performance_test_new_guest(Box::new(focal));
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args([
+            "--cpus",
+            &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+        ])
+        .args([
+            "--memory",
+            "size=128G,prefault=on,hugepages=on,hugepage_size=2M,shared=on",
+        ])
+        .args(["--console", "off"])
+        .verbosity(VerbosityLevel::Info)
+        .default_disks();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        measure_boot_time(&mut cmd, control.test_timeout).unwrap()
     });
 
     match r {
@@ -488,7 +553,6 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
     }
 }
 
-#[allow(dead_code)]
 pub fn get_cvm_boot_params(param: &str, output: String) -> f64 {
     let re = match param {
         "address_space_time" => Regex::new(r"Time it took to allocate address space (\d+\.\d+)s"),

@@ -227,7 +227,6 @@ impl PerformanceTest {
             } else {
                 res = (self.func_ptr)(&self.control);
             }
-            println!("Result: {:?}", res);
             metrics.push(res[0]);
             address_space_time.push(res[1]);
             hashing_page_time.push(res[2]);
@@ -381,7 +380,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 29] = [
+const TEST_LIST: [PerformanceTest; 30] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -420,6 +419,17 @@ const TEST_LIST: [PerformanceTest; 29] = [
             test_timeout: 2,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_ms,
+    },
+    PerformanceTest {
+        name: "boot_time_32_vcpus_hugepage_ms",
+        func_ptr: performance_boot_time_hugepage,
+        control: PerformanceTestControl {
+            test_timeout: 20,
+            test_iterations: 10,
+            num_boot_vcpus: Some(32),
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
