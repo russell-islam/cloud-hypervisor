@@ -434,6 +434,12 @@ impl Vcpu {
     pub fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
     }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn set_sev_control_register(&self, vmsa_pfn: u64) -> Result<()> {
+        self.vcpu.set_sev_control_register(vmsa_pfn).unwrap();
+        Ok(())
+    }
 }
 
 impl Pausable for Vcpu {}
@@ -482,6 +488,8 @@ pub struct CpuManager {
     affinity: BTreeMap<u8, Vec<u8>>,
     dynamic: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    #[cfg(feature = "sev_snp")]
+    sev_snp_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -630,6 +638,7 @@ impl CpuManager {
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
+        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded);
@@ -721,6 +730,8 @@ impl CpuManager {
             affinity,
             dynamic,
             hypervisor: hypervisor.clone(),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled,
         })))
     }
 
@@ -803,9 +814,14 @@ impl CpuManager {
         &self,
         vcpu: Arc<Mutex<Vcpu>>,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
+        #[cfg(feature = "sev_snp")] vmsa_pfn: u64,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            vcpu.set_sev_control_register(vmsa_pfn)?;
+        }
         #[cfg(target_arch = "x86_64")]
         assert!(!self.cpuid.is_empty());
 
@@ -1257,7 +1273,13 @@ impl CpuManager {
             cmp::Ordering::Greater => {
                 let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None)?
+                    self.configure_vcpu(
+                        vcpu,
+                        None,
+                        // SevSnp does not support resize, should not come here
+                        #[cfg(feature = "sev_snp")]
+                        0,
+                    )?
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
@@ -1813,6 +1835,11 @@ impl CpuManager {
             .get_cpuid_values(eax, ecx, xfem, xss)
             .unwrap();
         Ok(leaf_info)
+    }
+
+    #[cfg(feature = "sev_snp")]
+    pub(crate) fn sev_snp_enabled(&self) -> bool {
+        self.sev_snp_enabled
     }
 }
 

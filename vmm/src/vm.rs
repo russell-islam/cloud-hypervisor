@@ -27,6 +27,8 @@ use crate::device_tree::DeviceTree;
 use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
 #[cfg(feature = "igvm")]
 use crate::igvm::igvm_loader;
+#[cfg(feature = "sev_snp")]
+use crate::igvm::HV_PAGE_SIZE;
 use crate::memory_manager::{
     Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
 };
@@ -544,6 +546,8 @@ impl Vm {
             #[cfg(feature = "tdx")]
             tdx_enabled,
             &numa_nodes,
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -998,12 +1002,21 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<EntryPoint> {
-        let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager, "")
+        let res = igvm_loader::load_igvm(&igvm, memory_manager, cpu_manager.clone(), "")
             .map_err(Error::IgvmLoad)?;
 
-        Ok(EntryPoint {
-            entry_addr: vm_memory::GuestAddress(res.vmsa.rip),
-        })
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "sev_snp")] {
+                let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
+                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa) }
+                } else {
+                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip) }
+                };
+            } else {
+               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip) };
+            }
+        };
+        Ok(entry_point)
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2009,6 +2022,16 @@ impl Vm {
         // finish.
         let entry_point = self.entry_point()?;
 
+        #[cfg(feature = "sev_snp")]
+        let sev_snp_enabled = self.config.lock().unwrap().is_sev_snp_enabled();
+
+        #[cfg(feature = "sev_snp")]
+        let vmsa_pfn = if sev_snp_enabled {
+            entry_point.unwrap().entry_addr.0 / HV_PAGE_SIZE
+        } else {
+            0
+        };
+
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
 
@@ -2020,7 +2043,12 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, boot_setup)
+                .configure_vcpu(
+                    vcpu,
+                    boot_setup,
+                    #[cfg(feature = "sev_snp")]
+                    vmsa_pfn,
+                )
                 .map_err(Error::CpuManager)?;
         }
 
