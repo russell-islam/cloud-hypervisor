@@ -2098,7 +2098,10 @@ impl vm::Vm for MshvVm {
         let start_gpfn: u64 = gpa >> PAGE_SHIFT;
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
-        let gpas: Vec<u64> = (start_gpfn..=end_gpfn).map(|x| x << PAGE_SHIFT).collect();
+        let gpas: Vec<u64> = (start_gpfn..=end_gpfn)
+            .filter(|x| !self.host_access_pages.is_bit_set(*x as usize))
+            .map(|x| x << PAGE_SHIFT)
+            .collect();
 
         if !gpas.is_empty() {
             let mut gpa_list = vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
@@ -2118,6 +2121,11 @@ impl vm::Vm for MshvVm {
             self.fd
                 .modify_gpa_host_access(&gpa_list[0])
                 .map_err(|e| vm::HypervisorVmError::ModifyGpaHostAccess(e.into()))?;
+
+            for acquired_gpa in gpas {
+                self.host_access_pages
+                    .set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
+            }
         }
 
         Ok(())
