@@ -21,6 +21,8 @@ use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 mod bitmap;
+#[cfg(feature = "sev_snp")]
+use bitmap::SimpleAtomicBitmap;
 
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
@@ -51,6 +53,8 @@ pub use x86_64::{emulator, VcpuMshvState};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
+#[cfg(feature = "sev_snp")]
+const ONE_GB: usize = 1024 * 1024 * 1024;
 
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
@@ -337,12 +341,24 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 msrs[pos].index = *index;
             }
 
+            #[cfg(feature = "sev_snp")]
+            let mem_size_for_bitmap = if _mem_size as usize > 3 * ONE_GB {
+                _mem_size as usize + ONE_GB
+            } else {
+                _mem_size as usize
+            };
+
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                #[cfg(feature = "sev_snp")]
+                host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(
+                    mem_size_for_bitmap,
+                    HV_PAGE_SIZE,
+                )),
             }))
         }
 
@@ -412,6 +428,8 @@ pub struct MshvVcpu {
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: Arc<SimpleAtomicBitmap>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -1583,6 +1601,8 @@ pub struct MshvVm {
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: Arc<SimpleAtomicBitmap>,
 }
 
 impl MshvVm {
@@ -1683,6 +1703,8 @@ impl vm::Vm for MshvVm {
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "sev_snp")]
+            host_access_pages: self.host_access_pages.clone(),
         };
         Ok(Arc::new(vcpu))
     }
