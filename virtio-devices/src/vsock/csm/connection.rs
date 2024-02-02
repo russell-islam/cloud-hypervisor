@@ -671,6 +671,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "snp"))]
 mod tests {
     use super::super::super::tests::TestContext;
     use super::super::defs as csm_defs;

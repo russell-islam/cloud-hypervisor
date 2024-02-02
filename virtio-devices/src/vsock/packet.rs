@@ -419,6 +419,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 #[allow(clippy::undocumented_unsafe_blocks)]
+#[cfg(not(feature = "snp"))]
 mod tests {
     use super::super::tests::TestContext;
     use super::*;
