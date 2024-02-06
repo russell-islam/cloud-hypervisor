@@ -622,7 +622,7 @@ impl Vm {
             let max_vcpus = cpu_manager.lock().unwrap().max_vcpus() as u32;
             vm.tdx_init(&cpuid, max_vcpus)
                 .map_err(Error::InitializeTdxVm)?;
-        } 
+        }
 
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
@@ -2130,13 +2130,15 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         // Configure shared state based on loaded kernel
-        entry_point
-            .map(|entry_point| {
-                // Safe to unwrap rsdp_addr as we know it can't be None when
-                // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap(), entry_point)
-            })
-            .transpose()?;
+        if !self.sev_snp_enabled {
+            entry_point
+                .map(|entry_point| {
+                    // Safe to unwrap rsdp_addr as we know it can't be None when
+                    // the entry_point is Some.
+                    self.configure_system(rsdp_addr.unwrap(), entry_point)
+                })
+                .transpose()?;
+        }
 
         #[cfg(target_arch = "x86_64")]
         // Note: For x86, always call this function before invoking start boot vcpus.
@@ -2144,11 +2146,13 @@ impl Vm {
         // userspace mappings to update the hypervisor about the memory mappings.
         // These mappings must be created before we start the vCPU threads for
         // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+        if !self.sev_snp_enabled {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .allocate_address_space()
+                .map_err(Error::MemoryManager)?;
+        }
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
