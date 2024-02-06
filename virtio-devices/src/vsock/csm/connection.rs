@@ -671,7 +671,7 @@ where
 }
 
 #[cfg(test)]
-#[cfg(not(feature = "snp"))]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use super::super::super::tests::TestContext;
     use super::super::defs as csm_defs;
@@ -820,6 +820,8 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                None,
+                #[cfg(feature = "sev_snp")]
                 None,
             )
             .unwrap();

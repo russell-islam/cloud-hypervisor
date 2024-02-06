@@ -848,6 +848,7 @@ impl VsockMuxer {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;

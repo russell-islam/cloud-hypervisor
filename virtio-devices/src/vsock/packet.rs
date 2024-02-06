@@ -419,7 +419,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 #[allow(clippy::undocumented_unsafe_blocks)]
-#[cfg(not(feature = "snp"))]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use super::super::tests::TestContext;
     use super::*;
@@ -617,6 +617,8 @@ mod tests {
                 .next()
                 .unwrap(),
             None,
+            #[cfg(feature = "sev_snp")]
+            None,
         )
         .unwrap();
 
@@ -707,6 +709,8 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            None,
+            #[cfg(feature = "sev_snp")]
             None,
         )
         .unwrap();

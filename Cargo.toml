@@ -46,6 +46,8 @@ signal-hook = "0.3.17"
 thiserror = "1.0.62"
 tpm = { path = "tpm" }
 tracer = { path = "tracer" }
+vhost_user_block = { path = "vhost_user_block" }
+vhost_user_net = { path = "vhost_user_net" }
 vm-memory = "0.14.1"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.12.1"
@@ -71,7 +73,7 @@ io_uring = ["vmm/io_uring"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
-sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
+sev_snp = ["igvm", "mshv", "vhost_user_block/sev_snp", "vhost_user_net/sev_snp", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
 
