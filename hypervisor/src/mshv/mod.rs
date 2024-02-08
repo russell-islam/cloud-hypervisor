@@ -55,6 +55,8 @@ const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
 #[cfg(feature = "sev_snp")]
 const ONE_GB: usize = 1024 * 1024 * 1024;
+#[cfg(feature = "sev_snp")]
+const HV_PAGE_SIZE: u64 = 4096;
 
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
