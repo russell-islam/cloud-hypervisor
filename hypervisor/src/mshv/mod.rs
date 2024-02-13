@@ -1373,12 +1373,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
         let gpa = self.translate(gva)?;
-        debug!(
-            "mshv emulator: memory read {} bytes from [{:#x} -> {:#x}]",
-            data.len(),
-            gva,
-            gpa
-        );
 
         if let Some(vm_ops) = &self.vcpu.vm_ops {
             if vm_ops.guest_mem_read(gpa, data).is_err() {
@@ -1393,12 +1387,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
         let gpa = self.translate(gva)?;
-        debug!(
-            "mshv emulator: memory write {} bytes at [{:#x} -> {:#x}]",
-            data.len(),
-            gva,
-            gpa
-        );
 
         if let Some(vm_ops) = &self.vcpu.vm_ops {
             if vm_ops.guest_mem_write(gpa, data).is_err() {
@@ -1429,8 +1417,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             .get_sregs()
             .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
 
-        debug!("mshv emulator: Getting new CPU state");
-        debug!("mshv emulator: {:#x?}", regs);
 
         Ok(EmulatorCpuState { regs, sregs })
     }
@@ -1443,9 +1429,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
                 self.vcpu.vp_index
             )));
         }
-
-        debug!("mshv emulator: Setting new CPU state");
-        debug!("mshv emulator: {:#x?}", state.regs);
 
         self.vcpu
             .set_regs(&state.regs)

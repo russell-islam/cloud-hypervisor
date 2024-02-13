@@ -2746,6 +2746,7 @@ impl Migratable for MemoryManager {
             let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
                 MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
             })?;
+            info!("MUISLAM Dirty Bitmap Table: Slot {}, gpa: {:x?}, size {:x?}, bitmap size: {}", r.slot, r.gpa, r.size, vm_dirty_bitmap.len());
             let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
             {
                 Some(region) => {
