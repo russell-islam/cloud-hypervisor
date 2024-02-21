@@ -405,6 +405,7 @@ impl NetQueuePair {
         mem: &GuestMemoryMmap,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
+        debug!("process_rx: start");
         self.rx_desc_avail = !self.rx.process_desc_chain(
             mem,
             &self.tap,
@@ -439,7 +440,7 @@ impl NetQueuePair {
             .fetch_add(self.rx.counter_frames.0, Ordering::AcqRel);
         self.rx.counter_bytes = Wrapping(0);
         self.rx.counter_frames = Wrapping(0);
-
+        debug!("process_rx: start end");
         queue
             .needs_notification(mem)
             .map_err(NetQueuePairError::QueueNeedsNotification)

@@ -341,7 +341,10 @@ impl Pausable for VirtioCommon {
                 t.thread().unpark();
             }
         }
-
+        info!(
+            "Resuming virtio-{} Done",
+            VirtioDeviceType::from(self.device_type)
+        );
         Ok(())
     }
 }

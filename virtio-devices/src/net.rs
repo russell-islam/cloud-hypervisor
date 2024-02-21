@@ -95,6 +95,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
         event: &epoll::Event,
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
+        debug!("MUISLAM: NetCtrlEpollHandler event type: {:?}", ev_type);
         match ev_type {
             CTRL_QUEUE_EVENT => {
                 let mem = self.mem.memory();
@@ -258,6 +259,7 @@ impl NetEpollHandler {
             .map_err(DeviceError::NetQueuePair)?
             || !self.driver_awake
         {
+            debug!("handle_rx_tap_event");
             self.signal_used_queue(self.queue_index_base)?;
             debug!("Signalling RX queue");
         } else {
@@ -316,6 +318,7 @@ impl EpollHelperHandler for NetEpollHandler {
         event: &epoll::Event,
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
+        debug!("MUISLAM: NetEpollHandler event type: {:?}", ev_type);
         match ev_type {
             RX_QUEUE_EVENT => {
                 self.driver_awake = true;

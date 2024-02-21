@@ -235,6 +235,7 @@ impl EpollHelperHandler for PmemEpollHandler {
         event: &epoll::Event,
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
+        debug!("MUISLAM: BlockEpollHandler event type: {:?}", ev_type);
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
