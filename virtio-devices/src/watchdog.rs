@@ -140,6 +140,7 @@ impl EpollHelperHandler for WatchdogEpollHandler {
         event: &epoll::Event,
     ) -> result::Result<(), EpollHelperError> {
         let ev_type = event.data as u16;
+        debug!("MUISLAM: WatchdogEpollHandler event type: {:?}", ev_type);
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
@@ -169,6 +170,8 @@ impl EpollHelperHandler for WatchdogEpollHandler {
                 if let Some(last_ping_time) = self.last_ping_time.lock().unwrap().as_ref() {
                     let now = Instant::now();
                     let gap = now.duration_since(*last_ping_time).as_secs();
+                    println!("------------------------------------- Watchdog time out occures--------------------------------------------------");
+                    std::thread::sleep(std::time::Duration::from_millis(10000));
                     if gap > WATCHDOG_TIMEOUT {
                         error!("Watchdog triggered: {} seconds since last ping", gap);
                         self.reset_evt.write(1).ok();

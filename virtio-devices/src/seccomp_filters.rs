@@ -214,8 +214,10 @@ fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn virtio_watchdog_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
+        (libc::SYS_clock_nanosleep, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        (libc::SYS_nanosleep, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
     ]
 }
