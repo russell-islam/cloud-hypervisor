@@ -49,6 +49,7 @@ use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
 use arch::{NumaNode, NumaNodes};
+use clap::builder::Str;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 use devices::AcpiNotificationFlags;
@@ -2457,6 +2458,13 @@ impl Vm {
             .unwrap()
             .nmi()
             .map_err(|_| Error::ErrorNmi);
+    }
+
+    pub fn dump_memory_to_file(&mut self, dump_file: &mut File) {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .dump_save_mem(dump_file);
     }
 }
 

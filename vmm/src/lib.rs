@@ -7,7 +7,7 @@
 extern crate event_monitor;
 #[macro_use]
 extern crate log;
-
+use std::fs::OpenOptions;
 use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
@@ -35,6 +35,7 @@ use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
+use zerocopy::AsBytes;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
@@ -705,7 +706,13 @@ impl Vmm {
             serde_json::from_slice(&data).map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error deserialising config: {}", e))
             })?;
-
+        let config_path = PathBuf::from("/home/cloud/mig-data/recv/config.txt");
+        let mut config_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(config_path.to_str().unwrap()).unwrap();
+        config_file.write_all(&data).unwrap();
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         self.vm_check_cpuid_compatibility(
             &vm_migration_config.vm_config,
@@ -831,10 +838,12 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         memory_manager: &mut MemoryManager,
+        mem_ct: u8,
     ) -> std::result::Result<(), MigratableError>
     where
         T: Read + ReadVolatile + Write,
     {
+        let rec_mem_path = PathBuf::from(format!("/home/cloud/mig-data/recv/config-{mem_ct}.txt"));
         // Read table
         let table = MemoryRangeTable::read_from(socket, req.length())?;
 
@@ -898,6 +907,18 @@ impl Vmm {
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
+        let config_path = PathBuf::from("/home/cloud/mig-data/send/config.txt");
+        let mem_dup_path = PathBuf::from("/home/cloud/mig-data/send/memory.dump");
+        let mut mem_d_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(mem_dup_path.to_str().unwrap()).unwrap();
+        let mut config_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(config_path.to_str().unwrap()).unwrap();
         let mut socket = UnixStream::connect(path).map_err(|e| {
             MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
         })?;
@@ -956,9 +977,11 @@ impl Vmm {
         };
         let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
         Request::config(config_data.len() as u64).write_to(&mut socket)?;
+        config_file.write_all(config_data.len().as_bytes()).unwrap();
         socket
             .write_all(&config_data)
             .map_err(MigratableError::MigrateSocket)?;
+        config_file.write_all(&config_data).unwrap();
         let res = Response::read_from(&mut socket)?;
         if res.status() != Status::Ok {
             warn!("Error during config migration");
@@ -1008,10 +1031,13 @@ impl Vmm {
 
             // Now pause VM
             vm.pause()?;
-
+            info!("Send 1");
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
-
+            info!("Send 2");
+            info!("Dumping Memory send migration");
+            vm.dump_memory_to_file(&mut mem_d_file);
+            info!("Send 3");
             // Stop logging dirty pages
             vm.stop_dirty_log()?;
         }
@@ -1871,6 +1897,7 @@ impl RequestHandler for Vmm {
         let mut started = false;
         let mut memory_manager: Option<Arc<Mutex<MemoryManager>>> = None;
         let mut existing_memory_files = None;
+        let mut mem_ct: u8 = 0;
         loop {
             let req = Request::read_from(&mut socket)?;
             match req.command() {
@@ -1912,14 +1939,14 @@ impl RequestHandler for Vmm {
                 }
                 Command::Memory => {
                     info!("Memory Command Received");
-
+                    mem_ct =  mem_ct + 1;
                     if !started {
                         warn!("Migration not started yet");
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
                     if let Some(mm) = memory_manager.as_ref() {
-                        self.vm_receive_memory(&req, &mut socket, &mut mm.lock().unwrap())?;
+                        self.vm_receive_memory(&req, &mut socket, &mut mm.lock().unwrap(), mem_ct)?;
                     } else {
                         warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;
@@ -1956,6 +1983,13 @@ impl RequestHandler for Vmm {
                 Command::Complete => {
                     info!("Complete Command Received");
                     if let Some(ref mut vm) = self.vm.as_mut() {
+                        let mem_dup_path = PathBuf::from("/home/cloud/mig-data/recv/memory.dump");
+                        let mut mem_d_file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create_new(true)
+                        .open(mem_dup_path.to_str().unwrap()).unwrap();
+                        vm.dump_memory_to_file(&mut mem_d_file);
                         vm.resume()?;
                         Response::ok().write_to(&mut socket)?;
                     } else {

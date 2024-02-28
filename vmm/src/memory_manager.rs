@@ -2203,9 +2203,42 @@ impl MemoryManager {
                 }
             }
         }
+    }
 
-        debug!("coredump total bytes {}", total_bytes);
-        Ok(())
+    pub fn dump_save_mem(
+        &mut self,
+        dump_file: &mut File,
+    ) {
+        let snapshot_memory_ranges = self
+            .memory_range_table(false).unwrap();
+
+        if snapshot_memory_ranges.is_empty() {
+            println!("Empty");
+            debug!("Empty");
+            return;
+        }
+        let guest_memory = self.guest_memory.memory();
+        let mut total_bytes: u64 = 0;
+        println!("Dumping memory to file: {:?}", dump_file);
+        for range in snapshot_memory_ranges.regions() {
+            let mut offset: u64 = 0;
+            loop {
+                let bytes_written = guest_memory
+                    .write_volatile_to(
+                        GuestAddress(range.gpa + offset),
+                        dump_file,
+                        (range.length - offset) as usize,
+                    )
+                    .unwrap();
+                offset += bytes_written as u64;
+                total_bytes += bytes_written as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
+        }
+        debug!("Dumped total bytes {}", total_bytes);
     }
 
     pub fn receive_memory_regions<F>(
