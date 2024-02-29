@@ -551,6 +551,7 @@ pub struct Block {
     read_only: bool,
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
+    restored: bool,
 }
 
 #[derive(Versionize)]
@@ -582,8 +583,10 @@ impl Block {
         state: Option<BlockState>,
         queue_affinity: BTreeMap<u16, Vec<usize>>,
     ) -> io::Result<Self> {
+        let mut rst: bool;
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
+                rst = true;
                 info!("Restoring virtio-block {}", id);
                 (
                     state.disk_nsectors,
@@ -593,6 +596,7 @@ impl Block {
                     true,
                 )
             } else {
+                rst = false;
                 let disk_size = disk_image.size().map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::Other,
@@ -685,6 +689,7 @@ impl Block {
             read_only,
             serial,
             queue_affinity,
+            restored: rst,
         })
     }
 
@@ -839,7 +844,13 @@ impl VirtioDevice for Block {
 
         self.common.epoll_threads = Some(epoll_threads);
         event!("virtio-device", "activated", "id", &self.id);
-
+        if self.restored {
+            interrupt_cb.trigger(VirtioInterruptType::Queue(0))
+            .map_err(|e| {
+                error!("Failed to trigger interrupt after resume: {:?}", e);
+                ActivateError::BadActivate
+            })?;
+        }
         Ok(())
     }
 

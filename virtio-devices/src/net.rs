@@ -424,6 +424,7 @@ pub struct Net {
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
+    restored: bool,
 }
 
 #[derive(Versionize)]
@@ -458,8 +459,10 @@ impl Net {
 
         let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
+        let mut rst: bool;
         let (avail_features, acked_features, config, queue_sizes, paused) =
             if let Some(state) = state {
+                rst = true;
                 info!("Restoring virtio-net {}", id);
                 (
                     state.avail_features,
@@ -469,6 +472,7 @@ impl Net {
                     true,
                 )
             } else {
+                rst = false;
                 let mut avail_features =
                     1 << VIRTIO_NET_F_MTU | 1 << VIRTIO_RING_F_EVENT_IDX | 1 << VIRTIO_F_VERSION_1;
 
@@ -545,6 +549,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            restored: rst,
         })
     }
 
@@ -831,6 +836,13 @@ impl VirtioDevice for Net {
         self.common.epoll_threads = Some(epoll_threads);
 
         event!("virtio-device", "activated", "id", &self.id);
+        if self.restored {
+            interrupt_cb.trigger(VirtioInterruptType::Queue(0))
+            .map_err(|e| {
+                error!("Failed to trigger interrupt after resume: {:?}", e);
+                ActivateError::BadActivate
+            })?;
+        }
         Ok(())
     }
 
