@@ -1903,13 +1903,14 @@ impl RequestHandler for Vmm {
             match req.command() {
                 Command::Invalid => info!("Invalid Command Received"),
                 Command::Start => {
-                    info!("Start Command Received");
+                    println!("Start Command Received");
                     started = true;
 
                     Response::ok().write_to(&mut socket)?;
+                    println!("Start Command Complete");
                 }
                 Command::Config => {
-                    info!("Config Command Received");
+                    println!("Config Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -1921,9 +1922,10 @@ impl RequestHandler for Vmm {
                         &mut socket,
                         existing_memory_files.take(),
                     )?);
+                    println!("Config Command Complete");
                 }
                 Command::State => {
-                    info!("State Command Received");
+                    println!("State Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -1936,9 +1938,10 @@ impl RequestHandler for Vmm {
                         warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;
                     }
+                    println!("State Command Complete");
                 }
                 Command::Memory => {
-                    info!("Memory Command Received");
+                    println!("Memory Command Received");
                     mem_ct =  mem_ct + 1;
                     if !started {
                         warn!("Migration not started yet");
@@ -1951,9 +1954,10 @@ impl RequestHandler for Vmm {
                         warn!("Configuration not sent yet");
                         Response::error().write_to(&mut socket)?;
                     }
+                    println!("Memory Command Complete");
                 }
                 Command::MemoryFd => {
-                    info!("MemoryFd Command Received");
+                    println!("MemoryFd Command Received");
 
                     if !started {
                         warn!("Migration not started yet");
@@ -1979,9 +1983,10 @@ impl RequestHandler for Vmm {
                     }
 
                     Response::ok().write_to(&mut socket)?;
+                    println!("MemoryFd Command Complete");
                 }
                 Command::Complete => {
-                    info!("Complete Command Received");
+                    println!("Complete Command Received");
                     if let Some(ref mut vm) = self.vm.as_mut() {
                         let mem_dup_path = PathBuf::from("/home/cloud/mig-data/recv/memory.dump");
                         let mut mem_d_file = OpenOptions::new()
@@ -1996,6 +2001,7 @@ impl RequestHandler for Vmm {
                         warn!("VM not created yet");
                         Response::error().write_to(&mut socket)?;
                     }
+                    println!("Complete Command Complete");
                     break;
                 }
                 Command::Abandon => {
