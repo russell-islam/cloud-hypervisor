@@ -633,6 +633,7 @@ impl Vm {
             #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
+            hypervisor.clone(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
