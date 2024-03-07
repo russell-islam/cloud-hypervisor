@@ -999,8 +999,21 @@ impl DeviceManager {
         // inject ACPI tables. Currently we are assuming that each segments gets 4G
         // and we are supporting 10 segs only so we are saying that end of the device
         // area is 40G.
-        let start_of_device_area = 0x10000000000;
-        let end_of_device_area = 0x10000000000 + (num_pci_segments as u64 * (4 << 30)) - 1;
+        let phys_width = crate::vm::physical_bits(config.lock().unwrap().cpus.max_phys_bits);
+
+        let mut start_of_device_area = 0x10000000000;
+        if phys_width < 41 {
+            #[cfg(feature = "sev_snp")]
+            if config.lock().unwrap().is_sev_snp_enabled() {
+                error!(
+                    "Cannot start a SEV-SNP guest with max gpa_width: {:?} < 41",
+                    phys_width
+                );
+            }
+            start_of_device_area = (1 << phys_width) - (num_pci_segments + 1) as u64 * (4 << 30);
+        }
+
+        let end_of_device_area = start_of_device_area + (num_pci_segments as u64 * (4 << 30)) - 1;
 
         assert!(num_pci_segments <= 10);
 
