@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{self};
+use std::io::{self, Write};
 use std::ops::{BitAnd, Deref, Not, Sub};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::os::fd::AsFd;
@@ -2245,13 +2245,19 @@ impl MemoryManager {
         &mut self,
         ranges: &MemoryRangeTable,
         fd: &mut F,
+        ite: u8,
     ) -> std::result::Result<(), MigratableError>
     where
         F: ReadVolatile,
     {
         let guest_memory = self.guest_memory();
         let mem = guest_memory.memory();
-
+        let mem_path = PathBuf::from(format!("/home/cloud/mig-data/recv/mem-{}.dump", ite));
+        let mut mem_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(mem_path.to_str().unwrap()).unwrap();
         for range in ranges.regions() {
             let mut offset: u64 = 0;
             // Here we are manually handling the retry in case we can't the
@@ -2260,6 +2266,7 @@ impl MemoryManager {
             // following the correct behavior. For more info about this issue
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
+
                 let bytes_read = mem
                     .read_volatile_from(
                         GuestAddress(range.gpa + offset),
@@ -2269,6 +2276,18 @@ impl MemoryManager {
                     .map_err(|e| {
                         MigratableError::MigrateReceive(anyhow!(
                             "Error receiving memory from socket: {}",
+                            e
+                        ))
+                    })?;
+                let bytes_written = mem
+                    .write_volatile_to(
+                        GuestAddress(range.gpa + offset),
+                        &mut mem_file,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| {
+                        MigratableError::MigrateSend(anyhow!(
+                            "Error transferring memory to socket: {}",
                             e
                         ))
                     })?;

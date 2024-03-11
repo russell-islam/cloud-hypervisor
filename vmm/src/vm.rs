@@ -39,6 +39,7 @@ use crate::GuestMemoryMmap;
 use crate::{
     PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
 };
+use std::path::PathBuf;
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
@@ -2274,13 +2275,19 @@ impl Vm {
         &mut self,
         ranges: &MemoryRangeTable,
         fd: &mut F,
+        ite: u8,
     ) -> std::result::Result<(), MigratableError>
     where
         F: WriteVolatile,
     {
         let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
-
+        let mem_path = PathBuf::from(format!("/home/cloud/mig-data/send/mem-{}.dump", ite));
+        let mut mem_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(mem_path.to_str().unwrap()).unwrap();
         for range in ranges.regions() {
             let mut offset: u64 = 0;
             // Here we are manually handling the retry in case we can't the
@@ -2289,7 +2296,19 @@ impl Vm {
             // following the correct behavior. For more info about this issue
             // see: https://github.com/rust-vmm/vm-memory/issues/174
             loop {
-                let bytes_written = mem
+                let mut bytes_written = mem
+                .write_volatile_to(
+                    GuestAddress(range.gpa + offset),
+                    &mut mem_file,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error transferring memory to socket: {}",
+                        e
+                    ))
+                })?;
+                bytes_written = mem
                     .write_volatile_to(
                         GuestAddress(range.gpa + offset),
                         fd,

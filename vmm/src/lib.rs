@@ -778,6 +778,13 @@ impl Vmm {
         socket
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
+        let snap_path = PathBuf::from("/home/cloud/mig-data/recv/snap.dump");
+        let mut snapshot_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(snap_path.to_str().unwrap()).unwrap();
+        snapshot_file.write_all(&data).unwrap();
         let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
         })?;
@@ -849,7 +856,7 @@ impl Vmm {
 
         // And then read the memory itself
         memory_manager
-            .receive_memory_regions(&table, socket)
+            .receive_memory_regions(&table, socket, mem_ct)
             .map_err(|e| {
                 Response::error().write_to(socket).ok();
                 e
@@ -870,6 +877,7 @@ impl Vmm {
     fn vm_maybe_send_dirty_pages<T>(
         vm: &mut Vm,
         socket: &mut T,
+        ite: u8,
     ) -> result::Result<bool, MigratableError>
     where
         T: Read + Write + WriteVolatile,
@@ -885,7 +893,7 @@ impl Vmm {
         Request::memory(table.length()).write_to(socket).unwrap();
         table.write_to(socket)?;
         // And then the memory itself
-        vm.send_memory_regions(&table, socket)?;
+        vm.send_memory_regions(&table, socket, ite)?;
         let res = Response::read_from(socket)?;
         if res.status() != Status::Ok {
             warn!("Error during dirty memory migration");
@@ -909,6 +917,7 @@ impl Vmm {
         let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
         let config_path = PathBuf::from("/home/cloud/mig-data/send/config.txt");
         let mem_dup_path = PathBuf::from("/home/cloud/mig-data/send/memory.dump");
+        let snap_path = PathBuf::from("/home/cloud/mig-data/send/snap.dump");
         let mut mem_d_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -976,8 +985,7 @@ impl Vmm {
             memory_manager_data: vm.memory_manager_data(),
         };
         let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
-        Request::config(config_data.len() as u64).write_to(&mut socket)?;
-        config_file.write_all(config_data.len().as_bytes()).unwrap();
+        Request::config(config_data.len() as u64).write_to(&mut socket)?;;
         socket
             .write_all(&config_data)
             .map_err(MigratableError::MigrateSocket)?;
@@ -1009,7 +1017,7 @@ impl Vmm {
                 .unwrap();
             table.write_to(&mut socket)?;
             // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
+            vm.send_memory_regions(&table, &mut socket, 1)?;
             let res = Response::read_from(&mut socket)?;
             if res.status() != Status::Ok {
                 warn!("Error during memory migration");
@@ -1024,7 +1032,7 @@ impl Vmm {
             const MAX_DIRTY_MIGRATIONS: usize = 5;
             for i in 0..MAX_DIRTY_MIGRATIONS {
                 info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
+                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket, i as u8 + 2)? {
                     break;
                 }
             }
@@ -1033,7 +1041,7 @@ impl Vmm {
             vm.pause()?;
             info!("Send 1");
             // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            Self::vm_maybe_send_dirty_pages(vm, &mut socket, 7)?;
             info!("Send 2");
             info!("Dumping Memory send migration");
             vm.dump_memory_to_file(&mut mem_d_file);
@@ -1044,6 +1052,12 @@ impl Vmm {
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
         let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
+        let mut snapshot_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(snap_path.to_str().unwrap()).unwrap();
+        snapshot_file.write_all(&snapshot_data).unwrap();
         Request::state(snapshot_data.len() as u64).write_to(&mut socket)?;
         socket
             .write_all(&snapshot_data)
