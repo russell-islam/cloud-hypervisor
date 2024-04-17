@@ -92,6 +92,12 @@ impl From<mshv_user_mem_region> for UserMemoryRegion {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl From<MshvClockData> for ClockData {
+    fn from(d: MshvClockData) -> Self {
+        ClockData::Mshv(d)
+    }
+}
 impl From<UserMemoryRegion> for mshv_user_mem_region {
     fn from(region: UserMemoryRegion) -> Self {
         let mut flags: u32 = 0;
@@ -1930,7 +1936,12 @@ impl vm::Vm for MshvVm {
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
-        Ok(ClockData::Mshv)
+        let val = self.fd.get_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME
+        ).map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(MshvClockData {
+            time_ref: val
+        }.into())
     }
 
     /// Set guest clock.

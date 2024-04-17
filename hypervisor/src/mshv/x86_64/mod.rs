@@ -43,6 +43,10 @@ pub struct VcpuMshvState {
     pub vp_states: AllVpStateComponents,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct MshvClockData {
+    pub time_ref: u64,
+}
 impl fmt::Display for VcpuMshvState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let expected_num_msrs = self.msrs.len();
