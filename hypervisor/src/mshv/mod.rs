@@ -1936,12 +1936,11 @@ impl vm::Vm for MshvVm {
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
-        let val = self.fd.get_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME
-        ).map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
-        Ok(MshvClockData {
-            time_ref: val
-        }.into())
+        let val = self
+            .fd
+            .get_partition_property(hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME)
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(MshvClockData { time_ref: val }.into())
     }
 
     /// Set guest clock.
