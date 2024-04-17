@@ -2486,7 +2486,9 @@ impl Pausable for Vm {
 
         self.cpu_manager.lock().unwrap().pause()?;
         self.device_manager.lock().unwrap().pause()?;
-
+        self.vm
+            .pause()
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause Hypervisor VM: {}", e)))?;
         *state = new_state;
 
         event!("vm", "paused");
@@ -2514,6 +2516,9 @@ impl Pausable for Vm {
                 })?;
             }
         }
+        self.vm.resume().map_err(|e| {
+            MigratableError::Resume(anyhow!("Could not resume Hypervisor VM: {}", e))
+        })?;
         self.device_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.

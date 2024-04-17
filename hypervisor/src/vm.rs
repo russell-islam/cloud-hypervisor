@@ -390,6 +390,15 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
+
+    /// Pause VM
+    fn pause(&self) -> Result<()> {
+        Ok(())
+    }
+    /// Resume VM
+    fn resume(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub trait VmOps: Send + Sync {

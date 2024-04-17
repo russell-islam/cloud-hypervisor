@@ -1051,6 +1051,7 @@ dependencies = [
  "thiserror",
  "vfio-ioctls",
  "vm-memory",
+ "vm-migration",
  "vmm-sys-util",
 ]
 

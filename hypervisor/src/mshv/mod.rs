@@ -2057,4 +2057,25 @@ impl vm::Vm for MshvVm {
     fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
         unimplemented!()
     }
+
+    /// Pause VM
+    fn pause(&self) -> vm::Result<()> {
+        // Freeze the partition
+        println!("RUSSELLLL: Freezing the partition");
+        self
+            .fd
+            .set_partition_property(hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE, 1u64)
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(())
+    }
+    /// Resume VM
+    fn resume(&self) -> vm::Result<()> {
+        // Unfreeze the partition
+        println!("RUSSELLLL: Unfreezing the partition");
+        self
+            .fd
+            .set_partition_property(hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE, 0u64)
+            .map_err(|e| vm::HypervisorVmError::GetClock(e.into()))?;
+        Ok(())
+    }
 }

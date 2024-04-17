@@ -39,6 +39,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_arch = "aarch64")]
 use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
+use vm_migration::Pausable;
 use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
@@ -2404,3 +2405,5 @@ impl KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
     }
 }
+
+impl Pausable for KvmVm {}
