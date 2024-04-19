@@ -98,6 +98,19 @@ impl From<MshvClockData> for ClockData {
         ClockData::Mshv(d)
     }
 }
+
+#[cfg(target_arch = "x86_64")]
+impl From<ClockData> for MshvClockData {
+    fn from(ms: ClockData) -> Self {
+        match ms {
+            ClockData::Mshv(s) => s,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
 impl From<UserMemoryRegion> for mshv_user_mem_region {
     fn from(region: UserMemoryRegion) -> Self {
         let mut flags: u32 = 0;
@@ -1946,7 +1959,12 @@ impl vm::Vm for MshvVm {
     /// Set guest clock.
     #[cfg(target_arch = "x86_64")]
     fn set_clock(&self, _data: &ClockData) -> vm::Result<()> {
-        Ok(())
+        let data: MshvClockData = (*_data).into();
+        println!("Setting Time ref Info");
+        self
+            .fd
+            .set_partition_property(hv_partition_property_code_HV_PARTITION_PROPERTY_REFERENCE_TIME, data.time_ref)
+            .map_err(|e| vm::HypervisorVmError::SetClock(e.into()))
     }
 
     /// Downcast to the underlying MshvVm type
