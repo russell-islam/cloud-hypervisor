@@ -319,6 +319,8 @@ pub enum Error {
 
     #[error("Error injecting NMI")]
     ErrorNmi,
+    #[error("Error resuming partition")]
+    ErrorResumingPartition,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2172,7 +2174,12 @@ impl Vm {
             // With TDX memory and CPU state configured TDX setup is complete
             self.vm.tdx_finalize().map_err(Error::FinalizeTdx)?;
         }
-
+        println!("Current VM state: {:?}", current_state);
+        if current_state == VmState::Created {
+            self.vm.resume().map_err(|e| {
+                Error::ErrorResumingPartition
+            })?;
+        }
         self.cpu_manager
             .lock()
             .unwrap()
@@ -2497,6 +2504,7 @@ impl Pausable for Vm {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         event!("vm", "resuming");
+        let current_state = self.get_state().unwrap();
         let mut state = self
             .state
             .try_write()
@@ -2516,9 +2524,11 @@ impl Pausable for Vm {
                 })?;
             }
         }
-        self.vm.resume().map_err(|e| {
-            MigratableError::Resume(anyhow!("Could not resume Hypervisor VM: {}", e))
-        })?;
+        if current_state == VmState::Paused {
+            self.vm.resume().map_err(|e| {
+                MigratableError::Resume(anyhow!("Could not resume Hypervisor VM: {}", e))
+            })?;
+        }
         self.device_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.
