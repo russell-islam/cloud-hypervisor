@@ -53,6 +53,10 @@ vmm = { path = "vmm" }
 vmm-sys-util = "0.12.1"
 zbus = { version = "4.1.2", optional = true }
 
+[patch."https://github.com/rust-vmm/vfio"]
+vfio-ioctls = { git = "https://github.com/NunoDasNeves/vfio", branch = "nudasnev/mshv-ioctls-v0.3.0" }
+vfio-bindings = { git = "https://github.com/NunoDasNeves/vfio", branch = "nudasnev/mshv-ioctls-v0.3.0" }
+
 [dev-dependencies]
 dirs = "5.0.1"
 net_util = { path = "net_util" }
