@@ -57,6 +57,8 @@ struct RngEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     access_platform: Option<Arc<dyn AccessPlatform>>,
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+    vm: Option<Arc<dyn hypervisor::Vm>>,
 }
 
 impl RngEpollHandler {
@@ -76,8 +78,12 @@ impl RngEpollHandler {
             let len = desc_chain
                 .memory()
                 .read_volatile_from(
-                    desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                    desc.addr().translate_gva_with_vmfd(
+                        self.access_platform.as_ref(),
+                        desc.len() as usize,
+                        #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+                        self.vm.as_ref(),
+                    ),
                     &mut self.random_file,
                     desc.len() as usize,
                 )
@@ -273,6 +279,8 @@ impl VirtioDevice for Rng {
                 kill_evt,
                 pause_evt,
                 access_platform: self.common.access_platform.clone(),
+                #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+                vm: self.common.vm.clone(),
             };
 
             let paused = self.common.paused.clone();
