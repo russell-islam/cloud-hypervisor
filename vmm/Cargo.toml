@@ -18,8 +18,19 @@ kvm = [
   "vfio-ioctls/kvm",
   "vm-device/kvm",
 ]
-mshv = ["hypervisor/mshv", "pci/mshv", "vfio-ioctls/mshv", "vm-device/mshv"]
-sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
+mshv = [
+  "hypervisor/mshv",
+  "pci/mshv",
+  "vfio-ioctls/mshv",
+  "vm-device/mshv",
+  "vm-virtio/mshv",
+]
+sev_snp = [
+  "arch/sev_snp",
+  "hypervisor/sev_snp",
+  "virtio-devices/sev_snp",
+  "vm-virtio/sev_snp",
+]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 
