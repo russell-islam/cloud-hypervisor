@@ -304,6 +304,11 @@ impl VirtioDevice for Rng {
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
         self.common.set_access_platform(access_platform)
     }
+
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+    fn set_vm(&mut self, vm: Arc<dyn hypervisor::Vm>) {
+        self.common.set_vm(vm)
+    }
 }
 
 impl Pausable for Rng {

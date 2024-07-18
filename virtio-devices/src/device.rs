@@ -175,6 +175,11 @@ pub trait VirtioDevice: Send {
     /// Set the access platform trait to let the device perform address
     /// translations if needed.
     fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
+
+    /// Set the hypervisor specific VM trait to let the device perform address
+    /// translations if needed for SEV-SNP guest.
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+    fn set_vm(&mut self, _vm: Arc<dyn hypervisor::Vm>) {}
 }
 
 /// Trait providing address translation the same way a physical DMA remapping
@@ -306,6 +311,11 @@ impl VirtioCommon {
         // Indirect descriptors feature is not supported when the device
         // requires the addresses held by the descriptors to be translated.
         self.avail_features &= !(1 << VIRTIO_F_RING_INDIRECT_DESC);
+    }
+
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+    pub fn set_vm(&mut self, vm: Arc<dyn hypervisor::Vm>) {
+        self.vm = Some(vm);
     }
 }
 
