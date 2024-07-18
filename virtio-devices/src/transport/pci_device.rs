@@ -389,6 +389,7 @@ impl VirtioPciDevice {
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
         snapshot: Option<Snapshot>,
+        #[cfg(all(feature = "mshv", feature = "sev_snp"))] vm: Option<Arc<dyn hypervisor::Vm>>,
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
@@ -405,7 +406,10 @@ impl VirtioPciDevice {
         if let Some(access_platform) = &access_platform {
             locked_device.set_access_platform(access_platform.clone());
         }
-
+        #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+        if let Some(vm) = &vm {
+            locked_device.set_vm(vm.clone());
+        }
         let mut queues: Vec<Queue> = locked_device
             .queue_max_sizes()
             .iter()
