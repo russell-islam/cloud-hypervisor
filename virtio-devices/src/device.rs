@@ -205,6 +205,8 @@ pub struct VirtioCommon {
     pub device_type: u32,
     pub min_queues: u16,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+    pub vm: Option<Arc<dyn hypervisor::Vm>>,
 }
 
 impl VirtioCommon {
