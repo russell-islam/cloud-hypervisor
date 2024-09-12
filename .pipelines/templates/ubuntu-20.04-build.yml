@@ -29,8 +29,8 @@ steps:
         shellcheck jq findutils unzip flake8
 
       command -v go || (
-        sudo apt -y install golang-1.18-go;
-        sudo ln -vsf /usr/lib/go-1.18/bin/go /usr/bin/go
+        sudo apt -y install golang-1.21-go;
+        sudo ln -vsf /usr/lib/go-1.21/bin/go /usr/bin/go
       )
       go version
 
