@@ -60,7 +60,7 @@ variables:
   - group: mail
   - group: virtstackvalidation_variables
   - name: DEFAULT_BRANCH
-    value: msft-main
+    value: msft-main-3.0
   - name: RUST_VERSION
     value: "stable"
   - name: test_project
