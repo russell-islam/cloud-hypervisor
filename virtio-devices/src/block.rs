@@ -625,6 +625,7 @@ impl Block {
                 let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
                     | (1u64 << VIRTIO_BLK_F_FLUSH)
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
+                    | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX);
@@ -658,6 +659,7 @@ impl Block {
                 let mut config = VirtioBlockConfig {
                     capacity: disk_nsectors,
                     writeback: 1,
+                    seg_max: u32::from(queue_size) - 2,
                     blk_size: topology.logical_block_size as u32,
                     physical_block_exp,
                     min_io_size: (topology.minimum_io_size / logical_block_size) as u16,

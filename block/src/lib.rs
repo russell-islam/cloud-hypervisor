@@ -263,10 +263,10 @@ impl Request {
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(1),
+            data_descriptors: SmallVec::with_capacity(256),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: SmallVec::with_capacity(1),
+            aligned_operations: SmallVec::with_capacity(256),
             start: Instant::now(),
         };
 
