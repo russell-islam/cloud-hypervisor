@@ -101,7 +101,7 @@ resources:
     - repository: lisa
       type: git
       name: LSG/lsg-lisa
-      ref: main
+      ref: refs/heads/dom0-3.0
 
 stages:
   - stage: "CLH_Build"
@@ -209,6 +209,7 @@ stages:
     jobs:
       - template: virtstack\pipelines\templates\linux_dom0_test_template.yml@lisa
         parameters:
+          domo_vhd_version: '3.0'
           test_scenario: "$(test_project) - NON_CVM"
           test_project: $(test_project)
           checkout_repo: "lisa"
@@ -244,6 +245,7 @@ stages:
     jobs:
       - template: virtstack\pipelines\templates\linux_dom0_test_template.yml@lisa
         parameters:
+          domo_vhd_version: '3.0'
           test_scenario: "$(test_project) - CVM"
           test_project: $(test_project)
           checkout_repo: "lisa"
