@@ -217,6 +217,7 @@ stages:
           use_ms_guest_kernel: "YES"
           use_ms_hypervisor_fw: "YES"
           use_ms_ovmf_fw: "YES"
+          use_ms_bz_image: "YES"
           override_clh_ref: $(clh_ref)
           system_access_token: $(System.AccessToken)
           run_on_intel: ${{ parameters.run_on_intel }}
