@@ -5,8 +5,8 @@
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
-
-use io_uring::{opcode, squeue, types, IoUring};
+use crate::RequestType;
+use io_uring::{opcode, types, IoUring};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
@@ -48,11 +48,21 @@ impl DiskFile for RawFileDisk {
     }
 }
 
+struct AioData {
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    req_type: RequestType,
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
+    data: Vec<AioData>
 }
+
+unsafe impl Send for RawFileAsync {}
 
 impl RawFileAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> std::io::Result<Self> {
@@ -67,6 +77,7 @@ impl RawFileAsync {
             fd,
             io_uring,
             eventfd,
+            data: Vec::new(),
         })
     }
 }
@@ -82,10 +93,11 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        //let (submitter, mut sq, _) = self.io_uring.split();
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
+        /*
         let _ = unsafe {
             sq.push(
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
@@ -94,12 +106,12 @@ impl AsyncIo for RawFileAsync {
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
             )
-        };
-
+        };*/
+        self.data.push(AioData {offset, iovecs: iovecs.to_vec(), user_data, req_type: RequestType::In});
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        //sq.sync();
+        //submitter.submit().map_err(AsyncIoError::ReadVectored)?;
 
         Ok(())
     }
@@ -110,10 +122,11 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        //let (submitter, mut sq, _) = self.io_uring.split();
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
+        /*
         let _ = unsafe {
             sq.push(
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
@@ -123,11 +136,12 @@ impl AsyncIo for RawFileAsync {
                     .user_data(user_data),
             )
         };
-
+        */
+        self.data.push(AioData {offset, iovecs: iovecs.to_vec(), user_data, req_type: RequestType::Out});
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
+        //sq.sync();
+        //submitter.submit().map_err(AsyncIoError::WriteVectored)?;
 
         Ok(())
     }
@@ -141,7 +155,6 @@ impl AsyncIo for RawFileAsync {
                 sq.push(
                     &opcode::Fsync::new(types::Fd(self.fd))
                         .build()
-                        .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
                 )
             };
@@ -163,5 +176,44 @@ impl AsyncIo for RawFileAsync {
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
+    }
+    fn complete_queue(&mut self) -> AsyncIoResult<()> {
+        if self.data.len() == 0 {
+            return Ok(());
+        }
+        let (submitter, mut sq, _) = self.io_uring.split();
+        for dt in &self.data {
+            match dt.req_type {
+                RequestType::In => {
+                    let _ = unsafe {
+                        sq.push(
+                            &opcode::Readv::new(types::Fd(self.fd), dt.iovecs.as_ptr(), dt.iovecs.len() as u32)
+                                .offset(dt.offset.try_into().unwrap())
+                                .build()
+                                .user_data(dt.user_data),
+                        )
+                    };
+                }
+                RequestType::Out => {
+                    let _ = unsafe {
+                        sq.push(
+                            &opcode::Writev::new(types::Fd(self.fd), dt.iovecs.as_ptr(), dt.iovecs.len() as u32)
+                                .offset(dt.offset.try_into().unwrap())
+                                .build()
+                                .user_data(dt.user_data),
+                        )
+                    };
+                }
+                _ => {
+
+                }
+            }
+            
+        }
+
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        self.data.clear();
+        Ok(())
     }
 }
