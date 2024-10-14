@@ -58,4 +58,7 @@ pub trait AsyncIo: Send {
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
     fn next_completed_request(&mut self) -> Option<(u64, i32)>;
+    fn complete_queue(&mut self) -> AsyncIoResult<()> {
+        Ok(())
+    }
 }

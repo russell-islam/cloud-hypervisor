@@ -476,11 +476,13 @@ impl Request {
                 disk_image
                     .read_vectored(offset, &iovecs, user_data)
                     .map_err(ExecuteError::AsyncRead)?;
+                //debug!("MUISLAM: Write");
             }
             RequestType::Out => {
                 disk_image
                     .write_vectored(offset, &iovecs, user_data)
                     .map_err(ExecuteError::AsyncWrite)?;
+                //debug!("MUISLAM: Read");
             }
             RequestType::Flush => {
                 disk_image
