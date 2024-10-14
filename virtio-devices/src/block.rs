@@ -73,6 +73,10 @@ pub enum Error {
     AsyncRequestFailure,
     #[error("Failed synchronizing the file: {0}")]
     Fsync(#[source] AsyncIoError),
+    #[error("Failed complete the queue: {0}")]
+    CompleteQueue(#[source] AsyncIoError),
+    #[error("Failed signal USed Queue: {0}")]
+    UsedQueueError(#[source] EpollHelperError),
     #[error("Failed adding used index: {0}")]
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue: {0}")]
@@ -146,12 +150,13 @@ struct BlockEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
     host_cpus: Option<Vec<usize>>,
+    id: String,
 }
 
 impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
-
+        let mut toal_req = 0;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
@@ -224,6 +229,7 @@ impl BlockEpollHandler {
             {
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
+                toal_req += 1;
             } else {
                 desc_chain
                     .memory()
@@ -240,7 +246,13 @@ impl BlockEpollHandler {
                     .map_err(Error::QueueEnableNotification)?;
             }
         }
+        if toal_req > 0 {
+            self.disk_image
+                .complete_queue()
+                .map_err(Error::CompleteQueue)?;
+        }
 
+        //debug!("MUISLAM_total_req: {}", toal_req);
         Ok(())
     }
 
@@ -498,6 +510,7 @@ impl EpollHelperHandler for BlockEpollHandler {
         let ev_type = event.data as u16;
         match ev_type {
             QUEUE_AVAIL_EVENT => {
+                //debug!("MUISLAM: QUEUE_AVAIL_EVENT");
                 self.queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
@@ -510,6 +523,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                 }
             }
             COMPLETION_EVENT => {
+                //debug!("MUISLAM: COMPLETION_EVENT");
                 self.disk_image.notifier().read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
@@ -544,13 +558,13 @@ impl EpollHelperHandler for BlockEpollHandler {
                             e
                         ))
                     })?;
-
                     self.process_queue_submit_and_signal()?
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled."
                     )));
                 }
+                //debug!("MUISLAM: RATE_LIMITER_EVENT");
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
@@ -899,6 +913,13 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
+                id: self
+                    .disk_path
+                    .as_path()
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
             };
 
             let paused = self.common.paused.clone();

@@ -106,4 +106,7 @@ impl AsyncIo for FixedVhdAsync {
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.raw_file_async.next_completed_request()
     }
+    fn complete_queue(&mut self) -> AsyncIoResult<()> {
+        self.raw_file_async.complete_queue()
+    }
 }

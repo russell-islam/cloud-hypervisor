@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use crate::RequestType;
+use io_uring::{opcode, types, IoUring};
 use std::fs::File;
 use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
-
-use io_uring::{opcode, types, IoUring};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
@@ -52,11 +52,21 @@ impl DiskFile for RawFileDisk {
     }
 }
 
+struct AioData {
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    req_type: RequestType,
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
+    data: Vec<AioData>,
 }
+
+unsafe impl Send for RawFileAsync {}
 
 impl RawFileAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> std::io::Result<Self> {
@@ -71,6 +81,7 @@ impl RawFileAsync {
             fd,
             io_uring,
             eventfd,
+            data: Vec::new(),
         })
     }
 }
@@ -86,24 +97,29 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        //let (submitter, mut sq, _) = self.io_uring.split();
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
-        unsafe {
+        /*
+        let _ = unsafe {
             sq.push(
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
                     .build()
                     .user_data(user_data),
             )
-            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?
-        };
-
+        };*/
+        self.data.push(AioData {
+            offset,
+            iovecs: iovecs.to_vec(),
+            user_data,
+            req_type: RequestType::In,
+        });
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        //sq.sync();
+        //submitter.submit().map_err(AsyncIoError::ReadVectored)?;
 
         Ok(())
     }
@@ -114,11 +130,12 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        //let (submitter, mut sq, _) = self.io_uring.split();
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
-        unsafe {
+        /*
+        let _ = unsafe {
             sq.push(
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
@@ -127,11 +144,17 @@ impl AsyncIo for RawFileAsync {
             )
             .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?
         };
-
+        */
+        self.data.push(AioData {
+            offset,
+            iovecs: iovecs.to_vec(),
+            user_data,
+            req_type: RequestType::Out,
+        });
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
+        //sq.sync();
+        //submitter.submit().map_err(AsyncIoError::WriteVectored)?;
 
         Ok(())
     }
@@ -167,5 +190,64 @@ impl AsyncIo for RawFileAsync {
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
+    }
+    fn complete_queue(&mut self) -> AsyncIoResult<()> {
+        if self.data.is_empty() {
+            return Ok(());
+        }
+        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut submitted = false;
+
+        for dt in &self.data {
+            match dt.req_type {
+                RequestType::In => {
+                    // For VHD files, ensure offset and iovecs are valid and aligned.
+                    // If needed, add VHD-specific logic here (e.g., sector alignment).
+                    unsafe {
+                        sq.push(
+                            &opcode::Readv::new(
+                                types::Fd(self.fd),
+                                dt.iovecs.as_ptr(),
+                                dt.iovecs.len() as u32,
+                            )
+                            .offset(dt.offset as u64)
+                            .build()
+                            .user_data(dt.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                RequestType::Out => {
+                    unsafe {
+                        sq.push(
+                            &opcode::Writev::new(
+                                types::Fd(self.fd),
+                                dt.iovecs.as_ptr(),
+                                dt.iovecs.len() as u32,
+                            )
+                            .offset(dt.offset as u64)
+                            .build()
+                            .user_data(dt.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::WriteVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                _ => {}
+            }
+        }
+
+        // Only submit if we actually queued something
+        if submitted {
+            sq.sync();
+            submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        }
+        self.data.clear();
+        Ok(())
     }
 }
