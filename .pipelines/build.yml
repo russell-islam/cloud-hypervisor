@@ -52,6 +52,10 @@ parameters:
     displayName: Build ID of lsg-virt-mariner pipeline
     type: string
     default: " "
+  - name: linux_dom0_uvm_ref
+    displayName: Linux-Dom0 UVM Commit/Branch Name (ADO repo only)
+    type: string
+    default: " "
 
 variables:
   - group: azure_subscription_testonly
@@ -236,6 +240,8 @@ stages:
           run_ch_perf_tests: ${{ parameters.run_ch_perf_tests }}
           ${{ if and(ne(parameters.githubref, ' '), ne(parameters.githubref, '')) }}:
             githubref: ${{ parameters.githubref }}
+          ${{ if and(ne(parameters.linux_dom0_uvm_ref, ' '), ne(parameters.linux_dom0_uvm_ref, '')) }}:
+            linux_dom0_uvm_ref: ${{ parameters.linux_dom0_uvm_ref }}
 
   - stage: "CLH_Test_CVM"
     displayName: "Cloud-Hypervisor Test (CVM)"
@@ -269,4 +275,6 @@ stages:
           run_ch_integration_tests: ${{ parameters.run_ch_integration_tests }}
           run_ch_perf_tests: ${{ parameters.run_ch_perf_tests }}
           ${{ if and(ne(parameters.githubref, ' '), ne(parameters.githubref, '')) }}:
-            githubref: ${{ parameters.githubref }}            
+            githubref: ${{ parameters.githubref }}
+          ${{ if and(ne(parameters.linux_dom0_uvm_ref, ' '), ne(parameters.linux_dom0_uvm_ref, '')) }}:
+            linux_dom0_uvm_ref: ${{ parameters.linux_dom0_uvm_ref }}
