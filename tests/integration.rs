@@ -8851,7 +8851,7 @@ mod windows {
             .output()
             .expect("ps command failed")
             .stdout;
-        return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
+        String::from_utf8_lossy(&out).matches("vcpu").count() as u8
     }
 
     fn netdev_ctrl_threads_count(pid: u32) -> u8 {
