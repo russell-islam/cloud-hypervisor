@@ -1343,6 +1343,9 @@ impl<'a> GuestCommand<'a> {
         }
 
         if self.capture_output {
+            // The caller should call .wait() on the returned child
+            #[allow(unknown_lints)]
+            #[allow(clippy::zombie_processes)]
             let child = self
                 .command
                 .stderr(Stdio::piped())
@@ -1372,6 +1375,9 @@ impl<'a> GuestCommand<'a> {
                 ))
             }
         } else {
+            // The caller should call .wait() on the returned child
+            #[allow(unknown_lints)]
+            #[allow(clippy::zombie_processes)]
             self.command.spawn()
         }
     }
