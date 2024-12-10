@@ -1087,9 +1087,9 @@ impl MemoryManager {
                         } else {
                             // Alignment must be "natural" i.e. same as size of block
                             let start_addr = GuestAddress(
-                                (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_ALIGN_SIZE
-                                    - 1)
-                                    / virtio_devices::VIRTIO_MEM_ALIGN_SIZE
+                                start_of_device_area
+                                    .0
+                                    .div_ceil(virtio_devices::VIRTIO_MEM_ALIGN_SIZE)
                                     * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                             );
 
@@ -1963,9 +1963,8 @@ impl MemoryManager {
         }
 
         // Place the SGX EPC region on a 4k boundary between the RAM and the device area
-        let epc_region_start = GuestAddress(
-            ((self.start_of_device_area.0 + SGX_PAGE_SIZE - 1) / SGX_PAGE_SIZE) * SGX_PAGE_SIZE,
-        );
+        let epc_region_start =
+            GuestAddress(self.start_of_device_area.0.div_ceil(SGX_PAGE_SIZE) * SGX_PAGE_SIZE);
 
         self.start_of_device_area = epc_region_start
             .checked_add(epc_region_size)
