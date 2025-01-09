@@ -255,7 +255,7 @@ impl DiskSpec {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]
 struct MetadataTableHeader {
     signature: u64,
@@ -286,7 +286,7 @@ impl MetadataTableHeader {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct MetadataTableEntry {
     item_id: Uuid,
