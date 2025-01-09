@@ -1157,7 +1157,7 @@ mod tests {
 
     use super::*;
 
-    #[repr(packed)]
+    #[repr(C, packed)]
     #[derive(Clone, Copy, Default)]
     #[allow(dead_code)]
     struct TestCap {
