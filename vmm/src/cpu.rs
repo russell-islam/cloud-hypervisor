@@ -199,7 +199,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
@@ -211,7 +211,7 @@ struct LocalX2Apic {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct Ioapic {
     pub r#type: u8,
@@ -224,7 +224,7 @@ struct Ioapic {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicC {
     pub r#type: u8,
@@ -249,7 +249,7 @@ struct GicC {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicD {
     pub r#type: u8,
@@ -264,7 +264,7 @@ struct GicD {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicR {
     pub r#type: u8,
@@ -276,7 +276,7 @@ struct GicR {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicIts {
     pub r#type: u8,
@@ -289,7 +289,7 @@ struct GicIts {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct ProcessorHierarchyNode {
     pub r#type: u8,
@@ -302,7 +302,7 @@ struct ProcessorHierarchyNode {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct InterruptSourceOverride {
     pub r#type: u8,
