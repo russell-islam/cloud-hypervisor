@@ -10031,7 +10031,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10205,7 +10205,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10423,7 +10423,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10639,7 +10639,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10749,7 +10749,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10896,7 +10896,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
