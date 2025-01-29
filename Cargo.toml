@@ -106,11 +106,12 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 kvm-bindings = "0.10.0"
 kvm-ioctls = "0.19.1"
 linux-loader = "0.13.0"
-mshv-bindings = "0.3.2"
-mshv-ioctls = "0.3.2"
+mshv-bindings = { path = "../mshv/mshv-bindings" }
+mshv-ioctls = { path = "../mshv/mshv-ioctls" }
 seccompiler = "0.4.0"
-vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
+#vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
+vfio-bindings = { path = "../vfio/crates/vfio-bindings" }
+vfio-ioctls = { path = "../vfio/crates/vfio-ioctls", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
 vhost = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }
 vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }

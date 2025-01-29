@@ -152,7 +152,10 @@ impl VfioUserPciDevice {
                         size: mmio_region.length,
                     }]
                 } else {
-                    sparse_areas
+                    vec![vfio_region_sparse_mmap_area {
+                        offset: 0,
+                        size: mmio_region.length,
+                    }]
                 };
 
                 for s in mmaps.iter() {

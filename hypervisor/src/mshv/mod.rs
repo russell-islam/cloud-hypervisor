@@ -445,6 +445,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
 }
 
+#[derive(Debug)]
 #[cfg(feature = "sev_snp")]
 struct Ghcb(*mut svm_ghcb_base);
 
@@ -610,6 +611,7 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[allow(non_upper_case_globals)]
     fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+        let reg_page = self.fd.get_vp_reg_page().unwrap().0;
         match self.fd.run() {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
@@ -651,15 +653,13 @@ impl cpu::Vcpu for MshvVcpu {
                             let insn_len = info.header.instruction_length() as u64;
 
                             /* Advance RIP and update RAX */
-                            let arr_reg_name_value = [
-                                (
-                                    hv_register_name_HV_X64_REGISTER_RIP,
-                                    info.header.rip + insn_len,
-                                ),
-                                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                            ];
-                            set_registers_64!(self.fd, arr_reg_name_value)
-                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                            set_gp_regs_field_ptr!(reg_page, rax, ret_rax);
+                            // SAFETY: access union fields
+                            unsafe {
+                                (*reg_page).__bindgen_anon_1.__bindgen_anon_1.rip =
+                                    info.header.rip + insn_len;
+                                (*reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
+                            }
                             return Ok(cpu::VmExit::Ignore);
                         }
                         _ => {}
