@@ -2285,6 +2285,7 @@ impl DeviceManager {
             let mut options = OpenOptions::new();
             options.read(true);
             options.write(!disk_cfg.readonly);
+            
             if disk_cfg.direct {
                 options.custom_flags(libc::O_DIRECT);
             }

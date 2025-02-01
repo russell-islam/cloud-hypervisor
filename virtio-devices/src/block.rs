@@ -623,8 +623,10 @@ impl Block {
                 }
 
                 let mut avail_features = (1u64 << VIRTIO_F_VERSION_1)
-                    | (1u64 << VIRTIO_BLK_F_FLUSH)
+                    //| (1u64 << VIRTIO_BLK_F_FLUSH)
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
+                    | (1u64 << VIRTIO_BLK_F_WCE)
+                    | (1u64 << VIRTIO_BLK_F_GEOMETRY)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
                     | (1u64 << VIRTIO_BLK_F_SEG_MAX)

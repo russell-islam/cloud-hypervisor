@@ -218,7 +218,7 @@ fn sector<B: Bitmap + 'static>(
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
-const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 64;
 
 #[derive(Debug)]
 pub struct AlignedOperation {
