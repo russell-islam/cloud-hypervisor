@@ -246,10 +246,7 @@ stages:
   - stage: "CLH_Test_CVM"
     displayName: "Cloud-Hypervisor Test (CVM)"
     dependsOn: CLH_Build
-    # Disable CVM validation stage
-    # https://dev.azure.com/microsoft/OS/_workitems/edit/54063295
-    condition: ${{ false }}
-    #condition: eq(${{ parameters.run_on_cvm }}, True)
+    condition: eq(${{ parameters.run_on_cvm }}, True)
     pool:
       name: LSG_Virt_1ES_Pool
     jobs:
