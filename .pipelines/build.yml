@@ -105,7 +105,7 @@ resources:
     - repository: lisa
       type: git
       name: LSG/lsg-lisa
-      ref: refs/tags/virtstack/stable
+      ref: refs/heads/virtstack/stable
 
 stages:
   - stage: "CLH_Build"
