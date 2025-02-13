@@ -1893,7 +1893,7 @@ impl vm::Vm for MshvVm {
 
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
         let mut vfio_dev = mshv_create_device {
-            type_: MSHV_DEV_TYPE_VFIO,
+            type_: mshv_device_type_MSHV_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };

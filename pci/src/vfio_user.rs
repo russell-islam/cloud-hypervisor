@@ -128,7 +128,7 @@ impl VfioUserPciDevice {
                 .file_offset
                 .clone();
 
-            let sparse_areas = self
+            let _sparse_areas = self
                 .client
                 .lock()
                 .unwrap()
@@ -146,14 +146,11 @@ impl VfioUserPciDevice {
                     prot |= libc::PROT_WRITE;
                 }
 
-                let mmaps = if sparse_areas.is_empty() {
+                let mmaps =
                     vec![vfio_region_sparse_mmap_area {
                         offset: 0,
                         size: mmio_region.length,
-                    }]
-                } else {
-                    sparse_areas
-                };
+                    }];
 
                 for s in mmaps.iter() {
                     // SAFETY: FFI call with correct arguments
