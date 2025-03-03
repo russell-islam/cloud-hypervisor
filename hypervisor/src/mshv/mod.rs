@@ -1460,6 +1460,9 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let mut state: VcpuMshvState = state.clone().into();
+        debug!("MUISLAML debug set_state start:");
+        debug!("{}", state);
+        debug!("MUISLAML debug set_state end:");
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
         self.set_regs(&state.regs.into())?;
@@ -1515,7 +1518,7 @@ impl cpu::Vcpu for MshvVcpu {
             .get_all_vp_state_components()
             .map_err(|e| cpu::HypervisorCpuError::GetAllVpStateComponents(e.into()))?;
 
-        Ok(VcpuMshvState {
+        let state: VcpuMshvState= VcpuMshvState {
             msrs,
             vcpu_events,
             regs: regs.into(),
@@ -1525,8 +1528,11 @@ impl cpu::Vcpu for MshvVcpu {
             dbg,
             misc,
             vp_states,
-        }
-        .into())
+        };
+        debug!("MUISLAML debug get_state start:");
+        debug!("{}", state);
+        debug!("MUISLAML debug get_state end:");
+        Ok(state.into())
     }
 
     #[cfg(target_arch = "aarch64")]

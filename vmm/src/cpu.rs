@@ -421,6 +421,11 @@ impl Vcpu {
         self.saved_state.clone()
     }
 
+    /// Gets the saved vCPU state.
+    #[cfg(target_arch = "x86_64")]
+    pub fn get_saved_state(&self) -> Option<CpuState> {
+        self.saved_state.clone()
+    }
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
@@ -1393,6 +1398,16 @@ impl CpuManager {
             .iter()
             .map(|cpu| cpu.lock().unwrap().get_saved_state().unwrap())
             .collect()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn get_vcpu_states(&self) -> Vec<CpuState> {
+        let mut vcpus: Vec<CpuState> = Vec::new();
+        for vcpu in &self.vcpus {
+            let vcpu = vcpu.lock().unwrap();
+            vcpus.push(vcpu.vcpu.state().unwrap());
+        }
+        vcpus
     }
 
     pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {

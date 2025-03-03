@@ -1591,6 +1591,14 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_cpudump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.cpu_dump(destination_url)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+
+    }
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         if self.vm.is_some() || self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);
@@ -1640,7 +1648,7 @@ impl RequestHandler for Vmm {
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.coredump(destination_url).map_err(VmError::Coredump)
+            vm.coredump(destination_url)?
         } else {
             Err(VmError::VmNotRunning)
         }

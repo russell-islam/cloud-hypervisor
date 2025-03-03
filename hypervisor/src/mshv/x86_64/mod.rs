@@ -53,16 +53,14 @@ pub struct MshvClockData {
 
 impl fmt::Display for VcpuMshvState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let expected_num_msrs = self.msrs.len();
-        let mut msr_entries = vec![vec![0; 2]; expected_num_msrs];
+        let mut msr_str = String::new();
 
-        for (i, entry) in self.msrs.iter().enumerate() {
-            msr_entries[i][1] = entry.data;
-            msr_entries[i][0] = entry.index as u64;
+        for entry in self.msrs.iter() {
+            msr_str.push_str(format!("[{:#010X?}, {:#010X?}]", entry.index, entry.data).as_str());
         }
-        write!(f, "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- DBG: {:?} --- VP States: {:?}",
-                msr_entries.len(),
-                msr_entries,
+        write!(f, "Number of MSRs: {}: \nMSRs: {:#010X?}, \n-- VCPU Events: {:?} \n-- Standard registers: {:?} \n--- Special Registers: {:?} \n---- Floating Point Unit: {:?} \n--- Extended Control Register: {:?} \n--- DBG: {:?} \n--- VP States: {:?}",
+                self.msrs.len(),
+                msr_str,
                 self.vcpu_events,
                 self.regs,
                 self.sregs,

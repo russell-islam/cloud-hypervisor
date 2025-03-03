@@ -30,7 +30,7 @@ use crate::api::{
     AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
     VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot,
     VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot,
+    VmSendMigration, VmShutdown, VmSnapshot, VmCpuDump,
 };
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
@@ -266,6 +266,10 @@ pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
     r.routes.insert(
         endpoint!("/vm.snapshot"),
         Box::new(VmActionHandler::new(&VmSnapshot)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.cpudump"),
+        Box::new(VmActionHandler::new(&VmCpuDump)),
     );
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     r.routes.insert(

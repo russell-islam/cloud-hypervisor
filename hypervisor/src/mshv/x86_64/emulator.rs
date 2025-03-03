@@ -157,8 +157,8 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
             .get_sregs()
             .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
 
-        debug!("mshv emulator: Getting new CPU state");
-        debug!("mshv emulator: {:#x?}", regs);
+        //debug!("mshv emulator: Getting new CPU state");
+        //debug!("mshv emulator: {:#x?}", regs);
 
         Ok(EmulatorCpuState { regs, sregs })
     }
@@ -172,8 +172,8 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
             )));
         }
 
-        debug!("mshv emulator: Setting new CPU state");
-        debug!("mshv emulator: {:#x?}", state.regs);
+        //debug!("mshv emulator: Setting new CPU state");
+        //debug!("mshv emulator: {:#x?}", state.regs);
 
         self.vcpu
             .set_regs(&state.regs)

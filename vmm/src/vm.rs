@@ -39,7 +39,7 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
-use hypervisor::{HypervisorVmError, VmOps};
+use hypervisor::{CpuState, HypervisorVmError, VmOps};
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -189,6 +189,10 @@ pub enum Error {
 
     #[error("Cannot resume VM: {0}")]
     Resume(#[source] MigratableError),
+
+
+    #[error("Cannot cpudump VM")]
+    CpuDump,
 
     #[error("Memory manager error: {0:?}")]
     MemoryManager(MemoryManagerError),
@@ -2562,6 +2566,35 @@ impl Vm {
             .unwrap()
             .nmi()
             .map_err(|_| Error::ErrorNmi);
+    }
+
+    pub fn cpu_dump(&self, destination_url: &str) -> Result<()> {
+        let current_state = self.get_state().unwrap();
+        if current_state != VmState::Paused {
+            return Err(Error::CpuDump);
+        }
+        let cpu_manager = self.cpu_manager.lock().unwrap();
+        let states = cpu_manager.get_vcpu_states();
+        let mut cpu_dump_path = url_to_path(destination_url).unwrap();
+        cpu_dump_path.push("cpu.dump");
+        // Create the snapshot state file
+        let mut cpudump_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(cpu_dump_path)
+            .map_err(|_e| Error::CpuDump)?;
+        for (pos, state) in states.iter().enumerate() {
+            write!(cpudump_file, "CPU ID: {}\n", pos).unwrap();
+            let ms = match state {
+                CpuState::Mshv(s) => s,
+                /* Needed in case other hypervisors are enabled */
+                #[allow(unreachable_patterns)]
+                _ => panic!("CpuState is not valid"),
+            };
+            write!(cpudump_file, "{}", ms).unwrap();
+        }
+        Ok(())
     }
 }
 

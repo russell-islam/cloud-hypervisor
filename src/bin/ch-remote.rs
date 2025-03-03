@@ -449,6 +449,17 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
                 .map_err(Error::HttpApiClient)
         }
+        Some("cpudump") => {
+            let cpudump_config = cpudump_config(
+                matches
+                    .subcommand_matches("cpudump")
+                    .unwrap()
+                    .get_one::<String>("cpudump_config")
+                    .unwrap(),
+            );
+            simple_api_command(socket, "PUT", "cpudump", Some(&cpudump_config))
+                .map_err(Error::HttpApiClient)
+        }
         Some("restore") => {
             let (restore_config, fds) = restore_config(
                 matches
@@ -853,6 +864,14 @@ fn snapshot_config(url: &str) -> String {
     serde_json::to_string(&snapshot_config).unwrap()
 }
 
+fn cpudump_config(url: &str) -> String {
+    let cpudump_config = vmm::api::VmCpuDumpConfig {
+        destination_url: String::from(url),
+    };
+
+    serde_json::to_string(&cpudump_config).unwrap()
+}
+
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
@@ -1047,6 +1066,15 @@ fn main() {
                 .about("Create a snapshot from VM")
                 .arg(
                     Arg::new("snapshot_config")
+                        .index(1)
+                        .help("<destination_url>"),
+                ),
+        )
+        .subcommand(
+            Command::new("cpudump")
+                .about("Create a cpudump from VM")
+                .arg(
+                    Arg::new("cpudump_config")
                         .index(1)
                         .help("<destination_url>"),
                 ),
