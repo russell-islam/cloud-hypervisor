@@ -249,6 +249,12 @@ pub struct VmSnapshotConfig {
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
+pub struct VmCpuDumpConfig {
+    /// The snapshot destination URL
+    pub destination_url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmCoredumpData {
     /// The coredump destination file
     pub destination_url: String,
@@ -296,6 +302,7 @@ pub trait RequestHandler {
     fn vm_resume(&mut self) -> Result<(), VmError>;
 
     fn vm_snapshot(&mut self, destination_url: &str) -> Result<(), VmError>;
+    fn vm_cpudump(&mut self, destination_url: &str) -> Result<(), VmError>;
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> Result<(), VmError>;
 
@@ -1357,6 +1364,44 @@ impl ApiAction for VmSnapshot {
         get_response_body(self, api_evt, api_sender, data)
     }
 }
+
+pub struct VmCpuDump;
+
+impl ApiAction for VmCpuDump {
+    type RequestBody = VmCpuDumpConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmCpuDUmp {:?}", config);
+
+            let response = vmm
+                .vm_cpudump(&config.destination_url)
+                .map_err(ApiError::VmSnapshot)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
 
 pub struct VmmPing;
 

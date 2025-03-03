@@ -1276,7 +1276,7 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 
 [[package]]
 name = "mshv-bindings"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "libc",
  "num_enum",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "mshv-ioctls"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "libc",
  "mshv-bindings",
