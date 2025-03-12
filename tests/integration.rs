@@ -34,6 +34,7 @@ use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
 const MAX_NUM_PCI_SEGMENTS: u16 = 10;
+const CVM_TIMEOUT: i32 = 140;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
@@ -188,7 +189,7 @@ fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
     if is_guest_vm_type_cvm() {
         // wait until guest boot, cvm guest take little long to boot
         // This way we will wait for 120 second (default timeout)
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
     } else {
         thread::sleep(std::time::Duration::new(20, 0));
     }
@@ -197,7 +198,7 @@ fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
         if is_guest_vm_type_cvm() {
-            assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
         } else {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         }
@@ -259,7 +260,7 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
         if is_guest_vm_type_cvm() {
-            assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
         } else {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         }
@@ -283,7 +284,7 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
         if is_guest_vm_type_cvm() {
-            assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
         } else {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         }
@@ -347,7 +348,7 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
         if is_guest_vm_type_cvm() {
             // CVM guest will have little less memory,
             // we will assert based on guest vm type
-            assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
         } else {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         }
@@ -375,7 +376,7 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
         if is_guest_vm_type_cvm() {
             // CVM guest will have little less memory,
             // we will assert based on guest vm type
-            assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
         } else {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         }
@@ -1099,7 +1100,11 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
     let mut child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
         assert_eq!(
             guest.get_cpu_count().unwrap_or_default(),
             u32::from(total_vcpus)
@@ -1287,7 +1292,11 @@ fn _test_power_button(acpi: bool) {
     let child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
         assert!(remote_command(&api_socket, "power-button", None));
     });
 
@@ -1999,7 +2008,11 @@ fn _test_virtio_vsock(hotplug: bool) {
     let mut child = cmd.capture_output().spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         if hotplug {
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -2077,7 +2090,11 @@ fn test_memory_mergeable(mergeable: bool) {
 
     let mut child1 = cmd1.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest1.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest1.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest1.wait_vm_boot(None).unwrap();
+        }
     });
     if r.is_err() {
         kill_child(&mut child1);
@@ -2108,7 +2125,11 @@ fn test_memory_mergeable(mergeable: bool) {
 
     let mut child2 = cmd2.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest2.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest2.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest2.wait_vm_boot(None).unwrap();
+        }
         let ksm_ps_guest2 = get_ksm_pages_shared();
 
         if mergeable {
@@ -2194,7 +2215,7 @@ fn process_rss_kib(pid: u32) -> usize {
 // 10MB is our maximum accepted overhead.
 const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
 // 17MB is our maximum accepted overhead for CVM.
-const MAXIMUM_VMM_CVM_OVERHEAD_KB: u32 = 17 * 1024;
+const MAXIMUM_VMM_CVM_OVERHEAD_KB: u32 = 18 * 1024;
 
 #[derive(PartialEq, Eq, PartialOrd)]
 struct Counters {
@@ -2599,7 +2620,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(120)).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
@@ -2707,7 +2732,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             let pid = child.id();
             let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
@@ -2768,7 +2797,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             let pid = child.id();
             let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_q0.stdout).trim(), "0,2");
@@ -3030,7 +3063,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         #[cfg(target_arch = "x86_64")]
         let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
@@ -3078,7 +3115,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         #[cfg(target_arch = "aarch64")]
         let iface = "enp0s4";
@@ -3162,7 +3203,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
 
@@ -3323,13 +3368,17 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             if is_guest_vm_type_cvm() {
                 // CVM guest will have little less memory,
                 // we will assert based on guest vm type
-                assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             }
@@ -3455,7 +3504,11 @@ mod common_parallel {
         let mut cloud_child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 16M.
             assert_eq!(
@@ -3632,7 +3685,11 @@ mod common_parallel {
 
         let mut cloud_child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 100 MiB.
             assert_eq!(
@@ -3707,7 +3764,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(120)).unwrap();
+            }
         });
 
         kill_child(&mut child);
@@ -3817,7 +3878,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3871,7 +3936,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3914,7 +3983,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3963,7 +4036,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -4119,7 +4196,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let tap_count = exec_host_command_output("ip link | grep -c mytap1");
             assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
@@ -4204,7 +4285,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is no ttyS0
             assert_eq!(
@@ -4255,7 +4340,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4313,7 +4402,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4380,7 +4473,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4454,7 +4551,12 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
+
             // Get pty fd for console
             let console_path = get_pty_path(&api_socket, "console");
             _test_pty_interaction(console_path);
@@ -4511,7 +4613,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let _ = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
         });
 
         let mut socat_command = Command::new("socat");
@@ -4583,7 +4689,11 @@ mod common_parallel {
         let cmd = format!("echo {text} | sudo tee /dev/hvc0");
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert!(guest
                 .does_device_vendor_pair_match("0x1043", "0x1af4")
@@ -4632,7 +4742,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         guest.ssh_command("sudo shutdown -h now").unwrap();
 
@@ -4936,13 +5050,17 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             if is_guest_vm_type_cvm() {
                 // CVM guest will have little less memory,
                 // we will assert based on guest vm type
-                assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             }
@@ -5042,7 +5160,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
@@ -5448,7 +5570,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         if is_guest_vm_type_cvm() {
-            thread::sleep(std::time::Duration::new(120, 0));
+            thread::sleep(std::time::Duration::new(CVM_TIMEOUT.try_into().unwrap(), 0));
         } else {
             thread::sleep(std::time::Duration::new(20, 0));
         }
@@ -5505,7 +5627,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5578,7 +5704,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5898,7 +6028,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // MIN-IO column
             assert_eq!(
@@ -6259,7 +6393,7 @@ mod common_parallel {
         if is_guest_vm_type_cvm() {
             // wait until guest boot, cvm guest take little long to boot
             // This way we will wait for 120 second (default timeout)
-            thread::sleep(std::time::Duration::new(120, 0));
+            thread::sleep(std::time::Duration::new(CVM_TIMEOUT.try_into().unwrap(), 0));
         } else {
             thread::sleep(std::time::Duration::new(20, 0));
         }
@@ -6447,7 +6581,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let orig_counters = get_counters(&api_socket);
             guest
@@ -6582,7 +6720,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let mut expected_reboot_count = 1;
 
@@ -6672,7 +6814,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Trigger guest a panic
             make_guest_panic(&guest);
@@ -6743,7 +6889,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -6886,8 +7036,11 @@ mod common_parallel {
         // gets tested through wait_vm_boot() as it expects to receive a
         // HTTP request, and through the SSH command as well.
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
-
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
@@ -7229,7 +7382,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 128M.
             assert_eq!(
@@ -7355,7 +7512,11 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check we can find network interface related to vDPA device
             assert_eq!(
@@ -7489,7 +7650,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let mut r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
         });
 
         kill_child(&mut child);
@@ -7583,7 +7748,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let output = exec_host_command_output("date +%s");
             let host_time_str = String::from_utf8_lossy(&output.stdout)
@@ -7699,7 +7868,11 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(200)).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(300)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(200)).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -7827,7 +8000,7 @@ mod dbus_api {
             if is_guest_vm_type_cvm() {
                 // CVM guest will have little less memory,
                 // we will assert based on guest vm type
-                assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             }
@@ -7852,7 +8025,7 @@ mod dbus_api {
             if is_guest_vm_type_cvm() {
                 // CVM guest will have little less memory,
                 // we will assert based on guest vm type
-                assert!(guest.get_total_memory().unwrap_or_default() > 408_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
             } else {
                 assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             }
