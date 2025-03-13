@@ -74,7 +74,7 @@ const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuRange32 {
     start: u32,
@@ -82,7 +82,7 @@ struct VirtioIommuRange32 {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuRange64 {
     start: u64,
@@ -90,7 +90,7 @@ struct VirtioIommuRange64 {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
@@ -109,7 +109,7 @@ const VIRTIO_IOMMU_T_UNMAP: u8 = 4;
 const VIRTIO_IOMMU_T_PROBE: u8 = 5;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqHead {
     type_: u8,
     _reserved: [u8; 3],
@@ -135,7 +135,7 @@ const VIRTIO_IOMMU_S_FAULT: u8 = 7;
 const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuReqTail {
     status: u8,
@@ -144,7 +144,7 @@ struct VirtioIommuReqTail {
 
 /// ATTACH request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
@@ -156,7 +156,7 @@ const VIRTIO_IOMMU_ATTACH_F_BYPASS: u32 = 1;
 
 /// DETACH request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqDetach {
     domain: u32,
     endpoint: u32,
@@ -176,7 +176,7 @@ const VIRTIO_IOMMU_MAP_F_MASK: u32 =
 
 /// MAP request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqMap {
     domain: u32,
     virt_start: u64,
@@ -187,7 +187,7 @@ struct VirtioIommuReqMap {
 
 /// UNMAP request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqUnmap {
     domain: u32,
     virt_start: u64,
@@ -204,7 +204,7 @@ const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 
 /// PROBE request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuReqProbe {
     endpoint: u32,
@@ -212,7 +212,7 @@ struct VirtioIommuReqProbe {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuProbeProperty {
     type_: u16,
@@ -225,7 +225,7 @@ const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u8 = 0;
 const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuProbeResvMem {
     subtype: u8,
@@ -255,7 +255,7 @@ const VIRTIO_IOMMU_FAULT_R_MAPPING: u32 = 2;
 /// Fault reporting through eventq
 #[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuFault {
     reason: u8,
     reserved: [u8; 3],
@@ -941,10 +941,10 @@ impl Iommu {
                     true,
                 )
             } else {
-                let avail_features = 1u64 << VIRTIO_F_VERSION_1
-                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                    | 1u64 << VIRTIO_IOMMU_F_PROBE
-                    | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
+                let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                    | (1u64 << VIRTIO_IOMMU_F_MAP_UNMAP)
+                    | (1u64 << VIRTIO_IOMMU_F_PROBE)
+                    | (1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG);
 
                 (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
             };
