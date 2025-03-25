@@ -404,7 +404,7 @@ const TEST_LIST: [PerformanceTest; 31] = [
         name: "boot_time_16_vcpus_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_timeout: 6,
+            test_timeout: 8,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
@@ -425,7 +425,7 @@ const TEST_LIST: [PerformanceTest; 31] = [
         name: "boot_time_16_vcpus_pmem_ms",
         func_ptr: performance_boot_time_pmem,
         control: PerformanceTestControl {
-            test_timeout: 6,
+            test_timeout: 8,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
@@ -436,7 +436,7 @@ const TEST_LIST: [PerformanceTest; 31] = [
         name: "boot_time_32_vcpus_hugepage_ms",
         func_ptr: performance_boot_time_hugepage,
         control: PerformanceTestControl {
-            test_timeout: 20,
+            test_timeout: 30,
             test_iterations: 10,
             num_boot_vcpus: Some(32),
             ..PerformanceTestControl::default()

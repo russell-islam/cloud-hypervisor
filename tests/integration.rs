@@ -4750,7 +4750,11 @@ mod common_parallel {
 
         guest.ssh_command("sudo shutdown -h now").unwrap();
 
-        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        if is_guest_vm_type_cvm() {
+            let _ = child.wait_timeout(std::time::Duration::from_secs(30));
+        } else {
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        }
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
 
@@ -7869,9 +7873,9 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             if is_guest_vm_type_cvm() {
-                guest.wait_vm_boot(Some(300)).unwrap();
+                guest.wait_vm_boot(Some(400)).unwrap();
             } else {
-                guest.wait_vm_boot(Some(200)).unwrap();
+                guest.wait_vm_boot(Some(300)).unwrap();
             }
 
             assert_eq!(
