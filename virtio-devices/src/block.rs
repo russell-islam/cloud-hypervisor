@@ -281,7 +281,7 @@ impl BlockEpollHandler {
         Err(Error::MissingEntryRequestList)
     }
 
-    fn process_queue_complete(&mut self) -> Result<()> {
+    fn process_queue_complete(&mut self, paused: bool) -> Result<()> {
         let mem = self.mem.memory();
         let mut read_bytes = Wrapping(0);
         let mut write_bytes = Wrapping(0);
@@ -397,6 +397,9 @@ impl BlockEpollHandler {
             queue
                 .enable_notification(mem.deref())
                 .map_err(Error::QueueEnableNotification)?;
+            if paused {
+                warn!("MUISLAM: PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP");
+            }
         }
 
         self.counters
@@ -503,7 +506,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                self.process_queue_complete().map_err(|e| {
+                self.process_queue_complete(false).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Failed to process queue (complete): {:?}",
                         e
@@ -547,6 +550,19 @@ impl EpollHelperHandler for BlockEpollHandler {
                     ev_type
                 )));
             }
+        }
+        Ok(())
+    }
+    fn debug_pause(&mut self) -> result::Result<(), EpollHelperError> {
+        warn!("MUISLAM: Number of in flight requests: {}", self.inflight_requests.len());
+        if self.inflight_requests.len() > 0 {
+            warn!("MUISLAM: Handling remaining request before pausing: {}: thread: {:?}", self.inflight_requests.len(), std::thread::current().name());
+            self.process_queue_complete(true).map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!(
+                    "Failed to process queue (complete): {:?}",
+                    e
+                ))
+            })?;
         }
         Ok(())
     }

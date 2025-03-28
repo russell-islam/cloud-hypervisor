@@ -78,6 +78,9 @@ pub trait EpollHelperHandler {
     ) -> Result<(), EpollHelperError> {
         Ok(())
     }
+    fn debug_pause(&mut self) -> Result<(), EpollHelperError> {
+        Ok(())
+    }
 }
 
 impl EpollHelper {
@@ -208,7 +211,7 @@ impl EpollHelper {
             if enable_event_list {
                 handler.event_list(self, &events[..num_events])?;
             }
-
+            let mut hnd_evts = 0;
             for event in events.iter().take(num_events) {
                 let ev_type = event.data as u16;
 
@@ -218,8 +221,9 @@ impl EpollHelper {
                         return Ok(());
                     }
                     EPOLL_HELPER_EVENT_PAUSE => {
-                        info!("PAUSE_EVENT received, pausing epoll loop");
-
+                        info!("PAUSE_EVENT received, pausing epoll loop: thread: {:?}", std::thread::current().name());
+                        warn!("MUISLAM: num_events: {}, handled evetns: {}", num_events, hnd_evts);
+                        handler.debug_pause()?;
                         // Acknowledge the pause is effective by using the
                         // paused_sync barrier.
                         paused_sync.wait();
@@ -237,6 +241,7 @@ impl EpollHelper {
                         let _ = self.pause_evt.read();
                     }
                     _ => {
+                        hnd_evts += 1;
                         handler.handle_event(self, event)?;
                     }
                 }
