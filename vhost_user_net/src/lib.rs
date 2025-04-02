@@ -71,7 +71,7 @@ impl std::error::Error for Error {}
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
-        std::io::Error::new(io::ErrorKind::Other, e)
+        std::io::Error::other(e)
     }
 }
 

@@ -1367,8 +1367,7 @@ impl<'a> GuestCommand<'a> {
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Err(std::io::Error::other(
                     format!(
                         "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
                     ),
