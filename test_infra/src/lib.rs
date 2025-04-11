@@ -1715,12 +1715,22 @@ pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
             let v: Value = serde_json::from_str(l).expect("'ethr' parse error: invalid json line");
             // Skip header/summary lines
             if let Some(avg) = v["Avg"].as_str() {
-                // Assume the latency unit is always "us"
-                latency.push(
-                    avg.split("us").collect::<Vec<&str>>()[0]
-                        .parse::<f64>()
-                        .expect("'ethr' parse error: invalid 'Avg' entry"),
-                );
+                if avg.ends_with("us") {
+                    latency.push(
+                        avg.split("us").collect::<Vec<&str>>()[0]
+                            .parse::<f64>()
+                            .expect("'ethr' parse error: invalid 'Avg' entry"),
+                    );
+                } else if avg.ends_with("ms") {
+                    latency.push(
+                        avg.split("ms").collect::<Vec<&str>>()[0]
+                            .parse::<f64>()
+                            .expect("'ethr' parse error: invalid 'Avg' entry")
+                            * 1000.0, // Convert ms to us
+                    );
+                } else {
+                    panic!("'ethr' parse error: unsupported latency unit in 'Avg' entry");
+                }
             }
         }
 
