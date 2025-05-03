@@ -466,6 +466,7 @@ impl Vcpu {
 }
 
 impl Pausable for Vcpu {}
+
 impl Snapshottable for Vcpu {
     fn id(&self) -> String {
         self.id.to_string()
@@ -476,7 +477,7 @@ impl Snapshottable for Vcpu {
             .vcpu
             .state()
             .map_err(|e| MigratableError::Snapshot(anyhow!("Could not get vCPU state {:?}", e)))?;
-
+        self.vcpu.snapshot().unwrap();
         self.saved_state = Some(saved_state.clone());
 
         Ok(Snapshot::from_data(SnapshotData::new_from_state(

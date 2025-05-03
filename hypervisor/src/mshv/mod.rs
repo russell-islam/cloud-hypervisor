@@ -1603,6 +1603,16 @@ impl cpu::Vcpu for MshvVcpu {
             .request_virtual_interrupt(&cfg)
             .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
     }
+    fn snapshot(&self) -> cpu::Result<()> {
+        if let Some(reg_page) = self.fd.get_vp_reg_page() {
+            let vp_reg_page = reg_page.0;
+            unsafe {
+                let val = (*vp_reg_page).interrupt_vectors.as_uint64;
+                error!("MUISLAM: interrupt_vector: {:0x}", val);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl MshvVcpu {
