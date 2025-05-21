@@ -30,7 +30,7 @@ impl InterruptRoute {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
         let gsi = allocator
             .allocate_gsi()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed allocating new GSI"))?;
+            .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
 
         Ok(InterruptRoute {
             gsi,
@@ -41,12 +41,8 @@ impl InterruptRoute {
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
-            vm.register_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed registering irq_fd: {e}"),
-                )
-            })?;
+            vm.register_irqfd(&self.irq_fd, self.gsi)
+                .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
@@ -57,12 +53,8 @@ impl InterruptRoute {
 
     pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed unregistering irq_fd: {e}"),
-                )
-            })?;
+            vm.unregister_irqfd(&self.irq_fd, self.gsi)
+                .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
@@ -106,12 +98,9 @@ impl MsiInterruptGroup {
             entry_vec.push(entry.route);
         }
 
-        self.vm.set_gsi_routing(&entry_vec).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed setting GSI routing: {e}"),
-            )
-        })
+        self.vm
+            .set_gsi_routing(&entry_vec)
+            .map_err(|e| io::Error::other(format!("Failed setting GSI routing: {e}")))
     }
 }
 
@@ -151,10 +140,9 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             return route.trigger();
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("trigger: Invalid interrupt index {index}"),
-        ))
+        Err(io::Error::other(format!(
+            "trigger: Invalid interrupt index {index}"
+        )))
     }
 
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd> {
@@ -202,10 +190,9 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             return Ok(());
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("update: Invalid interrupt index {index}"),
-        ))
+        Err(io::Error::other(format!(
+            "update: Invalid interrupt index {index}"
+        )))
     }
 
     fn set_gsi(&self) -> Result<()> {
@@ -231,12 +218,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
             .lock()
             .unwrap()
             .service_irq(self.irq as usize)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to inject IRQ #{}: {:?}", self.irq, e),
-                )
-            })
+            .map_err(|e| io::Error::other(format!("failed to inject IRQ #{}: {:?}", self.irq, e)))
     }
 
     fn update(

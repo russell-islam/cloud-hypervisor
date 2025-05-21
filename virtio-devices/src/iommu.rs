@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
-use std::ops::Bound::Included;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -812,15 +811,7 @@ impl DmaRemapping for IommuMapping {
                     return Ok(addr);
                 }
 
-                let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
-                    0
-                } else {
-                    addr - VIRTIO_IOMMU_PAGE_SIZE_MASK
-                };
-                for (&key, &value) in domain
-                    .mappings
-                    .range((Included(&range_start), Included(&addr)))
-                {
+                for (&key, &value) in domain.mappings.iter() {
                     if addr >= key && addr < key + value.size {
                         let new_addr = addr - key + value.gpa;
                         debug!("Into GPA addr 0x{:x}", new_addr);
@@ -832,10 +823,9 @@ impl DmaRemapping for IommuMapping {
             return Ok(addr);
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("failed to translate GVA addr 0x{addr:x}"),
-        ))
+        Err(io::Error::other(format!(
+            "failed to translate GVA addr 0x{addr:x}"
+        )))
     }
 
     fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
@@ -860,10 +850,9 @@ impl DmaRemapping for IommuMapping {
             return Ok(addr);
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("failed to translate GPA addr 0x{addr:x}"),
-        ))
+        Err(io::Error::other(format!(
+            "failed to translate GPA addr 0x{addr:x}"
+        )))
     }
 }
 
