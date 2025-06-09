@@ -53,7 +53,7 @@ impl QcowSync {
 }
 
 impl AsyncAdaptor<QcowFile> for Arc<Mutex<QcowFile>> {
-    fn file(&mut self) -> MutexGuard<QcowFile> {
+    fn file(&mut self) -> MutexGuard<'_, QcowFile> {
         self.lock().unwrap()
     }
 }
