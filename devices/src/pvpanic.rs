@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::any::Any;
+use std::result;
+use std::sync::{Arc, Barrier, Mutex};
+
 use anyhow::anyhow;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -10,9 +14,6 @@ use pci::{
     PCI_CONFIGURATION_ID,
 };
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::result;
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};
@@ -87,7 +88,11 @@ impl PvPanicDevice {
         );
 
         let command: [u8; 2] = [0x03, 0x01];
-        configuration.write_config_register(1, 0, &command);
+        let bar_reprogram = configuration.write_config_register(1, 0, &command);
+        assert!(
+            bar_reprogram.is_empty(),
+            "No bar reprogrammig is expected from writing to the COMMAND register"
+        );
 
         let state: Option<PvPanicDeviceState> = snapshot
             .as_ref()
@@ -155,22 +160,16 @@ impl PciDevice for PvPanicDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.configuration
+                .write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         self.configuration.read_reg(reg_idx)
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(
@@ -236,7 +235,7 @@ impl PciDevice for PvPanicDevice {
         data[0] = self.events;
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

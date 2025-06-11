@@ -3,28 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::{
-    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
-    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
-    VIRTIO_F_IOMMU_PLATFORM,
-};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::{io, result};
+
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    io, result,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-};
 use thiserror::Error;
-use vhost::{
-    vdpa::{VhostVdpa, VhostVdpaIovaRange},
-    vhost_kern::VhostKernFeatures,
-    vhost_kern::{vdpa::VhostKernVdpa, vhost_binding::VHOST_BACKEND_F_SUSPEND},
-    VhostBackend, VringConfigData,
-};
+use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
+use vhost::vhost_kern::vdpa::VhostKernVdpa;
+use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
+use vhost::vhost_kern::VhostKernFeatures;
+use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::{Descriptor, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
@@ -32,62 +23,68 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::{
+    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
+    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
+    VIRTIO_F_IOMMU_PLATFORM,
+};
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to create vhost-vdpa: {0}")]
-    CreateVhostVdpa(vhost::Error),
+    CreateVhostVdpa(#[source] vhost::Error),
     #[error("Failed to map DMA range: {0}")]
-    DmaMap(vhost::Error),
+    DmaMap(#[source] vhost::Error),
     #[error("Failed to unmap DMA range: {0}")]
-    DmaUnmap(vhost::Error),
+    DmaUnmap(#[source] vhost::Error),
     #[error("Failed to get address range")]
     GetAddressRange,
     #[error("Failed to get the available index from the virtio queue: {0}")]
-    GetAvailableIndex(virtio_queue::Error),
+    GetAvailableIndex(#[source] virtio_queue::Error),
     #[error("Get virtio configuration size: {0}")]
-    GetConfigSize(vhost::Error),
+    GetConfigSize(#[source] vhost::Error),
     #[error("Get virtio device identifier: {0}")]
-    GetDeviceId(vhost::Error),
+    GetDeviceId(#[source] vhost::Error),
     #[error("Failed to get backend specific features: {0}")]
-    GetBackendFeatures(vhost::Error),
+    GetBackendFeatures(#[source] vhost::Error),
     #[error("Failed to get virtio features: {0}")]
-    GetFeatures(vhost::Error),
+    GetFeatures(#[source] vhost::Error),
     #[error("Failed to get the IOVA range: {0}")]
-    GetIovaRange(vhost::Error),
+    GetIovaRange(#[source] vhost::Error),
     #[error("Failed to get queue size: {0}")]
-    GetVringNum(vhost::Error),
+    GetVringNum(#[source] vhost::Error),
     #[error("Invalid IOVA range: {0}-{1}")]
     InvalidIovaRange(u64, u64),
     #[error("Missing VIRTIO_F_ACCESS_PLATFORM feature")]
     MissingAccessPlatformVirtioFeature,
     #[error("Failed to reset owner: {0}")]
-    ResetOwner(vhost::Error),
+    ResetOwner(#[source] vhost::Error),
     #[error("Failed to set backend specific features: {0}")]
-    SetBackendFeatures(vhost::Error),
+    SetBackendFeatures(#[source] vhost::Error),
     #[error("Failed to set backend configuration: {0}")]
-    SetConfig(vhost::Error),
+    SetConfig(#[source] vhost::Error),
     #[error("Failed to set eventfd notifying about a configuration change: {0}")]
-    SetConfigCall(vhost::Error),
+    SetConfigCall(#[source] vhost::Error),
     #[error("Failed to set virtio features: {0}")]
-    SetFeatures(vhost::Error),
+    SetFeatures(#[source] vhost::Error),
     #[error("Failed to set memory table: {0}")]
-    SetMemTable(vhost::Error),
+    SetMemTable(#[source] vhost::Error),
     #[error("Failed to set owner: {0}")]
-    SetOwner(vhost::Error),
+    SetOwner(#[source] vhost::Error),
     #[error("Failed to set virtio status: {0}")]
-    SetStatus(vhost::Error),
+    SetStatus(#[source] vhost::Error),
     #[error("Failed to set vring address: {0}")]
-    SetVringAddr(vhost::Error),
+    SetVringAddr(#[source] vhost::Error),
     #[error("Failed to set vring base: {0}")]
-    SetVringBase(vhost::Error),
+    SetVringBase(#[source] vhost::Error),
     #[error("Failed to set vring eventfd when buffer are used: {0}")]
-    SetVringCall(vhost::Error),
+    SetVringCall(#[source] vhost::Error),
     #[error("Failed to enable/disable vring: {0}")]
-    SetVringEnable(vhost::Error),
+    SetVringEnable(#[source] vhost::Error),
     #[error("Failed to set vring eventfd when new descriptors are available: {0}")]
-    SetVringKick(vhost::Error),
+    SetVringKick(#[source] vhost::Error),
     #[error("Failed to set vring size: {0}")]
-    SetVringNum(vhost::Error),
+    SetVringNum(#[source] vhost::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

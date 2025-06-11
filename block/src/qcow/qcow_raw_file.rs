@@ -4,11 +4,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::RawFile;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::fd::{AsRawFd, RawFd};
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroes;
+
+use super::RawFile;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
@@ -22,7 +25,7 @@ impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
     /// a power of two.
     pub fn from(file: RawFile, cluster_size: u64) -> Option<Self> {
-        if cluster_size.count_ones() != 1 {
+        if !cluster_size.is_power_of_two() {
             return None;
         }
         Some(QcowRawFile {
@@ -155,5 +158,11 @@ impl Clone for QcowRawFile {
             cluster_size: self.cluster_size,
             cluster_mask: self.cluster_mask,
         }
+    }
+}
+
+impl AsRawFd for QcowRawFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
     }
 }

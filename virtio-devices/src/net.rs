@@ -5,35 +5,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
-use anyhow::anyhow;
-#[cfg(not(fuzzing))]
-use net_util::virtio_features_to_tap_offload;
-use net_util::CtrlQueue;
-use net_util::{
-    build_net_config_space, build_net_config_space_with_mq, open_tap, MacAddr, NetCounters,
-    NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
-};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
+use std::{result, thread};
+
+use anyhow::anyhow;
+#[cfg(not(fuzzing))]
+use net_util::virtio_features_to_tap_offload;
+use net_util::{
+    build_net_config_space, build_net_config_space_with_mq, open_tap, CtrlQueue, MacAddr,
+    NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
+};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_net::*;
@@ -43,6 +32,15 @@ use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 /// Control queue
 // Event available on the control queue.
@@ -156,11 +154,11 @@ pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to open taps: {0}")]
-    OpenTap(OpenTapError),
+    OpenTap(#[source] OpenTapError),
     #[error("Using existing tap: {0}")]
-    TapError(TapError),
+    TapError(#[source] TapError),
     #[error("Error calling dup() on tap fd: {0}")]
-    DuplicateTapFd(std::io::Error),
+    DuplicateTapFd(#[source] std::io::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -549,8 +547,8 @@ impl Net {
     pub fn new(
         id: String,
         if_name: Option<&str>,
-        ip_addr: Option<Ipv4Addr>,
-        netmask: Option<Ipv4Addr>,
+        ip_addr: Option<IpAddr>,
+        netmask: Option<IpAddr>,
         guest_mac: Option<MacAddr>,
         host_mac: &mut Option<MacAddr>,
         mtu: Option<u16>,

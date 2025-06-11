@@ -86,6 +86,8 @@ VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 if [ ! -f "$VMLINUX_IMAGE" ] && [ "$GUEST_VM_TYPE" != "CVM" ]; then
     build_custom_linux
 fi
+# Prepare linux image (build from source or download pre-built)
+prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then

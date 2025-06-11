@@ -3,6 +3,25 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::os::unix::io::{IntoRawFd, RawFd};
+use std::os::unix::net::UnixListener;
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
+use std::thread;
+
+use hypervisor::HypervisorType;
+use micro_http::{
+    Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
+};
+use once_cell::sync::Lazy;
+use seccompiler::{apply_filter, SeccompAction};
+use serde_json::Error as SerdeError;
+use thiserror::Error;
+use vmm_sys_util::eventfd::EventFd;
+
 use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -15,59 +34,37 @@ use crate::api::{
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
-use core::fmt;
-use hypervisor::HypervisorType;
-use micro_http::{
-    Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
-};
-use once_cell::sync::Lazy;
-use seccompiler::{apply_filter, SeccompAction};
-use serde_json::Error as SerdeError;
-use std::collections::BTreeMap;
-use std::fmt::Display;
-use std::fs::File;
-use std::os::unix::io::{IntoRawFd, RawFd};
-use std::os::unix::net::UnixListener;
-use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
-use std::sync::mpsc::Sender;
-use std::thread;
-use vmm_sys_util::eventfd::EventFd;
 
 pub mod http_endpoint;
 
 pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 
 /// Errors associated with VMM management
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum HttpError {
     /// API request receive error
-    SerdeJsonDeserialize(SerdeError),
+    #[error("Failed to deserialize JSON: {0}")]
+    SerdeJsonDeserialize(#[source] SerdeError),
 
     /// Attempt to access unsupported HTTP method
+    #[error("Bad Request")]
     BadRequest,
 
     /// Undefined endpoints
+    #[error("Not Found")]
     NotFound,
 
+    /// Too many requests
+    #[error("Too Many Requests")]
+    TooManyRequests,
+
     /// Internal Server Error
+    #[error("Internal Server Error")]
     InternalServerError,
 
     /// Error from internal API
-    ApiError(ApiError),
-}
-
-impl Display for HttpError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::HttpError::*;
-        match self {
-            BadRequest => write!(f, "Bad Request"),
-            NotFound => write!(f, "Not Found"),
-            InternalServerError => write!(f, "Internal Server Error"),
-            SerdeJsonDeserialize(serde_error) => write!(f, "{}", serde_error),
-            ApiError(api_error) => write!(f, "{}", api_error),
-        }
-    }
+    #[error("Error from API: {0}")]
+    ApiError(#[source] ApiError),
 }
 
 impl From<serde_json::Error> for HttpError {
@@ -123,6 +120,7 @@ pub trait EndpointHandler {
             Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
                 error_response(e, StatusCode::BadRequest)
             }
+            Err(e @ HttpError::TooManyRequests) => error_response(e, StatusCode::TooManyRequests),
             Err(e) => error_response(e, StatusCode::InternalServerError),
         }
     }

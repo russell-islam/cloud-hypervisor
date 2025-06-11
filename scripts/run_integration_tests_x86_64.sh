@@ -49,7 +49,7 @@ if [ ! -f "$FOCAL_OS_QCOW_BACKING_FILE_IMAGE" ]; then
     popd || exit
 fi
 
-JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.qcow2"
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
 JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_IMAGE" ]; then
@@ -58,7 +58,7 @@ if [ ! -f "$JAMMY_OS_IMAGE" ]; then
     popd || exit
 fi
 
-JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20230119-0.raw"
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
 JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
 if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
@@ -102,8 +102,13 @@ popd || exit
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 # We will build kernel only if we are not running integration test for CVM
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-if [ ! -f "$VMLINUX_IMAGE" ] && [ "$GUEST_VM_TYPE" != "CVM" ]; then
+if [ ! -f "$VMLINUX_IMAGE" ]  &&  [ "$GUEST_VM_TYPE" != "CVM" ]; then
     build_custom_linux
+fi
+
+if [ ! -f "$VMLINUX_IMAGE" ]; then
+    # Prepare linux image (build from source or download pre-built)
+    prepare_linux
 fi
 
 VIRTIOFSD="$WORKLOADS_DIR/virtiofsd"
@@ -179,14 +184,16 @@ ulimit -n 4096
 ulimit -n 4096
 
 export RUST_BACKTRACE=1
-time cargo test $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
-export RUST_BACKTRACE=1
-time cargo test $test_features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
-RES=$?
+if [ $RES -eq 0 ]; then
+    export RUST_BACKTRACE=1
+    time cargo test --release --target "$BUILD_TARGET" $test_features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    RES=$?
+fi
 
 # Run tests on dbus_api
 cargo build --features "mshv,dbus_api,igvm,sev_snp" --all --release --target "$BUILD_TARGET"

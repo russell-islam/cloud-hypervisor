@@ -4,15 +4,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use anyhow::Context;
+use iced_x86::*;
+
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
 use crate::arch::x86::{
     segment_type_expand_down, segment_type_ro, Exception, SegmentRegister, SpecialRegisters,
-    StandardRegisters,
 };
-use anyhow::Context;
-use iced_x86::*;
+use crate::StandardRegisters;
 
 #[macro_use]
 mod instructions;
@@ -184,7 +185,7 @@ pub trait CpuStateManager: Clone {
                     )));
                 }
 
-                Ok(logical_addr + segment_register.base)
+                Ok(logical_addr.wrapping_add(segment_register.base))
             }
 
             _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{:?}", mode))),
@@ -203,7 +204,7 @@ macro_rules! set_reg {
     };
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 /// A minimal, emulated CPU state.
 ///
 /// Hypervisors needing x86 emulation can choose to either use their own
@@ -220,29 +221,29 @@ impl CpuStateManager for EmulatorCpuState {
     fn read_reg(&self, reg: Register) -> Result<u64, PlatformError> {
         let mut reg_value: u64 = match reg {
             Register::RAX | Register::EAX | Register::AX | Register::AL | Register::AH => {
-                self.regs.rax
+                self.regs.get_rax()
             }
             Register::RBX | Register::EBX | Register::BX | Register::BL | Register::BH => {
-                self.regs.rbx
+                self.regs.get_rbx()
             }
             Register::RCX | Register::ECX | Register::CX | Register::CL | Register::CH => {
-                self.regs.rcx
+                self.regs.get_rcx()
             }
             Register::RDX | Register::EDX | Register::DX | Register::DL | Register::DH => {
-                self.regs.rdx
+                self.regs.get_rdx()
             }
-            Register::RSP | Register::ESP | Register::SP => self.regs.rsp,
-            Register::RBP | Register::EBP | Register::BP => self.regs.rbp,
-            Register::RSI | Register::ESI | Register::SI | Register::SIL => self.regs.rsi,
-            Register::RDI | Register::EDI | Register::DI | Register::DIL => self.regs.rdi,
-            Register::R8 | Register::R8D | Register::R8W | Register::R8L => self.regs.r8,
-            Register::R9 | Register::R9D | Register::R9W | Register::R9L => self.regs.r9,
-            Register::R10 | Register::R10D | Register::R10W | Register::R10L => self.regs.r10,
-            Register::R11 | Register::R11D | Register::R11W | Register::R11L => self.regs.r11,
-            Register::R12 | Register::R12D | Register::R12W | Register::R12L => self.regs.r12,
-            Register::R13 | Register::R13D | Register::R13W | Register::R13L => self.regs.r13,
-            Register::R14 | Register::R14D | Register::R14W | Register::R14L => self.regs.r14,
-            Register::R15 | Register::R15D | Register::R15W | Register::R15L => self.regs.r15,
+            Register::RSP | Register::ESP | Register::SP => self.regs.get_rsp(),
+            Register::RBP | Register::EBP | Register::BP => self.regs.get_rbp(),
+            Register::RSI | Register::ESI | Register::SI | Register::SIL => self.regs.get_rsi(),
+            Register::RDI | Register::EDI | Register::DI | Register::DIL => self.regs.get_rdi(),
+            Register::R8 | Register::R8D | Register::R8W | Register::R8L => self.regs.get_r8(),
+            Register::R9 | Register::R9D | Register::R9W | Register::R9L => self.regs.get_r9(),
+            Register::R10 | Register::R10D | Register::R10W | Register::R10L => self.regs.get_r10(),
+            Register::R11 | Register::R11D | Register::R11W | Register::R11L => self.regs.get_r11(),
+            Register::R12 | Register::R12D | Register::R12W | Register::R12L => self.regs.get_r12(),
+            Register::R13 | Register::R13D | Register::R13W | Register::R13L => self.regs.get_r13(),
+            Register::R14 | Register::R14D | Register::R14W | Register::R14L => self.regs.get_r14(),
+            Register::R15 | Register::R15D | Register::R15W | Register::R15L => self.regs.get_r15(),
             Register::CR0 => self.sregs.cr0,
             Register::CR2 => self.sregs.cr2,
             Register::CR3 => self.sregs.cr3,
@@ -318,52 +319,52 @@ impl CpuStateManager for EmulatorCpuState {
 
         match reg {
             Register::RAX | Register::EAX | Register::AX | Register::AL | Register::AH => {
-                set_reg!(self.regs.rax, mask, reg_value);
+                self.regs.set_rax((self.regs.get_rax() & mask) | reg_value);
             }
             Register::RBX | Register::EBX | Register::BX | Register::BL | Register::BH => {
-                set_reg!(self.regs.rbx, mask, reg_value);
+                self.regs.set_rbx((self.regs.get_rbx() & mask) | reg_value);
             }
             Register::RCX | Register::ECX | Register::CX | Register::CL | Register::CH => {
-                set_reg!(self.regs.rcx, mask, reg_value);
+                self.regs.set_rcx((self.regs.get_rcx() & mask) | reg_value);
             }
             Register::RDX | Register::EDX | Register::DX | Register::DL | Register::DH => {
-                set_reg!(self.regs.rdx, mask, reg_value);
+                self.regs.set_rdx((self.regs.get_rdx() & mask) | reg_value);
             }
             Register::RSP | Register::ESP | Register::SP => {
-                set_reg!(self.regs.rsp, mask, reg_value)
+                self.regs.set_rsp((self.regs.get_rsp() & mask) | reg_value);
             }
             Register::RBP | Register::EBP | Register::BP => {
-                set_reg!(self.regs.rbp, mask, reg_value)
+                self.regs.set_rbp((self.regs.get_rbp() & mask) | reg_value);
             }
             Register::RSI | Register::ESI | Register::SI | Register::SIL => {
-                set_reg!(self.regs.rsi, mask, reg_value)
+                self.regs.set_rsi((self.regs.get_rsi() & mask) | reg_value);
             }
             Register::RDI | Register::EDI | Register::DI | Register::DIL => {
-                set_reg!(self.regs.rdi, mask, reg_value)
+                self.regs.set_rdi((self.regs.get_rdi() & mask) | reg_value);
             }
             Register::R8 | Register::R8D | Register::R8W | Register::R8L => {
-                set_reg!(self.regs.r8, mask, reg_value)
+                self.regs.set_r8((self.regs.get_r8() & mask) | reg_value);
             }
             Register::R9 | Register::R9D | Register::R9W | Register::R9L => {
-                set_reg!(self.regs.r9, mask, reg_value)
+                self.regs.set_r9((self.regs.get_r9() & mask) | reg_value);
             }
             Register::R10 | Register::R10D | Register::R10W | Register::R10L => {
-                set_reg!(self.regs.r10, mask, reg_value)
+                self.regs.set_r10((self.regs.get_r10() & mask) | reg_value);
             }
             Register::R11 | Register::R11D | Register::R11W | Register::R11L => {
-                set_reg!(self.regs.r11, mask, reg_value)
+                self.regs.set_r11((self.regs.get_r11() & mask) | reg_value);
             }
             Register::R12 | Register::R12D | Register::R12W | Register::R12L => {
-                set_reg!(self.regs.r12, mask, reg_value)
+                self.regs.set_r12((self.regs.get_r12() & mask) | reg_value);
             }
             Register::R13 | Register::R13D | Register::R13W | Register::R13L => {
-                set_reg!(self.regs.r13, mask, reg_value)
+                self.regs.set_r13((self.regs.get_r13() & mask) | reg_value);
             }
             Register::R14 | Register::R14D | Register::R14W | Register::R14L => {
-                set_reg!(self.regs.r14, mask, reg_value)
+                self.regs.set_r14((self.regs.get_r14() & mask) | reg_value);
             }
             Register::R15 | Register::R15D | Register::R15W | Register::R15L => {
-                set_reg!(self.regs.r15, mask, reg_value)
+                self.regs.set_r15((self.regs.get_r15() & mask) | reg_value);
             }
             Register::CR0 => set_reg!(self.sregs.cr0, mask, reg_value),
             Register::CR2 => set_reg!(self.sregs.cr2, mask, reg_value),
@@ -426,11 +427,11 @@ impl CpuStateManager for EmulatorCpuState {
     }
 
     fn ip(&self) -> u64 {
-        self.regs.rip
+        self.regs.get_rip()
     }
 
     fn set_ip(&mut self, ip: u64) {
-        self.regs.rip = ip;
+        self.regs.set_rip(ip);
     }
 
     fn efer(&self) -> u64 {
@@ -442,11 +443,11 @@ impl CpuStateManager for EmulatorCpuState {
     }
 
     fn flags(&self) -> u64 {
-        self.regs.rflags
+        self.regs.get_rflags()
     }
 
     fn set_flags(&mut self, flags: u64) {
-        self.regs.rflags = flags;
+        self.regs.set_rflags(flags);
     }
 
     fn mode(&self) -> Result<CpuMode, PlatformError> {
@@ -598,8 +599,8 @@ impl<T: CpuStateManager> Emulator<'_, T> {
                 decoder.decode_out(&mut insn);
                 if decoder.last_error() != DecoderError::None {
                     return Err(EmulationError::InstructionFetchingError(anyhow!(
-                        "{:#x?}",
-                        insn_format!(insn)
+                        "{:?}",
+                        insn.code()
                     )));
                 }
             }
@@ -608,14 +609,17 @@ impl<T: CpuStateManager> Emulator<'_, T> {
             Emulator::get_handler(insn.code())
                 .ok_or_else(|| {
                     EmulationError::UnsupportedInstruction(anyhow!(
-                        "{:#x?} {:?} {:?}",
-                        insn_format!(insn),
-                        insn.mnemonic(),
-                        insn.code()
+                        "{:?} {:x?}",
+                        insn.code(),
+                        insn_stream
                     ))
                 })?
                 .emulate(&insn, &mut state, self.platform)
-                .context(anyhow!("Failed to emulate {:#x?}", insn_format!(insn)))?;
+                .context(anyhow!(
+                    "Failed to emulate {:?} {:x?}",
+                    insn.code(),
+                    insn_stream
+                ))?;
 
             last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
@@ -653,10 +657,12 @@ impl<T: CpuStateManager> Emulator<'_, T> {
 
 #[cfg(test)]
 mod mock_vmm {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::arch::x86::emulator::EmulatorCpuState as CpuState;
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-    use std::sync::{Arc, Mutex};
+    use crate::StandardRegisters;
 
     #[derive(Debug, Clone)]
     pub struct MockVmm {
@@ -672,7 +678,19 @@ mod mock_vmm {
             let cs_reg = segment_from_gdt(gdt_entry(0xc09b, 0, 0xffffffff), 1);
             let ds_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 2);
             let es_reg = segment_from_gdt(gdt_entry(0xc093, 0, 0xffffffff), 3);
-            let mut initial_state = CpuState::default();
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "kvm")] {
+                    let std_regs: StandardRegisters = kvm_bindings::kvm_regs::default().into();
+                } else if #[cfg(feature = "mshv")] {
+                    let std_regs: StandardRegisters = mshv_bindings::StandardRegisters::default().into();
+                } else {
+                    panic!("Unsupported hypervisor type!")
+                }
+            };
+            let mut initial_state = CpuState {
+                regs: std_regs,
+                sregs: SpecialRegisters::default(),
+            };
             initial_state.set_ip(ip);
             initial_state.write_segment(Register::CS, cs_reg).unwrap();
             initial_state.write_segment(Register::DS, ds_reg).unwrap();
@@ -794,7 +812,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &[], Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &[], Some(2)).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -832,7 +850,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &[], None).is_err());
+        vmm.emulate_insn(cpu_id, &[], None).unwrap_err();
     }
 
     #[test]
@@ -860,7 +878,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -895,7 +913,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -930,7 +948,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(1)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(1)).unwrap();
 
         let new_ip: u64 = vmm.cpu_state(cpu_id).unwrap().ip();
         assert_eq!(new_ip, ip + 0x7 /* length of mov rax,0x1000 */);
@@ -971,6 +989,6 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_err());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap_err();
     }
 }

@@ -9,27 +9,26 @@ mod raw_file;
 mod refcount;
 mod vec_cache;
 
-use crate::qcow::{
-    qcow_raw_file::QcowRawFile,
-    refcount::RefCount,
-    vec_cache::{CacheMap, Cacheable, VecCache},
-};
-use crate::BlockBackend;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use libc::{EINVAL, ENOSPC, ENOTSUP};
-use remain::sorted;
 use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::fd::{AsRawFd, RawFd};
 use std::str;
-use thiserror::Error;
-use vmm_sys_util::{
-    file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
-    write_zeroes::WriteZeroesAt,
-};
 
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use libc::{EINVAL, ENOSPC, ENOTSUP};
+use remain::sorted;
+use thiserror::Error;
+use vmm_sys_util::file_traits::{FileSetLen, FileSync};
+use vmm_sys_util::seek_hole::SeekHole;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
+
+use crate::qcow::qcow_raw_file::QcowRawFile;
 pub use crate::qcow::raw_file::RawFile;
+use crate::qcow::refcount::RefCount;
+use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
+use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.
 const MAX_NESTING_DEPTH: u32 = 10;
@@ -38,23 +37,23 @@ const MAX_NESTING_DEPTH: u32 = 10;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Backing file io error: {0}")]
-    BackingFileIo(io::Error),
+    BackingFileIo(#[source] io::Error),
     #[error("Backing file open error: {0}")]
-    BackingFileOpen(Box<Error>),
+    BackingFileOpen(#[source] Box<Error>),
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
     #[error("Compressed blocks not supported")]
     CompressedBlocksNotSupported,
     #[error("Failed to evict cache: {0}")]
-    EvictingCache(io::Error),
-    #[error("File larger than max of {}: {0}", MAX_QCOW_FILE_SIZE)]
+    EvictingCache(#[source] io::Error),
+    #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
     #[error("Failed to get file size: {0}")]
-    GettingFileSize(io::Error),
+    GettingFileSize(#[source] io::Error),
     #[error("Failed to get refcount: {0}")]
-    GettingRefcount(refcount::Error),
+    GettingRefcount(#[source] refcount::Error),
     #[error("Failed to parse filename: {0}")]
-    InvalidBackingFileName(str::Utf8Error),
+    InvalidBackingFileName(#[source] str::Utf8Error),
     #[error("Invalid cluster index")]
     InvalidClusterIndex,
     #[error("Invalid cluster size")]
@@ -82,29 +81,29 @@ pub enum Error {
     #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
     #[error("Failed to open file {0}")]
-    OpeningFile(io::Error),
+    OpeningFile(#[source] io::Error),
     #[error("Failed to read data: {0}")]
-    ReadingData(io::Error),
+    ReadingData(#[source] io::Error),
     #[error("Failed to read header: {0}")]
-    ReadingHeader(io::Error),
+    ReadingHeader(#[source] io::Error),
     #[error("Failed to read pointers: {0}")]
-    ReadingPointers(io::Error),
+    ReadingPointers(#[source] io::Error),
     #[error("Failed to read ref count block: {0}")]
-    ReadingRefCountBlock(refcount::Error),
+    ReadingRefCountBlock(#[source] refcount::Error),
     #[error("Failed to read ref counts: {0}")]
-    ReadingRefCounts(io::Error),
+    ReadingRefCounts(#[source] io::Error),
     #[error("Failed to rebuild ref counts: {0}")]
-    RebuildingRefCounts(io::Error),
+    RebuildingRefCounts(#[source] io::Error),
     #[error("Refcount table offset past file end")]
     RefcountTableOffEnd,
     #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
     #[error("Failed to seek file: {0}")]
-    SeekingFile(io::Error),
+    SeekingFile(#[source] io::Error),
     #[error("Failed to set file size: {0}")]
-    SettingFileSize(io::Error),
+    SettingFileSize(#[source] io::Error),
     #[error("Failed to set refcount refcount: {0}")]
-    SettingRefcountRefcount(io::Error),
+    SettingRefcountRefcount(#[source] io::Error),
     #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
     #[error("L1 entry table too large: {0}")]
@@ -116,9 +115,9 @@ pub enum Error {
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
     #[error("Failed to write data: {0}")]
-    WritingData(io::Error),
+    WritingData(#[source] io::Error),
     #[error("Failed to write header: {0}")]
-    WritingHeader(io::Error),
+    WritingHeader(#[source] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -380,7 +379,7 @@ impl QcowHeader {
         }
 
         if let Some(backing_file_path) = self.backing_file_path.as_ref() {
-            write!(file, "{}", backing_file_path).map_err(Error::WritingHeader)?;
+            write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
         }
 
         // Set the file length by seeking and writing a zero to the last byte. This avoids needing
@@ -1518,6 +1517,12 @@ impl QcowFile {
     }
 }
 
+impl AsRawFd for QcowFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.raw_file.as_raw_fd()
+    }
+}
+
 impl Drop for QcowFile {
     fn drop(&mut self) {
         let _ = self.sync_caches();
@@ -1836,12 +1841,14 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::path::Path;
+
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
+
+    use super::*;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -2050,8 +2057,7 @@ mod tests {
             .expect("Failed to write header to shm.");
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
-        let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_ok());
+        QcowFile::from_with_nesting_depth(disk_file, 0).unwrap();
     }
 
     #[test]
@@ -2067,7 +2073,6 @@ mod tests {
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
         let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), Error::MaxNestingDepthExceeded));
     }
 

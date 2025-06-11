@@ -8,40 +8,33 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use block::{
-    build_serial,
-    qcow::{self, ImageType, QcowFile},
-    Request, VirtioBlockConfig,
-};
-use libc::EFD_NONBLOCK;
-use log::*;
-use option_parser::{OptionParser, OptionParserError, Toggle};
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::{Seek, SeekFrom, Write};
-use std::ops::Deref;
-use std::ops::DerefMut;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::process;
-use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
-use std::{convert, error, fmt, io};
+use std::{convert, io, process, result};
+
+use block::qcow::{self, ImageType, QcowFile};
+use block::{build_serial, Request, VirtioBlockConfig};
+use libc::EFD_NONBLOCK;
+use log::*;
+use option_parser::{OptionParser, OptionParserError, Toggle};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{
-    bitmap::BitmapMmapRegion, VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT,
-};
+use vhost_user_backend::bitmap::BitmapMmapRegion;
+use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::VIRTIO_F_VERSION_1;
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
-use vm_memory::GuestAddressSpace;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
-use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
@@ -60,19 +53,25 @@ type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
     /// Failed to create kill eventfd
-    CreateKillEventFd(io::Error),
+    #[error("Failed to create kill eventfd: {0}")]
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string
-    FailedConfigParse(OptionParserError),
+    #[error("Failed to parse configuration string: {0}")]
+    FailedConfigParse(#[source] OptionParserError),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// No path provided
+    #[error("No path provided")]
     PathParameterMissing,
     /// No socket provided
+    #[error("No socket provided")]
     SocketParameterMissing,
 }
 
@@ -80,14 +79,6 @@ pub const SYNTAX: &str = "vhost-user-block backend parameters \
  \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
  queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
  poll_queue=true|false\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_block_error: {self:?}")
-    }
-}
-
-impl error::Error for Error {}
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {

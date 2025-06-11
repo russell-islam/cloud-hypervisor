@@ -6,13 +6,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
-use crate::GuestMemoryMmap;
-use crate::{
-    ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT,
-};
+use std::any::Any;
+use std::cmp;
+use std::io::Write;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
@@ -21,12 +21,6 @@ use pci::{
     PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::cmp;
-use std::io::Write;
-use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{AddressAllocator, SystemAllocator};
@@ -41,6 +35,12 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::pci_common_config::VirtioPciCommonConfigState;
+use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
+use crate::{
+    ActivateResult, GuestMemoryMmap, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
+    DEVICE_FEATURES_OK, DEVICE_INIT,
+};
 
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
@@ -830,18 +830,14 @@ impl VirtioPciDevice {
 }
 
 impl VirtioTransport for VirtioPciDevice {
-    fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)> {
+    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
         let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts()
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                (
-                    event,
-                    notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-                )
-            })
-            .collect()
+        self.queue_evts().iter().enumerate().map(move |(i, event)| {
+            (
+                event,
+                notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+            )
+        })
     }
 }
 
@@ -916,7 +912,7 @@ impl PciDevice for VirtioPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
         // is accessed. This capability has a special meaning as it allows the
         // guest to access other capabilities without mapping the PCI BAR.
@@ -926,11 +922,13 @@ impl PciDevice for VirtioPciDevice {
                 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
         {
             let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
-            self.write_cap_pci_cfg(offset, data)
+            (Vec::new(), self.write_cap_pci_cfg(offset, data))
         } else {
-            self.configuration
-                .write_config_register(reg_idx, offset, data);
-            None
+            (
+                self.configuration
+                    .write_config_register(reg_idx, offset, data),
+                None,
+            )
         }
     }
 
@@ -949,14 +947,6 @@ impl PciDevice for VirtioPciDevice {
         } else {
             self.configuration.read_reg(reg_idx)
         }
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(
@@ -1186,9 +1176,9 @@ impl PciDevice for VirtioPciDevice {
                 .contains(&o) =>
             {
                 #[cfg(feature = "sev_snp")]
-                for (_event, _addr) in self.ioeventfds(_base) {
-                    if _addr == _base + offset {
-                        _event.write(1).unwrap();
+                for (event, addr) in self.ioeventfds(_base) {
+                    if addr == _base + offset {
+                        event.write(1).unwrap();
                     }
                 }
                 // Handled with ioeventfds.
@@ -1249,7 +1239,7 @@ impl PciDevice for VirtioPciDevice {
         None
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

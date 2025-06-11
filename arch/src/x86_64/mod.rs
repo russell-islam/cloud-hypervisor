@@ -12,22 +12,22 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
-use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
-use crate::RegionType;
+use std::collections::BTreeMap;
+use std::mem;
+
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
-use std::collections::BTreeMap;
-use std::mem;
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion, GuestUsize,
 };
+
+use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
 mod smbios;
 use std::arch::x86_64;
 #[cfg(feature = "tdx")]
@@ -133,35 +133,35 @@ pub struct CpuidConfig {
 pub enum Error {
     /// Error writing MP table to memory.
     #[error("Error writing MP table to memory: {0}")]
-    MpTableSetup(mptable::Error),
+    MpTableSetup(#[source] mptable::Error),
 
     /// Error configuring the general purpose registers
     #[error("Error configuring the general purpose registers: {0}")]
-    RegsConfiguration(regs::Error),
+    RegsConfiguration(#[source] regs::Error),
 
     /// Error configuring the special registers
     #[error("Error configuring the special registers: {0}")]
-    SregsConfiguration(regs::Error),
+    SregsConfiguration(#[source] regs::Error),
 
     /// Error configuring the floating point related registers
     #[error("Error configuring the floating point related registers: {0}")]
-    FpuConfiguration(regs::Error),
+    FpuConfiguration(#[source] regs::Error),
 
     /// Error configuring the MSR registers
     #[error("Error configuring the MSR registers: {0}")]
-    MsrsConfiguration(regs::Error),
+    MsrsConfiguration(#[source] regs::Error),
 
     /// Failed to set supported CPUs.
     #[error("Failed to set supported CPUs: {0}")]
-    SetSupportedCpusFailed(anyhow::Error),
+    SetSupportedCpusFailed(#[source] anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
     #[error("Cannot set the local interruption due to bad configuration: {0}")]
-    LocalIntConfiguration(anyhow::Error),
+    LocalIntConfiguration(#[source] anyhow::Error),
 
     /// Error setting up SMBIOS table
     #[error("Error setting up SMBIOS table: {0}")]
-    SmbiosSetup(smbios::Error),
+    SmbiosSetup(#[source] smbios::Error),
 
     /// Could not find any SGX EPC section
     #[error("Could not find any SGX EPC section")]
@@ -177,15 +177,15 @@ pub enum Error {
 
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
     #[error("Error getting supported CPUID through the hypervisor API: {0}")]
-    CpuidGetSupported(HypervisorError),
+    CpuidGetSupported(#[source] HypervisorError),
 
     /// Error populating CPUID with KVM HyperV emulation details
     #[error("Error populating CPUID with KVM HyperV emulation details: {0}")]
-    CpuidKvmHyperV(vmm_sys_util::fam::Error),
+    CpuidKvmHyperV(#[source] vmm_sys_util::fam::Error),
 
     /// Error populating CPUID with CPU identification
     #[error("Error populating CPUID with CPU identification: {0}")]
-    CpuidIdentification(vmm_sys_util::fam::Error),
+    CpuidIdentification(#[source] vmm_sys_util::fam::Error),
 
     /// Error checking CPUID compatibility
     #[error("Error checking CPUID compatibility")]
@@ -193,16 +193,16 @@ pub enum Error {
 
     // Error writing EBDA address
     #[error("Error writing EBDA address: {0}")]
-    EbdaSetup(vm_memory::GuestMemoryError),
+    EbdaSetup(#[source] vm_memory::GuestMemoryError),
 
     // Error getting CPU TSC frequency
     #[error("Error getting CPU TSC frequency: {0}")]
-    GetTscFrequency(HypervisorCpuError),
+    GetTscFrequency(#[source] HypervisorCpuError),
 
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
     #[error("Error retrieving TDX capabilities through the hypervisor API: {0}")]
-    TdxCapabilities(HypervisorError),
+    TdxCapabilities(#[source] HypervisorError),
 
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
@@ -887,6 +887,10 @@ pub fn configure_vcpu(
         }
     }
 
+    for c in &cpuid {
+        info!("{}", c);
+    }
+
     vcpu.set_cpuid2(&cpuid)
         .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
 
@@ -1407,6 +1411,7 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EDX, x2apic_id);
 
     // CPU Topology leaf 0x1f
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
@@ -1551,8 +1556,9 @@ fn update_cpuid_sgx(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use linux_loader::loader::bootparam::boot_e820_entry;
+
+    use super::*;
 
     #[test]
     fn regions_base_addr() {
@@ -1580,7 +1586,7 @@ mod tests {
             None,
             None,
         );
-        assert!(config_err.is_err());
+        config_err.unwrap_err();
 
         // Now assigning some memory that falls before the 32bit memory hole.
         let arch_mem_regions = arch_memory_regions();
@@ -1685,13 +1691,13 @@ mod tests {
         // Exercise the scenario where the field storing the length of the e820 entry table is
         // is bigger than the allocated memory.
         params.e820_entries = params.e820_table.len() as u8 + 1;
-        assert!(add_e820_entry(
+        add_e820_entry(
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_
+            e820_table[0].type_,
         )
-        .is_err());
+        .unwrap_err();
     }
 
     #[test]

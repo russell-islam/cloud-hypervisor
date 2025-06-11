@@ -11,62 +11,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::CpusConfig;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
-    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
-    NT_PRSTATUS,
-};
-#[cfg(feature = "guest_debug")]
-use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
-#[cfg(target_arch = "x86_64")]
-use crate::memory_manager::MemoryManager;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
-#[cfg(target_arch = "x86_64")]
-use crate::vm::physical_bits;
-use crate::GuestMemoryMmap;
-use crate::CPU_MANAGER_SNAPSHOT_ID;
-use acpi_tables::{aml, sdt::Sdt, Aml};
-use anyhow::anyhow;
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use arch::aarch64::regs;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::get_x2apic_id;
-use arch::EntryPoint;
-use arch::NumaNodes;
-#[cfg(target_arch = "aarch64")]
-use devices::gic::Gic;
-use devices::interrupt_controller::InterruptController;
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use hypervisor::aarch64::StandardRegisters;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::msr_index;
-#[cfg(target_arch = "x86_64")]
-use hypervisor::arch::x86::CpuIdEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::MsrEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
-#[cfg(target_arch = "aarch64")]
-use hypervisor::kvm::kvm_bindings;
-#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
-use hypervisor::kvm::kvm_ioctls::Cap;
-#[cfg(feature = "tdx")]
-use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
-#[cfg(target_arch = "x86_64")]
-use hypervisor::CpuVendor;
-#[cfg(feature = "kvm")]
-use hypervisor::HypervisorType;
-use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
-use libc::{c_void, siginfo_t};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use linux_loader::elf::Elf64_Nhdr;
-use seccompiler::{apply_filter, SeccompAction};
 use std::collections::BTreeMap;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::io::Write;
@@ -76,6 +20,44 @@ use std::os::unix::thread::JoinHandleExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
+
+#[cfg(not(target_arch = "riscv64"))]
+use acpi_tables::sdt::Sdt;
+use acpi_tables::{aml, Aml};
+use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::get_x2apic_id;
+use arch::{EntryPoint, NumaNodes};
+#[cfg(target_arch = "aarch64")]
+use devices::gic::Gic;
+use devices::interrupt_controller::InterruptController;
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::msr_index;
+#[cfg(target_arch = "x86_64")]
+use hypervisor::arch::x86::CpuIdEntry;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::MsrEntry;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::SpecialRegisters;
+#[cfg(feature = "tdx")]
+use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
+#[cfg(target_arch = "x86_64")]
+use hypervisor::CpuVendor;
+#[cfg(feature = "kvm")]
+use hypervisor::HypervisorType;
+#[cfg(feature = "guest_debug")]
+use hypervisor::StandardRegisters;
+use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
+use libc::{c_void, siginfo_t};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use linux_loader::elf::Elf64_Nhdr;
+use seccompiler::{apply_filter, SeccompAction};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -90,7 +72,24 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
-use zerocopy::AsBytes;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
+    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
+    NT_PRSTATUS,
+};
+#[cfg(feature = "guest_debug")]
+use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
+#[cfg(target_arch = "x86_64")]
+use crate::memory_manager::MemoryManager;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+#[cfg(target_arch = "x86_64")]
+use crate::vm::physical_bits;
+use crate::vm_config::CpusConfig;
+use crate::{GuestMemoryMmap, CPU_MANAGER_SNAPSHOT_ID};
+
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
@@ -137,14 +136,29 @@ pub enum Error {
     VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(target_arch = "aarch64")]
+    #[error("Error setting vCPU processor features: {0}")]
+    VcpuSetProcessorFeatures(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "aarch64")]
     #[error("Error initialising vCPU: {0}")]
     VcpuArmInit(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error finalising vCPU: {0}")]
+    VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error initialising GICR base address: {0}")]
+    VcpuSetGicrBaseAddr(#[source] hypervisor::HypervisorCpuError),
 
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     #[error("Error adding CpuManager to MMIO bus: {0}")]
     BusError(#[source] vm_device::BusError),
+
+    #[error("Requested zero vCPUs")]
+    DesiredVCpuCountIsZero,
 
     #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
@@ -193,14 +207,14 @@ pub enum Error {
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
-    NmiError(hypervisor::HypervisorCpuError),
+    NmiError(#[source] hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
@@ -212,7 +226,7 @@ struct LocalX2Apic {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct Ioapic {
     pub r#type: u8,
     pub length: u8,
@@ -225,7 +239,7 @@ struct Ioapic {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicC {
     pub r#type: u8,
     pub length: u8,
@@ -250,7 +264,7 @@ struct GicC {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicD {
     pub r#type: u8,
     pub length: u8,
@@ -265,7 +279,7 @@ struct GicD {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicR {
     pub r#type: u8,
     pub length: u8,
@@ -277,7 +291,7 @@ struct GicR {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicIts {
     pub r#type: u8,
     pub length: u8,
@@ -290,7 +304,7 @@ struct GicIts {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct ProcessorHierarchyNode {
     pub r#type: u8,
     pub length: u8,
@@ -303,7 +317,7 @@ struct ProcessorHierarchyNode {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct InterruptSourceOverride {
     pub r#type: u8,
     pub length: u8,
@@ -384,6 +398,8 @@ impl Vcpu {
             self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
+        #[cfg(target_arch = "riscv64")]
+        arch::configure_vcpu(&self.vcpu, self.id, boot_setup).map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
         arch::configure_vcpu(
@@ -407,7 +423,7 @@ impl Vcpu {
     }
 
     /// Gets the saved vCPU state.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn get_saved_state(&self) -> Option<CpuState> {
         self.saved_state.clone()
     }
@@ -415,26 +431,29 @@ impl Vcpu {
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
-        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        use std::arch::is_aarch64_feature_detected;
+        #[allow(clippy::nonminimal_bool)]
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+        let mut kvi = self.vcpu.create_vcpu_init();
 
         // This reads back the kernel's preferred target type.
         vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
-        // We already checked that the capability is supported.
-        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-        if vm
-            .as_any()
-            .downcast_ref::<hypervisor::kvm::KvmVm>()
-            .unwrap()
-            .check_extension(Cap::ArmPmuV3)
-        {
-            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
+
+        self.vcpu
+            .vcpu_set_processor_features(vm, &mut kvi, self.id)
+            .map_err(Error::VcpuSetProcessorFeatures)?;
+
+        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+
+        if sve_supported {
+            let finalized_features = self.vcpu.vcpu_get_finalized_features();
+            self.vcpu
+                .vcpu_finalize(finalized_features)
+                .map_err(Error::VcpuArmFinalize)?;
         }
-        // Non-boot cpus are powered off initially.
-        if self.id > 0 {
-            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
-        }
-        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)
+        Ok(())
     }
 
     /// Runs the VCPU until it exits, returning the reason.
@@ -450,6 +469,23 @@ impl Vcpu {
         self.vcpu
             .set_sev_control_register(vmsa_pfn)
             .map_err(Error::SetSevControlRegister)
+    }
+
+    ///
+    /// Sets the vCPU's GIC redistributor base address.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    pub fn set_gic_redistributor_addr(
+        &self,
+        base_redist_addr: u64,
+        redist_size: u64,
+    ) -> Result<()> {
+        let gicr_base = base_redist_addr + (arch::layout::GIC_V3_REDIST_SIZE * self.id as u64);
+        assert!(gicr_base + arch::layout::GIC_V3_REDIST_SIZE <= base_redist_addr + redist_size);
+        self.vcpu
+            .set_gic_redistributor_addr(gicr_base)
+            .map_err(Error::VcpuSetGicrBaseAddr)?;
+        Ok(())
     }
 }
 
@@ -788,7 +824,7 @@ impl CpuManager {
         let topology = self.get_vcpu_topology();
         #[cfg(target_arch = "x86_64")]
         let x2apic_id = arch::x86_64::get_x2apic_id(cpu_id as u32, topology);
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let x2apic_id = cpu_id as u32;
 
         let mut vcpu = Vcpu::new(
@@ -861,6 +897,9 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         vcpu.configure(&self.vm, boot_setup)?;
+
+        #[cfg(target_arch = "riscv64")]
+        vcpu.configure(boot_setup)?;
 
         Ok(())
     }
@@ -1284,6 +1323,10 @@ impl CpuManager {
             return Ok(false);
         }
 
+        if desired_vcpus < 1 {
+            return Err(Error::DesiredVCpuCountIsZero);
+        }
+
         if self.check_pending_removed_vcpu() {
             return Err(Error::VcpuPendingRemovedVcpu);
         }
@@ -1387,6 +1430,7 @@ impl CpuManager {
             .map(|t| (t.threads_per_core, t.cores_per_die, t.packages))
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     pub fn create_madt(&self) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.
@@ -1595,6 +1639,15 @@ impl CpuManager {
         pptt
     }
 
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+    fn create_standard_regs(&self, cpu_id: u8) -> StandardRegisters {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .create_standard_regs()
+    }
+
     #[cfg(feature = "guest_debug")]
     fn get_regs(&self, cpu_id: u8) -> Result<StandardRegisters> {
         self.vcpus[usize::from(cpu_id)]
@@ -1678,19 +1731,19 @@ impl CpuManager {
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::TCR_EL1)
+            .get_sys_reg(TCR_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
         let ttbr1_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::TTBR1_EL1)
+            .get_sys_reg(TTBR1_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
         let id_aa64mmfr0_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::ID_AA64MMFR0_EL1)
+            .get_sys_reg(ID_AA64MMFR0_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
 
         // Bit 55 of the VA determines the range, high (0xFFFxxx...)
@@ -2331,14 +2384,28 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
         let regs = [
-            gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rbp, gregs.rsp,
-            gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14, gregs.r15,
+            gregs.get_rax(),
+            gregs.get_rbx(),
+            gregs.get_rcx(),
+            gregs.get_rdx(),
+            gregs.get_rsi(),
+            gregs.get_rdi(),
+            gregs.get_rbp(),
+            gregs.get_rsp(),
+            gregs.get_r8(),
+            gregs.get_r9(),
+            gregs.get_r10(),
+            gregs.get_r11(),
+            gregs.get_r12(),
+            gregs.get_r13(),
+            gregs.get_r14(),
+            gregs.get_r15(),
         ];
 
         // GDB exposes 32-bit eflags instead of 64-bit rflags.
         // https://github.com/bminor/binutils-gdb/blob/master/gdb/features/i386/64bit-core.xml
-        let eflags = gregs.rflags as u32;
-        let rip = gregs.rip;
+        let eflags = gregs.get_rflags() as u32;
+        let rip = gregs.get_rip();
 
         // Segment registers: CS, SS, DS, ES, FS, GS
         let sregs = self
@@ -2370,9 +2437,9 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
         Ok(CoreRegs {
-            x: gregs.regs.regs,
-            sp: gregs.regs.sp,
-            pc: gregs.regs.pc,
+            x: gregs.get_regs(),
+            sp: gregs.get_sp(),
+            pc: gregs.get_pc(),
             ..Default::default()
         })
     }
@@ -2386,27 +2453,26 @@ impl Debuggable for CpuManager {
         let orig_gregs = self
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
-        let gregs = StandardRegisters {
-            rax: regs.regs[0],
-            rbx: regs.regs[1],
-            rcx: regs.regs[2],
-            rdx: regs.regs[3],
-            rsi: regs.regs[4],
-            rdi: regs.regs[5],
-            rbp: regs.regs[6],
-            rsp: regs.regs[7],
-            r8: regs.regs[8],
-            r9: regs.regs[9],
-            r10: regs.regs[10],
-            r11: regs.regs[11],
-            r12: regs.regs[12],
-            r13: regs.regs[13],
-            r14: regs.regs[14],
-            r15: regs.regs[15],
-            rip: regs.rip,
-            // Update the lower 32-bit of rflags.
-            rflags: (orig_gregs.rflags & !(u32::MAX as u64)) | (regs.eflags as u64),
-        };
+        let mut gregs = self.create_standard_regs(cpu_id as u8);
+        gregs.set_rax(regs.regs[0]);
+        gregs.set_rbx(regs.regs[1]);
+        gregs.set_rcx(regs.regs[2]);
+        gregs.set_rdx(regs.regs[3]);
+        gregs.set_rsi(regs.regs[4]);
+        gregs.set_rdi(regs.regs[5]);
+        gregs.set_rbp(regs.regs[6]);
+        gregs.set_rsp(regs.regs[7]);
+        gregs.set_r8(regs.regs[8]);
+        gregs.set_r9(regs.regs[9]);
+        gregs.set_r10(regs.regs[10]);
+        gregs.set_r11(regs.regs[11]);
+        gregs.set_r12(regs.regs[12]);
+        gregs.set_r13(regs.regs[13]);
+        gregs.set_r14(regs.regs[14]);
+        gregs.set_r15(regs.regs[15]);
+        gregs.set_rip(regs.rip);
+        // Update the lower 32-bit of rflags.
+        gregs.set_rflags((orig_gregs.get_rflags() & !(u32::MAX as u64)) | (regs.eflags as u64));
 
         self.set_regs(cpu_id as u8, &gregs)
             .map_err(DebuggableError::WriteRegs)?;
@@ -2441,9 +2507,9 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
 
-        gregs.regs.regs = regs.x;
-        gregs.regs.sp = regs.sp;
-        gregs.regs.pc = regs.pc;
+        gregs.set_regs(regs.x);
+        gregs.set_sp(regs.sp);
+        gregs.set_pc(regs.pc);
 
         self.set_regs(cpu_id as u8, &gregs)
             .map_err(DebuggableError::WriteRegs)?;
@@ -2566,11 +2632,24 @@ impl CpuElf64Writable for CpuManager {
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
 
             let regs1 = [
-                gregs.r15, gregs.r14, gregs.r13, gregs.r12, gregs.rbp, gregs.rbx, gregs.r11,
-                gregs.r10,
+                gregs.get_r15(),
+                gregs.get_r14(),
+                gregs.get_r13(),
+                gregs.get_r12(),
+                gregs.get_rbp(),
+                gregs.get_rbx(),
+                gregs.get_r11(),
+                gregs.get_r10(),
             ];
             let regs2 = [
-                gregs.r9, gregs.r8, gregs.rax, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, orig_rax,
+                gregs.get_r9(),
+                gregs.get_r8(),
+                gregs.get_rax(),
+                gregs.get_rcx(),
+                gregs.get_rdx(),
+                gregs.get_rsi(),
+                gregs.get_rdi(),
+                orig_rax,
             ];
 
             let sregs = self.vcpus[usize::from(vcpu_id)]
@@ -2582,8 +2661,8 @@ impl CpuElf64Writable for CpuManager {
 
             debug!(
                 "rip 0x{:x} rsp 0x{:x} gs 0x{:x} cs 0x{:x} ss 0x{:x} ds 0x{:x}",
-                gregs.rip,
-                gregs.rsp,
+                gregs.get_rip(),
+                gregs.get_rsp(),
                 sregs.gs.base,
                 sregs.cs.selector,
                 sregs.ss.selector,
@@ -2593,10 +2672,10 @@ impl CpuElf64Writable for CpuManager {
             let regs = X86_64UserRegs {
                 regs1,
                 regs2,
-                rip: gregs.rip,
+                rip: gregs.get_rip(),
                 cs: sregs.cs.selector as u64,
-                eflags: gregs.rflags,
-                rsp: gregs.rsp,
+                eflags: gregs.get_rflags(),
+                rsp: gregs.get_rsp(),
                 ss: sregs.ss.selector as u64,
                 fs_base: sregs.fs.base,
                 gs_base: sregs.gs.base,
@@ -2655,13 +2734,25 @@ impl CpuElf64Writable for CpuManager {
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
 
             let regs1 = [
-                gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rsp,
-                gregs.rbp,
+                gregs.get_rax(),
+                gregs.get_rbx(),
+                gregs.get_rcx(),
+                gregs.get_rdx(),
+                gregs.get_rsi(),
+                gregs.get_rdi(),
+                gregs.get_rsp(),
+                gregs.get_rbp(),
             ];
 
             let regs2 = [
-                gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14,
-                gregs.r15,
+                gregs.get_r8(),
+                gregs.get_r9(),
+                gregs.get_r10(),
+                gregs.get_r11(),
+                gregs.get_r12(),
+                gregs.get_r13(),
+                gregs.get_r14(),
+                gregs.get_r15(),
             ];
 
             let sregs = self.vcpus[usize::from(vcpu_id)]
@@ -2700,8 +2791,8 @@ impl CpuElf64Writable for CpuManager {
                 size: size_of::<DumpCpusState>() as u32,
                 regs1,
                 regs2,
-                rip: gregs.rip,
-                rflags: gregs.rflags,
+                rip: gregs.get_rip(),
+                rflags: gregs.get_rflags(),
                 cs,
                 ds,
                 es,
@@ -2734,20 +2825,20 @@ impl CpuElf64Writable for CpuManager {
 #[cfg(not(feature = "sev_snp"))]
 #[cfg(test)]
 mod tests {
-    use arch::layout::BOOT_STACK_POINTER;
-    use arch::layout::ZERO_PAGE_START;
+    use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::{FpuState, LapicState, StandardRegisters};
+    use hypervisor::arch::x86::{FpuState, LapicState};
+    use hypervisor::StandardRegisters;
     use linux_loader::loader::bootparam::setup_header;
 
     #[test]
     fn test_setlint() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        assert!(hv.check_required_extensions().is_ok());
+        hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
-        assert!(vm.create_irq_chip().is_ok());
+        vm.create_irq_chip().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
@@ -2823,17 +2914,15 @@ mod tests {
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let expected_regs: StandardRegisters = StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rbx: arch::layout::PVH_INFO_START.0,
-            rip: 1,
-            ..Default::default()
-        };
+        let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
+        expected_regs.set_rflags(0x0000000000000002u64);
+        expected_regs.set_rbx(arch::layout::PVH_INFO_START.0);
+        expected_regs.set_rip(1);
 
         setup_regs(
             &vcpu,
             arch::EntryPoint {
-                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: None,
             },
         )
@@ -2849,18 +2938,16 @@ mod tests {
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let expected_regs: StandardRegisters = StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: 1,
-            rsp: BOOT_STACK_POINTER.0,
-            rsi: ZERO_PAGE_START.0,
-            ..Default::default()
-        };
+        let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
+        expected_regs.set_rflags(0x0000000000000002u64);
+        expected_regs.set_rip(1);
+        expected_regs.set_rsp(BOOT_STACK_POINTER.0);
+        expected_regs.set_rsi(ZERO_PAGE_START.0);
 
         setup_regs(
             &vcpu,
             arch::EntryPoint {
-                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: Some(setup_header {
                     ..Default::default()
                 }),
@@ -2876,14 +2963,19 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::{aarch64::regs, layout};
-    use hypervisor::kvm::aarch64::is_system_register;
-    use hypervisor::kvm::kvm_bindings::{
-        kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-        KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
-    };
-    use hypervisor::{arm64_core_reg_id, offset_of};
+    #[cfg(feature = "kvm")]
     use std::mem;
+
+    use arch::layout;
+    use hypervisor::arch::aarch64::regs::MPIDR_EL1;
+    #[cfg(feature = "kvm")]
+    use hypervisor::kvm::aarch64::is_system_register;
+    #[cfg(feature = "kvm")]
+    use hypervisor::kvm::kvm_bindings::{
+        user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
+    };
+    #[cfg(feature = "kvm")]
+    use hypervisor::{arm64_core_reg_id, offset_of};
 
     #[test]
     fn test_setup_regs() {
@@ -2891,15 +2983,14 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let res = vcpu.setup_regs(0, 0x0, layout::FDT_START.0);
         // Must fail when vcpu is not initialized yet.
-        assert!(res.is_err());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
 
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        assert!(vcpu.setup_regs(0, 0x0, layout::FDT_START.0).is_ok());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
     }
 
     #[test]
@@ -2907,16 +2998,17 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        assert!(vcpu.get_sys_reg(regs::MPIDR_EL1).is_err());
+        vcpu.get_sys_reg(MPIDR_EL1).unwrap_err();
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
+        assert_eq!(vcpu.get_sys_reg(MPIDR_EL1).unwrap(), 0x80000000);
     }
 
+    #[cfg(feature = "kvm")]
     #[test]
     fn test_is_system_register() {
         let offset = offset_of!(user_pt_regs, pc);
@@ -2931,32 +3023,26 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        let res = vcpu.get_regs();
-        assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
-            "Failed to get core register: Exec format error (os error 8)"
+            format!("{}", vcpu.get_regs().unwrap_err()),
+            "Failed to get aarch64 core register: Exec format error (os error 8)"
         );
 
-        let mut state = kvm_regs::default();
-        let res = vcpu.set_regs(&state);
-        assert!(res.is_err());
+        let mut state = vcpu.create_standard_regs();
         assert_eq!(
-            format!("{}", res.unwrap_err()),
-            "Failed to set core register: Exec format error (os error 8)"
+            format!("{}", vcpu.set_regs(&state).unwrap_err()),
+            "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
-        let res = vcpu.get_regs();
-        assert!(res.is_ok());
-        state = res.unwrap();
-        assert_eq!(state.regs.pstate, 0x3C5);
+        state = vcpu.get_regs().unwrap();
+        assert_eq!(state.get_pstate(), 0x3C5);
 
-        assert!(vcpu.set_regs(&state).is_ok());
+        vcpu.set_regs(&state).unwrap();
     }
 
     #[test]
@@ -2964,11 +3050,10 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
+        let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
 
-        let res = vcpu.get_mp_state();
-        assert!(res.is_ok());
-        assert!(vcpu.set_mp_state(res.unwrap()).is_ok());
+        let state = vcpu.get_mp_state().unwrap();
+        vcpu.set_mp_state(state).unwrap();
     }
 }

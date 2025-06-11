@@ -2,13 +2,18 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::vhdx::{Result as VhdxResult, Vhdx};
-use crate::AsyncAdaptor;
 use std::collections::VecDeque;
 use std::fs::File;
+use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex, MutexGuard};
+
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::async_io::{
+    AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+};
+use crate::vhdx::{Result as VhdxResult, Vhdx};
+use crate::AsyncAdaptor;
 
 pub struct VhdxDiskSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
@@ -32,6 +37,11 @@ impl DiskFile for VhdxDiskSync {
             Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
                 as Box<dyn AsyncIo>,
         )
+    }
+
+    fn fd(&mut self) -> BorrowedDiskFd {
+        let lock = self.vhdx_file.lock().unwrap();
+        BorrowedDiskFd::new(lock.as_raw_fd())
     }
 }
 

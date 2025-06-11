@@ -14,19 +14,21 @@ mod open_tap;
 mod queue_pair;
 mod tap;
 
-use serde::{Deserialize, Serialize};
 use std::io::Error as IoError;
+use std::net::IpAddr;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
-use thiserror::Error;
 
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use virtio_bindings::virtio_net::{
     virtio_net_hdr_v1, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
     VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
     VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ,
 };
-use vm_memory::{bitmap::AtomicBitmap, ByteValued};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::ByteValued;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -39,7 +41,7 @@ pub use tap::{Error as TapError, Tap};
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to create a socket: {0}")]
-    CreateSocket(IoError),
+    CreateSocket(#[source] IoError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -75,9 +77,14 @@ fn create_sockaddr(ip_addr: net::Ipv4Addr) -> net_gen::sockaddr {
     unsafe { mem::transmute(addr_in) }
 }
 
-fn create_inet_socket() -> Result<net::UdpSocket> {
+fn create_inet_socket(addr: IpAddr) -> Result<net::UdpSocket> {
+    let domain = match addr {
+        IpAddr::V4(_) => libc::AF_INET,
+        IpAddr::V6(_) => libc::AF_INET6,
+    };
+
     // SAFETY: we check the return value.
-    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    let sock = unsafe { libc::socket(domain, libc::SOCK_DGRAM, 0) };
     if sock < 0 {
         return Err(Error::CreateSocket(IoError::last_os_error()));
     }

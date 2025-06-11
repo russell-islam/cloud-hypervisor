@@ -6,56 +6,58 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
+use std::sync::Arc;
+use std::{mem, result};
+
+use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
+use hypervisor::arch::x86::regs::CR0_PE;
+use hypervisor::arch::x86::{FpuState, SpecialRegisters};
+use thiserror::Error;
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
+
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
 };
 use crate::{EntryPoint, GuestMemoryMmap};
-use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
-use std::sync::Arc;
-use std::{mem, result};
-use thiserror::Error;
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 
 #[derive(Debug, Error)]
 pub enum Error {
     /// Failed to get SREGs for this CPU.
     #[error("Failed to get SREGs for this CPU: {0}")]
-    GetStatusRegisters(hypervisor::HypervisorCpuError),
+    GetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set base registers for this CPU.
     #[error("Failed to set base registers for this CPU: {0}")]
-    SetBaseRegisters(hypervisor::HypervisorCpuError),
+    SetBaseRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to configure the FPU.
     #[error("Failed to configure the FPU: {0}")]
-    SetFpuRegisters(hypervisor::HypervisorCpuError),
+    SetFpuRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Setting up MSRs failed.
     #[error("Setting up MSRs failed: {0}")]
-    SetModelSpecificRegisters(hypervisor::HypervisorCpuError),
+    SetModelSpecificRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set SREGs for this CPU.
     #[error("Failed to set SREGs for this CPU: {0}")]
-    SetStatusRegisters(hypervisor::HypervisorCpuError),
+    SetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Checking the GDT address failed.
     #[error("Checking the GDT address failed")]
     CheckGdtAddr,
     /// Writing the GDT to RAM failed.
     #[error("Writing the GDT to RAM failed: {0}")]
-    WriteGdt(GuestMemoryError),
+    WriteGdt(#[source] GuestMemoryError),
     /// Writing the IDT to RAM failed.
     #[error("Writing the IDT to RAM failed: {0}")]
-    WriteIdt(GuestMemoryError),
+    WriteIdt(#[source] GuestMemoryError),
     /// Writing PDPTE to RAM failed.
     #[error("Writing PDPTE to RAM failed: {0}")]
-    WritePdpteAddress(GuestMemoryError),
+    WritePdpteAddress(#[source] GuestMemoryError),
     /// Writing PDE to RAM failed.
     #[error("Writing PDE to RAM failed: {0}")]
-    WritePdeAddress(GuestMemoryError),
+    WritePdeAddress(#[source] GuestMemoryError),
     /// Writing PML4 to RAM failed.
     #[error("Writing PML4 to RAM failed: {0}")]
-    WritePml4Address(GuestMemoryError),
+    WritePml4Address(#[source] GuestMemoryError),
     /// Writing PML5 to RAM failed.
     #[error("Writing PML5 to RAM failed: {0}")]
-    WritePml5Address(GuestMemoryError),
+    WritePml5Address(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -94,20 +96,19 @@ pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 /// * `entry_point` - Description of the boot entry to set up.
 pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> Result<()> {
-    let regs = match entry_point.setup_header {
-        None => StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: entry_point.entry_addr.raw_value(),
-            rbx: PVH_INFO_START.raw_value(),
-            ..Default::default()
-        },
-        Some(_) => StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: entry_point.entry_addr.raw_value(),
-            rsp: BOOT_STACK_POINTER.raw_value(),
-            rsi: ZERO_PAGE_START.raw_value(),
-            ..Default::default()
-        },
+    let mut regs = vcpu.create_standard_regs();
+    match entry_point.setup_header {
+        None => {
+            regs.set_rflags(0x0000000000000002u64);
+            regs.set_rip(entry_point.entry_addr.raw_value());
+            regs.set_rbx(PVH_INFO_START.raw_value());
+        }
+        Some(_) => {
+            regs.set_rflags(0x0000000000000002u64);
+            regs.set_rip(entry_point.entry_addr.raw_value());
+            regs.set_rsp(BOOT_STACK_POINTER.raw_value());
+            regs.set_rsi(ZERO_PAGE_START.raw_value());
+        }
     };
     vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
@@ -187,8 +188,9 @@ pub fn configure_segments_and_sregs(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vm_memory::GuestAddress;
+
+    use super::*;
 
     fn create_guest_mem() -> GuestMemoryMmap {
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()

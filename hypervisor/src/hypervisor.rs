@@ -8,6 +8,12 @@
 //
 //
 #[cfg(target_arch = "x86_64")]
+use std::arch::x86_64;
+use std::sync::Arc;
+
+use thiserror::Error;
+
+#[cfg(target_arch = "x86_64")]
 use crate::arch::x86::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
 use crate::cpu::CpuVendor;
@@ -15,10 +21,6 @@ use crate::cpu::CpuVendor;
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
 use crate::HypervisorType;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64;
-use std::sync::Arc;
-use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum HypervisorError {
@@ -65,22 +67,22 @@ pub enum HypervisorError {
     ///
     /// Checking extensions failed
     ///
-    #[error("Checking extensions:{0}")]
+    #[error("Checking extensions: {0}")]
     CheckExtensions(#[source] anyhow::Error),
     ///
     /// Failed to retrieve TDX capabilities
     ///
-    #[error("Failed to retrieve TDX capabilities:{0}")]
+    #[error("Failed to retrieve TDX capabilities: {0}")]
     TdxCapabilities(#[source] anyhow::Error),
     ///
     /// Failed to set partition property
     ///
-    #[error("Failed to set partition property:{0}")]
+    #[error("Failed to set partition property: {0}")]
     SetPartitionProperty(#[source] anyhow::Error),
     ///
     /// Running on an unsupported CPU
     ///
-    #[error("Unsupported CPU:{0}")]
+    #[error("Unsupported CPU: {0}")]
     UnsupportedCpu(#[source] anyhow::Error),
     ///
     /// Launching a VM with unsupported VM Type
@@ -114,6 +116,17 @@ pub trait Hypervisor: Send + Sync {
     /// Return a hypervisor-agnostic Vm trait object
     ///
     fn create_vm_with_type(
+        &self,
+        _vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> Result<Arc<dyn Vm>> {
+        unreachable!()
+    }
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    fn create_vm_with_type_and_memory(
         &self,
         _vm_type: u64,
         #[cfg(feature = "sev_snp")] _mem_size: u64,

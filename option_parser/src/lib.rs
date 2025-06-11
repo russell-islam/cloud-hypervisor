@@ -4,9 +4,10 @@
 //
 
 use std::collections::HashMap;
-use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
+
+use thiserror::Error;
 
 #[derive(Default)]
 pub struct OptionParser {
@@ -18,25 +19,16 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum OptionParserError {
+    #[error("unknown option: {0}")]
     UnknownOption(String),
+    #[error("unknown option: {0}")]
     InvalidSyntax(String),
-    Conversion(String, String),
+    #[error("unable to convert {1} for {0}")]
+    Conversion(String /* field */, String /* value */),
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-}
-
-impl fmt::Display for OptionParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {s}"),
-            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{s}"),
-            OptionParserError::Conversion(field, value) => {
-                write!(f, "unable to convert {value} for {field}")
-            }
-            OptionParserError::InvalidValue(s) => write!(f, "invalid value: {s}"),
-        }
-    }
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
@@ -163,7 +155,9 @@ impl OptionParser {
 
 pub struct Toggle(pub bool);
 
+#[derive(Error, Debug)]
 pub enum ToggleParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -184,8 +178,9 @@ impl FromStr for Toggle {
 
 pub struct ByteSized(pub u64);
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ByteSizedParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -215,7 +210,9 @@ impl FromStr for ByteSized {
 
 pub struct IntegerList(pub Vec<u64>);
 
+#[derive(Error, Debug)]
 pub enum IntegerListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -305,11 +302,16 @@ impl TupleValue for Vec<usize> {
 
 pub struct Tuple<S, T>(pub Vec<(S, T)>);
 
+#[derive(Error, Debug)]
 pub enum TupleError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-    SplitOutsideBrackets(OptionParserError),
-    InvalidIntegerList(IntegerListParseError),
-    InvalidInteger(ParseIntError),
+    #[error("split outside brackets: {0}")]
+    SplitOutsideBrackets(#[source] OptionParserError),
+    #[error("invalid integer list: {0}")]
+    InvalidIntegerList(#[source] IntegerListParseError),
+    #[error("invalid integer: {0}")]
+    InvalidInteger(#[source] ParseIntError),
 }
 
 impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
@@ -347,7 +349,9 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
 #[derive(Default)]
 pub struct StringList(pub Vec<String>);
 
+#[derive(Error, Debug)]
 pub enum StringListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -381,42 +385,44 @@ mod tests {
             .add("topology")
             .add("cmdline");
 
-        assert!(parser.parse("size=128M,hanging_param").is_err());
-        assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
-        assert!(parser.parse("size=128M,file=/dev/shm").is_err());
+        parser.parse("size=128M,hanging_param").unwrap_err();
+        parser
+            .parse("size=128M,too_many_equals=foo=bar")
+            .unwrap_err();
+        parser.parse("size=128M,file=/dev/shm").unwrap_err();
 
-        assert!(parser.parse("size=128M").is_ok());
+        parser.parse("size=128M").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
 
-        assert!(parser.parse("size=128M,mergeable=on").is_ok());
+        parser.parse("size=128M,mergeable=on").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[1,2]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[1,2]".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[[1,2],[3,4]]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[[1,2],[3,4]]".to_owned()));
 
-        assert!(parser.parse("topology=[").is_err());
-        assert!(parser.parse("topology=[[[]]]]").is_err());
+        parser.parse("topology=[").unwrap_err();
+        parser.parse("topology=[[[]]]]").unwrap_err();
 
-        assert!(parser.parse("cmdline=\"console=ttyS0,9600n8\"").is_ok());
+        parser.parse("cmdline=\"console=ttyS0,9600n8\"").unwrap();
         assert_eq!(
             parser.get("cmdline"),
             Some("console=ttyS0,9600n8".to_owned())
         );
-        assert!(parser.parse("cmdline=\"").is_err());
-        assert!(parser.parse("cmdline=\"\"\"").is_err());
+        parser.parse("cmdline=\"").unwrap_err();
+        parser.parse("cmdline=\"\"\"").unwrap_err();
     }
 }

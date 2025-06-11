@@ -6,6 +6,7 @@
 
 use core::fmt::Debug;
 use std::fmt::{self, Display};
+
 use thiserror::Error;
 
 #[derive(Clone, Copy, Error, Debug)]
@@ -81,13 +82,13 @@ pub enum EmulationError<T: Debug> {
     WrongNumberOperands(#[source] anyhow::Error),
 
     #[error("Instruction Exception: {0}")]
-    InstructionException(Exception<T>),
+    InstructionException(#[source] Exception<T>),
 
     #[error("Instruction fetching error: {0}")]
     InstructionFetchingError(#[source] anyhow::Error),
 
     #[error("Platform emulation error: {0}")]
-    PlatformEmulationError(PlatformError),
+    PlatformEmulationError(#[source] PlatformError),
 
     #[error(transparent)]
     EmulationError(#[from] anyhow::Error),

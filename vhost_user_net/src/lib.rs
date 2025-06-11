@@ -6,68 +6,68 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
+use std::net::{IpAddr, Ipv4Addr};
+use std::ops::Deref;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{Arc, Mutex, RwLock};
+use std::{io, process};
+
 use libc::EFD_NONBLOCK;
 use log::*;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
-use option_parser::Toggle;
-use option_parser::{OptionParser, OptionParserError};
-use std::fmt;
-use std::io;
-use std::net::Ipv4Addr;
-use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::process;
-use std::sync::{Arc, Mutex, RwLock};
+use option_parser::{OptionParser, OptionParserError, Toggle};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::virtio_net::*;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemoryAtomic;
-use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
 pub type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create kill eventfd.
-    CreateKillEventFd(io::Error),
+    #[error("Failed to create kill eventfd: {0}")]
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string.
-    FailedConfigParse(OptionParserError),
+    #[error("Failed to parse configuration string: {0}")]
+    FailedConfigParse(#[source] OptionParserError),
     /// Failed to signal used queue.
-    FailedSignalingUsedQueue(io::Error),
+    #[error("Failed to signal used queue: {0}")]
+    FailedSignalingUsedQueue(#[source] io::Error),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// Failed to open tap device.
-    OpenTap(OpenTapError),
+    #[error("Failed to open tap device: {0}")]
+    OpenTap(#[source] OpenTapError),
     /// No socket provided.
+    #[error("No socket provided")]
     SocketParameterMissing,
     /// Underlying QueuePair error.
-    NetQueuePair(net_util::NetQueuePairError),
+    #[error("Underlying QueuePair error: {0}")]
+    NetQueuePair(#[source] net_util::NetQueuePairError),
     /// Failed to register the TAP listener.
-    RegisterTapListener(io::Error),
+    #[error("Failed to register the TAP listener: {0}")]
+    RegisterTapListener(#[source] io::Error),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
 \"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_net_error: {self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
@@ -120,9 +120,9 @@ pub struct VhostUserNetBackend {
 impl VhostUserNetBackend {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        ip_addr: Ipv4Addr,
+        ip_addr: IpAddr,
         host_mac: MacAddr,
-        netmask: Ipv4Addr,
+        netmask: IpAddr,
         mtu: Option<u16>,
         num_queues: usize,
         queue_size: u16,
@@ -273,9 +273,9 @@ impl VhostUserBackendMut for VhostUserNetBackend {
 }
 
 pub struct VhostUserNetBackendConfig {
-    pub ip: Ipv4Addr,
+    pub ip: IpAddr,
     pub host_mac: MacAddr,
-    pub mask: Ipv4Addr,
+    pub mask: IpAddr,
     pub mtu: Option<u16>,
     pub socket: String,
     pub num_queues: usize,
@@ -305,7 +305,7 @@ impl VhostUserNetBackendConfig {
         let ip = parser
             .convert("ip")
             .map_err(Error::FailedConfigParse)?
-            .unwrap_or_else(|| Ipv4Addr::new(192, 168, 100, 1));
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::new(192, 168, 100, 1)));
         let host_mac = parser
             .convert("host_mac")
             .map_err(Error::FailedConfigParse)?
@@ -313,7 +313,7 @@ impl VhostUserNetBackendConfig {
         let mask = parser
             .convert("mask")
             .map_err(Error::FailedConfigParse)?
-            .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)));
         let mtu = parser.convert("mtu").map_err(Error::FailedConfigParse)?;
         let queue_size = parser
             .convert("queue_size")

@@ -5,8 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hypervisor::HypervisorType;
+use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
-    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
+    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
 };
 
@@ -66,13 +67,14 @@ const TUNGETFEATURES: u64 = 0x8004_54cf;
 
 // See include/uapi/linux/sockios.h in the kernel code.
 const SIOCGIFFLAGS: u64 = 0x8913;
-const SIOCGIFHWADDR: u64 = 0x8927;
 const SIOCSIFFLAGS: u64 = 0x8914;
 const SIOCSIFADDR: u64 = 0x8916;
+const SIOCSIFNETMASK: u64 = 0x891c;
 const SIOCGIFMTU: u64 = 0x8921;
 const SIOCSIFMTU: u64 = 0x8922;
 const SIOCSIFHWADDR: u64 = 0x8924;
-const SIOCSIFNETMASK: u64 = 0x891c;
+const SIOCGIFHWADDR: u64 = 0x8927;
+const SIOCGIFINDEX: u64 = 0x8933;
 
 // See include/uapi/linux/vfio.h in the kernel code.
 const VFIO_GET_API_VERSION: u64 = 0x3b64;
@@ -148,12 +150,11 @@ mod kvm {
     pub const KVM_NMI: u64 = 0xae9a;
 }
 
-#[cfg(feature = "kvm")]
-use kvm::*;
-
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
 use hypervisor::mshv::mshv_ioctls::*;
+#[cfg(feature = "kvm")]
+use kvm::*;
 
 #[cfg(feature = "mshv")]
 fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, BackendError> {
@@ -166,6 +167,12 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             MSHV_INITIALIZE_PARTITION()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_GUEST_MEMORY())?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_GET_HOST_PARTITION_PROPERTY()
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_CREATE_VP())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IRQFD())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IOEVENTFD())?],
@@ -173,7 +180,9 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_REGISTERS())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_REGISTERS())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_RUN_VP())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_STATE())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_STATE())?],
         and![Cond::new(
             1,
@@ -194,6 +203,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             MSHV_GET_GPAP_ACCESS_BITMAP()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_VP_TRANSLATE_GVA())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(
             1,
             ArgLen::Dword,
@@ -294,6 +304,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFMTU)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFINDEX)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFHWADDR)?],
@@ -433,19 +444,27 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
     const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
     const KVM_SET_GUEST_DEBUG: u64 = 0x4208_ae9b;
+    const KVM_ARM_VCPU_FINALIZE: u64 = 0x4004_aec2;
 
     let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
     let mut arch_rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_PREFERRED_TARGET,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_VCPU_INIT,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GUEST_DEBUG,)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_VCPU_FINALIZE,)?],
     ];
     arch_rules.extend(common_rules);
 
     Ok(arch_rules)
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+#[cfg(all(target_arch = "riscv64", feature = "kvm"))]
+fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError> {
+    let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
+    Ok(common_rules)
+}
+
+#[cfg(feature = "mshv")]
 fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendError> {
     create_vmm_ioctl_seccomp_rule_common(HypervisorType::Mshv)
 }
@@ -655,6 +674,7 @@ fn vmm_thread_rules(
             or![
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
+                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
             ],
         ),
         (libc::SYS_socketpair, vec![]),
@@ -743,6 +763,7 @@ fn create_vcpu_ioctl_seccomp_rule(
     let mut rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
@@ -823,6 +844,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_create1, vec![]),

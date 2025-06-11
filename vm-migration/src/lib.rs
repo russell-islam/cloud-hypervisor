@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::protocol::MemoryRangeTable;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::protocol::MemoryRangeTable;
 
 pub mod protocol;
 
@@ -47,6 +48,9 @@ pub enum MigratableError {
 
     #[error("Failed to complete migration for migratable component: {0}")]
     CompleteMigration(#[source] anyhow::Error),
+
+    #[error("Failed to release a disk lock before the migration: {0}")]
+    UnlockError(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.

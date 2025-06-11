@@ -8,17 +8,16 @@ extern crate test_infra;
 
 mod performance_tests;
 
+use std::process::Command;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
+use std::time::Duration;
+use std::{env, fmt, thread};
+
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    env, fmt,
-    process::Command,
-    sync::{mpsc::channel, Arc},
-    thread,
-    time::Duration,
-};
-use test_infra::*;
+use test_infra::{is_guest_vm_type_cvm, FioOps};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

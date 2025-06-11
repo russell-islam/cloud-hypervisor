@@ -14,20 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    seccomp_filters::Thread, thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper,
-    EpollHelperError, EpollHelperHandler, GuestMemoryMmap, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
-};
-use anyhow::anyhow;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{atomic::AtomicBool, Arc, Barrier};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier};
+
+use anyhow::anyhow;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
@@ -37,6 +33,14 @@ use vm_memory::{
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+};
 
 const QUEUE_SIZE: u16 = 128;
 const REPORTING_QUEUE_SIZE: u16 = 32;
@@ -61,27 +65,27 @@ const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Guest gave us bad memory addresses.: {0}")]
-    GuestMemory(GuestMemoryError),
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
     #[error("Fallocate fail.: {0}")]
-    FallocateFail(std::io::Error),
+    FallocateFail(#[source] std::io::Error),
     #[error("Madvise fail.: {0}")]
-    MadviseFail(std::io::Error),
+    MadviseFail(#[source] std::io::Error),
     #[error("Failed to EventFd write.: {0}")]
-    EventFdWriteFail(std::io::Error),
+    EventFdWriteFail(#[source] std::io::Error),
     #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
     #[error("Fail tp signal: {0}")]
-    FailedSignal(io::Error),
+    FailedSignal(#[source] io::Error),
     #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
     #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue: {0}")]
-    QueueIterator(virtio_queue::Error),
+    QueueIterator(#[source] virtio_queue::Error),
 }
 
 // Got from include/uapi/linux/virtio_balloon.h

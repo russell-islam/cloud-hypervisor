@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -8,23 +10,6 @@
 //
 //
 
-#[cfg(target_arch = "aarch64")]
-use crate::aarch64::gic::KvmGicV3Its;
-#[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState,
-};
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::{Vgic, VgicConfig};
-use crate::cpu;
-use crate::hypervisor;
-use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::HypervisorType;
-#[cfg(target_arch = "aarch64")]
-use crate::{arm64_core_reg_id, offset_of};
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
@@ -36,25 +21,35 @@ use std::os::unix::io::RawFd;
 use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+
+use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use vmm_sys_util::eventfd::EventFd;
+
+#[cfg(target_arch = "aarch64")]
+use crate::aarch64::gic::KvmGicV3Its;
+#[cfg(target_arch = "aarch64")]
+pub use crate::aarch64::{check_required_kvm_extensions, is_system_register, VcpuKvmState};
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "riscv64")]
+use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
+#[cfg(target_arch = "riscv64")]
+use crate::riscv64::aia::KvmAiaImsics;
+#[cfg(target_arch = "riscv64")]
+pub use crate::riscv64::{
+    aia::AiaImsicsState as AiaState, check_required_kvm_extensions, is_non_core_register,
+    VcpuKvmState,
+};
+use crate::vm::{self, InterruptSourceConfig, VmOps};
+#[cfg(target_arch = "aarch64")]
+use crate::{arm64_core_reg_id, offset_of};
+use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
+#[cfg(target_arch = "riscv64")]
+use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters, XsaveState,
-    NUM_IOAPIC_PINS,
-};
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-};
-#[cfg(target_arch = "aarch64")]
-use aarch64::{RegList, Register, StandardRegisters};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
@@ -64,13 +59,35 @@ use kvm_bindings::{
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
+
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
+use crate::{
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion,
+    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
-pub use kvm_bindings;
+// riscv64 dependencies
+#[cfg(target_arch = "riscv64")]
+pub mod riscv64;
+#[cfg(target_arch = "aarch64")]
+use std::mem;
+
+///
+/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
+///
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
 pub use kvm_bindings::{
-    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
+    kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
+    kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
     KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
     KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
@@ -81,30 +98,27 @@ use kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
+#[cfg(target_arch = "riscv64")]
+use kvm_bindings::{kvm_riscv_core, user_regs_struct, KVM_REG_RISCV_CORE};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
-pub use kvm_ioctls;
-pub use kvm_ioctls::{Cap, Kvm};
-#[cfg(target_arch = "aarch64")]
-use std::mem;
+pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
-///
-/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
-///
-pub use {
-    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::VcpuExit,
-};
+pub use {kvm_bindings, kvm_ioctls};
+
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::RegList;
 
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::ioctl_io_nr;
-
 #[cfg(all(not(feature = "tdx"), target_arch = "x86_64"))]
 use vmm_sys_util::ioctl_ioc_nr;
 
@@ -337,6 +351,99 @@ impl From<ClockData> for kvm_clock_data {
     }
 }
 
+impl From<kvm_bindings::kvm_one_reg> for crate::Register {
+    fn from(s: kvm_bindings::kvm_one_reg) -> Self {
+        crate::Register::Kvm(s)
+    }
+}
+
+impl From<crate::Register> for kvm_bindings::kvm_one_reg {
+    fn from(e: crate::Register) -> Self {
+        match e {
+            crate::Register::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("Register is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<kvm_bindings::kvm_vcpu_init> for crate::VcpuInit {
+    fn from(s: kvm_bindings::kvm_vcpu_init) -> Self {
+        crate::VcpuInit::Kvm(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for kvm_bindings::kvm_vcpu_init {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<kvm_bindings::RegList> for crate::RegList {
+    fn from(s: kvm_bindings::RegList) -> Self {
+        crate::RegList::Kvm(s)
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<crate::RegList> for kvm_bindings::RegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl From<kvm_bindings::kvm_regs> for crate::StandardRegisters {
+    fn from(s: kvm_bindings::kvm_regs) -> Self {
+        crate::StandardRegisters::Kvm(s)
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl From<crate::StandardRegisters> for kvm_bindings::kvm_regs {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+impl From<kvm_bindings::kvm_riscv_core> for crate::StandardRegisters {
+    fn from(s: kvm_bindings::kvm_riscv_core) -> Self {
+        crate::StandardRegisters::Kvm(s)
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+impl From<crate::StandardRegisters> for kvm_bindings::kvm_riscv_core {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
 impl From<kvm_irq_routing_entry> for IrqRoutingEntry {
     fn from(s: kvm_irq_routing_entry) -> Self {
         IrqRoutingEntry::Kvm(s)
@@ -419,6 +526,7 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetTssAddress(e.into()))
     }
 
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     ///
     /// Creates an in-kernel interrupt controller.
     ///
@@ -477,6 +585,16 @@ impl vm::Vm for KvmVm {
         let gic_device = KvmGicV3Its::new(self, config)
             .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
         Ok(Arc::new(Mutex::new(gic_device)))
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Creates a virtual AIA device.
+    ///
+    fn create_vaia(&self, config: VaiaConfig) -> vm::Result<Arc<Mutex<dyn Vaia>>> {
+        let aia_device = KvmAiaImsics::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVaia(anyhow!("Vaia error {:?}", e)))?;
+        Ok(Arc::new(Mutex::new(aia_device)))
     }
 
     ///
@@ -689,10 +807,13 @@ impl vm::Vm for KvmVm {
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     ///
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+    fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> vm::Result<()> {
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
-            .get_preferred_target(kvi)
-            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))
+            .get_preferred_target(&mut kvm_kvi)
+            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))?;
+        *kvi = kvm_kvi.into();
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1015,6 +1136,31 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         HypervisorType::Kvm
     }
 
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use hypervisor::kvm::KvmHypervisor;
+    /// use hypervisor::kvm::KvmVm;
+    /// let hypervisor = KvmHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm_with_type_and_memory(0).unwrap();
+    /// ```
+    fn create_vm_with_type_and_memory(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        self.create_vm_with_type(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            _mem_size,
+        )
+        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))
+    }
+
     /// Create a KVM vm object of a specific VM type and return the object as Vm trait object
     ///
     /// # Examples
@@ -1072,7 +1218,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }))
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
@@ -1162,6 +1308,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         Ok(data)
     }
 
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     ///
     /// Get the number of supported hardware breakpoints
     ///
@@ -1205,6 +1352,19 @@ pub struct KvmVcpu {
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    fn create_standard_regs(&self) -> StandardRegisters {
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        {
+            kvm_bindings::kvm_regs::default().into()
+        }
+        #[cfg(target_arch = "riscv64")]
+        {
+            kvm_bindings::kvm_riscv_core::default().into()
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.
@@ -1226,7 +1386,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
-        let mut state: StandardRegisters = kvm_regs::default();
+        let mut state = kvm_regs::default();
         let mut off = offset_of!(user_pt_regs, regs);
         // There are 31 user_pt_regs:
         // https://elixir.free-electrons.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
@@ -1238,7 +1398,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .lock()
                 .unwrap()
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.regs.regs[i] = u64::from_le_bytes(bytes);
             off += std::mem::size_of::<u64>();
         }
@@ -1251,7 +1411,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.regs.sp = u64::from_le_bytes(bytes);
 
         // Second one, the program counter.
@@ -1261,7 +1421,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.regs.pc = u64::from_le_bytes(bytes);
 
         // Next is the processor state.
@@ -1271,7 +1431,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.regs.pstate = u64::from_le_bytes(bytes);
 
         // The stack pointer associated with EL1
@@ -1281,7 +1441,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.sp_el1 = u64::from_le_bytes(bytes);
 
         // Exception Link Register for EL1, when taking an exception to EL1, this register
@@ -1292,7 +1452,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.elr_el1 = u64::from_le_bytes(bytes);
 
         // Saved Program Status Registers, there are 5 of them used in the kernel.
@@ -1303,7 +1463,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .lock()
                 .unwrap()
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U64, off), &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.spsr[i] = u64::from_le_bytes(bytes);
             off += std::mem::size_of::<u64>();
         }
@@ -1317,7 +1477,7 @@ impl cpu::Vcpu for KvmVcpu {
                 .lock()
                 .unwrap()
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
             state.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
             off += mem::size_of::<u128>();
         }
@@ -1329,7 +1489,7 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.fp_regs.fpsr = u32::from_le_bytes(bytes);
 
         // Floating-point Control Register
@@ -1339,9 +1499,80 @@ impl cpu::Vcpu for KvmVcpu {
             .lock()
             .unwrap()
             .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U32, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
         state.fp_regs.fpcr = u32::from_le_bytes(bytes);
-        Ok(state)
+        Ok(state.into())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Returns the RISC-V vCPU core registers.
+    /// The `KVM_GET_REGS` ioctl is not available on RISC-V 64-bit,
+    /// `KVM_GET_ONE_REG` is used to get registers one by one.
+    ///
+    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+        let mut state = kvm_riscv_core::default();
+
+        /// Macro used to extract RISC-V register data from KVM Vcpu according
+        /// to `$reg_name` provided to `state`.
+        macro_rules! riscv64_get_one_reg_from_vcpu {
+            (mode) => {
+                let off = offset_of!(kvm_riscv_core, mode);
+                let mut bytes = [0_u8; 8];
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+                state.mode = u64::from_le_bytes(bytes);
+            };
+            ($reg_name:ident) => {
+                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                let mut bytes = [0_u8; 8];
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+                state.regs.$reg_name = u64::from_le_bytes(bytes);
+            };
+        }
+
+        riscv64_get_one_reg_from_vcpu!(pc);
+        riscv64_get_one_reg_from_vcpu!(ra);
+        riscv64_get_one_reg_from_vcpu!(sp);
+        riscv64_get_one_reg_from_vcpu!(gp);
+        riscv64_get_one_reg_from_vcpu!(tp);
+        riscv64_get_one_reg_from_vcpu!(t0);
+        riscv64_get_one_reg_from_vcpu!(t1);
+        riscv64_get_one_reg_from_vcpu!(t2);
+        riscv64_get_one_reg_from_vcpu!(s0);
+        riscv64_get_one_reg_from_vcpu!(s1);
+        riscv64_get_one_reg_from_vcpu!(a0);
+        riscv64_get_one_reg_from_vcpu!(a1);
+        riscv64_get_one_reg_from_vcpu!(a2);
+        riscv64_get_one_reg_from_vcpu!(a3);
+        riscv64_get_one_reg_from_vcpu!(a4);
+        riscv64_get_one_reg_from_vcpu!(a5);
+        riscv64_get_one_reg_from_vcpu!(a6);
+        riscv64_get_one_reg_from_vcpu!(a7);
+        riscv64_get_one_reg_from_vcpu!(s2);
+        riscv64_get_one_reg_from_vcpu!(s3);
+        riscv64_get_one_reg_from_vcpu!(s4);
+        riscv64_get_one_reg_from_vcpu!(s5);
+        riscv64_get_one_reg_from_vcpu!(s6);
+        riscv64_get_one_reg_from_vcpu!(s7);
+        riscv64_get_one_reg_from_vcpu!(s8);
+        riscv64_get_one_reg_from_vcpu!(s9);
+        riscv64_get_one_reg_from_vcpu!(s10);
+        riscv64_get_one_reg_from_vcpu!(s11);
+        riscv64_get_one_reg_from_vcpu!(t3);
+        riscv64_get_one_reg_from_vcpu!(t4);
+        riscv64_get_one_reg_from_vcpu!(t5);
+        riscv64_get_one_reg_from_vcpu!(t6);
+        riscv64_get_one_reg_from_vcpu!(mode);
+
+        Ok(state.into())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1366,6 +1597,7 @@ impl cpu::Vcpu for KvmVcpu {
     fn set_regs(&self, state: &StandardRegisters) -> cpu::Result<()> {
         // The function follows the exact identical order from `state`. Look there
         // for some additional info on registers.
+        let kvm_regs_state: kvm_regs = (*state).into();
         let mut off = offset_of!(user_pt_regs, regs);
         for i in 0..31 {
             self.fd
@@ -1373,9 +1605,9 @@ impl cpu::Vcpu for KvmVcpu {
                 .unwrap()
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                    &state.regs.regs[i].to_le_bytes(),
+                    &kvm_regs_state.regs.regs[i].to_le_bytes(),
                 )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += std::mem::size_of::<u64>();
         }
 
@@ -1385,9 +1617,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                &state.regs.sp.to_le_bytes(),
+                &kvm_regs_state.regs.sp.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let off = offset_of!(user_pt_regs, pc);
         self.fd
@@ -1395,9 +1627,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                &state.regs.pc.to_le_bytes(),
+                &kvm_regs_state.regs.pc.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let off = offset_of!(user_pt_regs, pstate);
         self.fd
@@ -1405,9 +1637,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                &state.regs.pstate.to_le_bytes(),
+                &kvm_regs_state.regs.pstate.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let off = offset_of!(kvm_regs, sp_el1);
         self.fd
@@ -1415,9 +1647,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                &state.sp_el1.to_le_bytes(),
+                &kvm_regs_state.sp_el1.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let off = offset_of!(kvm_regs, elr_el1);
         self.fd
@@ -1425,9 +1657,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                &state.elr_el1.to_le_bytes(),
+                &kvm_regs_state.elr_el1.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let mut off = offset_of!(kvm_regs, spsr);
         for i in 0..KVM_NR_SPSR as usize {
@@ -1436,9 +1668,9 @@ impl cpu::Vcpu for KvmVcpu {
                 .unwrap()
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, off),
-                    &state.spsr[i].to_le_bytes(),
+                    &kvm_regs_state.spsr[i].to_le_bytes(),
                 )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += std::mem::size_of::<u64>();
         }
 
@@ -1449,9 +1681,9 @@ impl cpu::Vcpu for KvmVcpu {
                 .unwrap()
                 .set_one_reg(
                     arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    &state.fp_regs.vregs[i].to_le_bytes(),
+                    &kvm_regs_state.fp_regs.vregs[i].to_le_bytes(),
                 )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
             off += mem::size_of::<u128>();
         }
 
@@ -1461,9 +1693,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                &state.fp_regs.fpsr.to_le_bytes(),
+                &kvm_regs_state.fp_regs.fpsr.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         let off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, fpcr);
         self.fd
@@ -1471,9 +1703,84 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U32, off),
-                &state.fp_regs.fpcr.to_le_bytes(),
+                &kvm_regs_state.fp_regs.fpcr.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Sets the RISC-V vCPU core registers.
+    /// The `KVM_SET_REGS` ioctl is not available on RISC-V 64-bit,
+    /// `KVM_SET_ONE_REG` is used to set registers one by one.
+    ///
+    fn set_regs(&self, state: &StandardRegisters) -> cpu::Result<()> {
+        // The function follows the exact identical order from `state`. Look there
+        // for some additional info on registers.
+        let kvm_regs_state: kvm_riscv_core = (*state).into();
+
+        /// Macro used to set value of specific RISC-V `$reg_name` stored in
+        /// `state` to KVM Vcpu.
+        macro_rules! riscv64_set_one_reg_to_vcpu {
+            (mode) => {
+                let off = offset_of!(kvm_riscv_core, mode);
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .set_one_reg(
+                        riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                        &kvm_regs_state.mode.to_le_bytes(),
+                    )
+                    .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+            };
+            ($reg_name:ident) => {
+                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .set_one_reg(
+                        riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                        &kvm_regs_state.regs.$reg_name.to_le_bytes(),
+                    )
+                    .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+            };
+        }
+
+        riscv64_set_one_reg_to_vcpu!(pc);
+        riscv64_set_one_reg_to_vcpu!(ra);
+        riscv64_set_one_reg_to_vcpu!(sp);
+        riscv64_set_one_reg_to_vcpu!(gp);
+        riscv64_set_one_reg_to_vcpu!(tp);
+        riscv64_set_one_reg_to_vcpu!(t0);
+        riscv64_set_one_reg_to_vcpu!(t1);
+        riscv64_set_one_reg_to_vcpu!(t2);
+        riscv64_set_one_reg_to_vcpu!(s0);
+        riscv64_set_one_reg_to_vcpu!(s1);
+        riscv64_set_one_reg_to_vcpu!(a0);
+        riscv64_set_one_reg_to_vcpu!(a1);
+        riscv64_set_one_reg_to_vcpu!(a2);
+        riscv64_set_one_reg_to_vcpu!(a3);
+        riscv64_set_one_reg_to_vcpu!(a4);
+        riscv64_set_one_reg_to_vcpu!(a5);
+        riscv64_set_one_reg_to_vcpu!(a6);
+        riscv64_set_one_reg_to_vcpu!(a7);
+        riscv64_set_one_reg_to_vcpu!(s2);
+        riscv64_set_one_reg_to_vcpu!(s3);
+        riscv64_set_one_reg_to_vcpu!(s4);
+        riscv64_set_one_reg_to_vcpu!(s5);
+        riscv64_set_one_reg_to_vcpu!(s6);
+        riscv64_set_one_reg_to_vcpu!(s7);
+        riscv64_set_one_reg_to_vcpu!(s8);
+        riscv64_set_one_reg_to_vcpu!(s9);
+        riscv64_set_one_reg_to_vcpu!(s10);
+        riscv64_set_one_reg_to_vcpu!(s11);
+        riscv64_set_one_reg_to_vcpu!(t3);
+        riscv64_set_one_reg_to_vcpu!(t4);
+        riscv64_set_one_reg_to_vcpu!(t5);
+        riscv64_set_one_reg_to_vcpu!(t6);
+        riscv64_set_one_reg_to_vcpu!(mode);
+
         Ok(())
     }
 
@@ -1806,6 +2113,7 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
@@ -1863,25 +2171,96 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        kvm_bindings::KVM_ARM_VCPU_SVE as i32
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        vm: &Arc<dyn crate::Vm>,
+        kvi: &mut crate::VcpuInit,
+        id: u8,
+    ) -> cpu::Result<()> {
+        use std::arch::is_aarch64_feature_detected;
+        #[allow(clippy::nonminimal_bool)]
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
+
+        // We already checked that the capability is supported.
+        kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        if vm
+            .as_any()
+            .downcast_ref::<crate::kvm::KvmVm>()
+            .unwrap()
+            .check_extension(Cap::ArmPmuV3)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
+        }
+
+        if sve_supported
+            && vm
+                .as_any()
+                .downcast_ref::<crate::kvm::KvmVm>()
+                .unwrap()
+                .check_extension(Cap::ArmSve)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
+        // Non-boot cpus are powered off initially.
+        if id > 0 {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
+        }
+
+        *kvi = kvm_kvi.into();
+
+        Ok(())
+    }
+
+    ///
+    /// Return VcpuInit with default value set
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        kvm_bindings::kvm_vcpu_init::default().into()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_init(&self, kvi: &crate::VcpuInit) -> cpu::Result<()> {
+        let kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
             .lock()
             .unwrap()
-            .vcpu_init(kvi)
+            .vcpu_init(&kvm_kvi)
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, feature: i32) -> cpu::Result<()> {
+        self.fd
+            .lock()
+            .unwrap()
+            .vcpu_finalize(&feature)
+            .map_err(|e| cpu::HypervisorCpuError::VcpuFinalize(e.into()))
+    }
+
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+        let mut kvm_reg_list: kvm_bindings::RegList = reg_list.clone().into();
         self.fd
             .lock()
             .unwrap()
-            .get_reg_list(reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
+            .get_reg_list(&mut kvm_reg_list)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+        *reg_list = kvm_reg_list.into();
+        Ok(())
     }
 
     ///
@@ -1920,22 +2299,18 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     ///
+    /// Gets the value of a non-core register
+    ///
+    #[cfg(target_arch = "riscv64")]
+    fn get_non_core_reg(&self, _non_core_reg: u32) -> cpu::Result<u64> {
+        unimplemented!()
+    }
+
+    ///
     /// Configure core registers for a given CPU.
     ///
     #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
-        #[allow(non_upper_case_globals)]
-        // PSR (Processor State Register) bits.
-        // Taken from arch/arm64/include/uapi/asm/ptrace.h.
-        const PSR_MODE_EL1h: u64 = 0x0000_0005;
-        const PSR_F_BIT: u64 = 0x0000_0040;
-        const PSR_I_BIT: u64 = 0x0000_0080;
-        const PSR_A_BIT: u64 = 0x0000_0100;
-        const PSR_D_BIT: u64 = 0x0000_0200;
-        // Taken from arch/arm64/kvm/inject_fault.c.
-        const PSTATE_FAULT_BITS_64: u64 =
-            PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
-
         let kreg_off = offset_of!(kvm_regs, regs);
 
         // Get the register index of the PSTATE (Processor State) register.
@@ -1945,9 +2320,9 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
-                &PSTATE_FAULT_BITS_64.to_le_bytes(),
+                &regs::PSTATE_FAULT_BITS_64.to_le_bytes(),
             )
-            .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+            .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
         // Other vCPUs are powered off initially awaiting PSCI wakeup.
         if cpu_id == 0 {
@@ -1960,7 +2335,7 @@ impl cpu::Vcpu for KvmVcpu {
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, pc),
                     &boot_ip.to_le_bytes(),
                 )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
             // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
             // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
@@ -1974,8 +2349,51 @@ impl cpu::Vcpu for KvmVcpu {
                     arm64_core_reg_id!(KVM_REG_SIZE_U64, regs0),
                     &fdt_start.to_le_bytes(),
                 )
-                .map_err(|e| cpu::HypervisorCpuError::SetCoreRegister(e.into()))?;
+                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
         }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Configure registers for a given RISC-V CPU.
+    ///
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        // Setting the A0 () to the hartid of this CPU.
+        let a0 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, a0),
+                &u64::from(cpu_id).to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        // Setting the PC (Processor Counter) to the current program address (kernel address).
+        let pc = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, pc),
+                &boot_ip.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
+        // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
+        // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
+        let a1 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, a1),
+                &fdt_start.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
         Ok(())
     }
 
@@ -2113,13 +2531,13 @@ impl cpu::Vcpu for KvmVcpu {
             ..Default::default()
         };
         // Get core registers
-        state.core_regs = self.get_regs()?;
+        state.core_regs = self.get_regs()?.into();
 
         // Get systerm register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For ArmV8 there are around 500 registers.
-        let mut sys_regs: Vec<Register> = Vec::new();
-        let mut reg_list = RegList::new(500).unwrap();
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        let mut reg_list = kvm_bindings::RegList::new(500).unwrap();
         self.fd
             .lock()
             .unwrap()
@@ -2152,6 +2570,66 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         state.sys_regs = sys_regs;
+
+        Ok(state.into())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Get the current RISC-V 64-bit CPU state
+    ///
+    fn state(&self) -> cpu::Result<CpuState> {
+        let mut state = VcpuKvmState {
+            mp_state: self.get_mp_state()?.into(),
+            ..Default::default()
+        };
+        // Get core registers
+        state.core_regs = self.get_regs()?.into();
+
+        // Get non-core register
+        // Call KVM_GET_REG_LIST to get all registers available to the guest.
+        // For RISC-V 64-bit there are around 200 registers.
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        let mut reg_list = kvm_bindings::RegList::new(200).unwrap();
+        self.fd
+            .lock()
+            .unwrap()
+            .get_reg_list(&mut reg_list)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+
+        // At this point reg_list should contain:
+        // - core registers
+        // - config registers
+        // - timer registers
+        // - control and status registers
+        // - AIA control and status registers
+        // - smstateen control and status registers
+        // - sbi_sta control and status registers.
+        //
+        // The register list contains the number of registers and their ids. We
+        // will be needing to call KVM_GET_ONE_REG on each id in order to save
+        // all of them. We carve out from the list the core registers which are
+        // represented in the kernel by `kvm_riscv_core` structure and for which
+        // we can calculate the id based on the offset in the structure.
+        reg_list.retain(|regid| is_non_core_register(*regid));
+
+        // Now, for the rest of the registers left in the previously fetched
+        // register list, we are simply calling KVM_GET_ONE_REG.
+        let indices = reg_list.as_slice();
+        for index in indices.iter() {
+            let mut bytes = [0_u8; 8];
+            self.fd
+                .lock()
+                .unwrap()
+                .get_one_reg(*index, &mut bytes)
+                .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
+            sys_regs.push(kvm_bindings::kvm_one_reg {
+                id: *index,
+                addr: u64::from_le_bytes(bytes),
+            });
+        }
+
+        state.non_core_regs = sys_regs;
 
         Ok(state.into())
     }
@@ -2253,9 +2731,31 @@ impl cpu::Vcpu for KvmVcpu {
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
         // Set core registers
-        self.set_regs(&state.core_regs)?;
+        self.set_regs(&state.core_regs.into())?;
         // Set system registers
         for reg in &state.sys_regs {
+            self.fd
+                .lock()
+                .unwrap()
+                .set_one_reg(reg.id, &reg.addr.to_le_bytes())
+                .map_err(|e| cpu::HypervisorCpuError::SetSysRegister(e.into()))?;
+        }
+
+        self.set_mp_state(state.mp_state.into())?;
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Restore the previously saved RISC-V 64-bit CPU state
+    ///
+    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        let state: VcpuKvmState = state.clone().into();
+        // Set core registers
+        self.set_regs(&state.core_regs.into())?;
+        // Set system registers
+        for reg in &state.non_core_regs {
             self.fd
                 .lock()
                 .unwrap()
@@ -2531,5 +3031,60 @@ impl KvmVcpu {
             .unwrap()
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_arch = "riscv64")]
+    fn test_get_and_set_regs() {
+        use super::*;
+
+        let kvm = KvmHypervisor::new().unwrap();
+        let hypervisor = Arc::new(kvm);
+        let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+        let vcpu0 = vm.create_vcpu(0, None).unwrap();
+
+        let core_regs = StandardRegisters::from(kvm_riscv_core {
+            regs: user_regs_struct {
+                pc: 0x00,
+                ra: 0x01,
+                sp: 0x02,
+                gp: 0x03,
+                tp: 0x04,
+                t0: 0x05,
+                t1: 0x06,
+                t2: 0x07,
+                s0: 0x08,
+                s1: 0x09,
+                a0: 0x0a,
+                a1: 0x0b,
+                a2: 0x0c,
+                a3: 0x0d,
+                a4: 0x0e,
+                a5: 0x0f,
+                a6: 0x10,
+                a7: 0x11,
+                s2: 0x12,
+                s3: 0x13,
+                s4: 0x14,
+                s5: 0x15,
+                s6: 0x16,
+                s7: 0x17,
+                s8: 0x18,
+                s9: 0x19,
+                s10: 0x1a,
+                s11: 0x1b,
+                t3: 0x1c,
+                t4: 0x1d,
+                t5: 0x1e,
+                t6: 0x1f,
+            },
+            mode: 0x00,
+        });
+
+        vcpu0.set_regs(&core_regs).unwrap();
+        assert_eq!(vcpu0.get_regs().unwrap(), core_regs);
     }
 }

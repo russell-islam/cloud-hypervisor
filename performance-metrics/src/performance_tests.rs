@@ -5,17 +5,15 @@
 
 // Performance tests
 
-use crate::{mean, PerformanceTestControl};
-use regex::Regex;
-use std::fs;
+use crate::Command;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::string::String;
-use std::thread;
 use std::time::Duration;
-use test_infra::Error as InfraError;
-use test_infra::*;
+use std::{fs, thread};
+use test_infra::{Error as InfraError, *};
+use thiserror::Error;
+
+use crate::{mean, PerformanceTestControl};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -23,10 +21,13 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
+    #[error("boot time could not be parsed")]
     BootTimeParse,
-    Infra(InfraError),
+    #[error("infrastructure failure: {0}")]
+    Infra(#[source] InfraError),
+    #[error("restore time could not be parsed")]
     RestoreTimeParse,
 }
 
@@ -83,7 +84,7 @@ fn direct_kernel_boot_path() -> PathBuf {
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = std::process::Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -695,7 +696,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64>
         assert!(remote_command(
             &api_socket_source,
             "snapshot",
-            Some(format!("file://{}", snapshot_dir).as_str()),
+            Some(format!("file://{snapshot_dir}").as_str()),
         ));
 
         let _ = child.kill();
@@ -706,9 +707,9 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64>
         let c = cmd
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()]);
+            .args(["--event-monitor", format!("path={event_path}").as_str()]);
 
         measure_restore_time(c, event_path.as_str(), control.test_timeout).unwrap()
     });
