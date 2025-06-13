@@ -419,6 +419,7 @@ impl VsockPacket {
 
 #[cfg(test)]
 #[allow(clippy::undocumented_unsafe_blocks)]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::QueueOwnedT;
@@ -617,6 +618,8 @@ mod tests {
                 .next()
                 .unwrap(),
             None,
+            #[cfg(feature = "sev_snp")]
+            None,
         )
         .unwrap();
 
@@ -707,6 +710,8 @@ mod tests {
                 .unwrap()
                 .next()
                 .unwrap(),
+            None,
+            #[cfg(feature = "sev_snp")]
             None,
         )
         .unwrap();

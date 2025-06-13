@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, Read, Seek, Write};
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::string::String;
@@ -29,7 +30,8 @@ use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
-const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+const MAX_NUM_PCI_SEGMENTS: u16 = 10;
+const CVM_TIMEOUT: i32 = 140;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
@@ -156,11 +158,23 @@ fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
 
     // Create the VM first
     let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = if is_guest_vm_type_cvm() {
+        guest.api_create_body(
+            cpu_count,
+            direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            true,
+            generate_host_data().as_str(),
+        )
+    } else {
+        guest.api_create_body(
+            cpu_count,
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            false,
+            "",
+        )
+    };
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
@@ -170,12 +184,22 @@ fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
 
     // Then boot it
     assert!(target_api.remote_command("boot", None));
-    thread::sleep(std::time::Duration::new(20, 0));
+    if is_guest_vm_type_cvm() {
+        // wait until guest boot, cvm guest take little long to boot
+        // This way we will wait for 120 second (default timeout)
+        guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+    } else {
+        thread::sleep(std::time::Duration::new(20, 0));
+    }
 
     let r = std::panic::catch_unwind(|| {
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        if is_guest_vm_type_cvm() {
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+        } else {
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        }
     });
 
     kill_child(&mut child);
@@ -201,11 +225,23 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
 
     // Create the VM first
     let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = if is_guest_vm_type_cvm() {
+        guest.api_create_body(
+            cpu_count,
+            direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            true,
+            generate_host_data().as_str(),
+        )
+    } else {
+        guest.api_create_body(
+            cpu_count,
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            false,
+            "",
+        )
+    };
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
@@ -221,7 +257,11 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        if is_guest_vm_type_cvm() {
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+        } else {
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        }
 
         // Sync and shutdown without powering off to prevent filesystem
         // corruption.
@@ -241,7 +281,11 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        if is_guest_vm_type_cvm() {
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+        } else {
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        }
     });
 
     kill_child(&mut child);
@@ -267,11 +311,24 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
 
     // Create the VM first
     let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = if is_guest_vm_type_cvm() {
+        guest.api_create_body(
+            cpu_count,
+            direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            true,
+            generate_host_data().as_str(),
+        )
+    } else {
+        guest.api_create_body(
+            cpu_count,
+            direct_kernel_boot_path().to_str().unwrap(),
+            DIRECT_KERNEL_BOOT_CMDLINE,
+            false,
+            "",
+        )
+    };
+
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
@@ -286,7 +343,13 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        if is_guest_vm_type_cvm() {
+            // CVM guest will have little less memory,
+            // we will assert based on guest vm type
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+        } else {
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        }
 
         // Sync and shutdown without powering off to prevent filesystem
         // corruption.
@@ -308,7 +371,13 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        if is_guest_vm_type_cvm() {
+            // CVM guest will have little less memory,
+            // we will assert based on guest vm type
+            assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+        } else {
+            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        }
     });
 
     kill_child(&mut child);
@@ -339,6 +408,8 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
         cpu_count,
         direct_kernel_boot_path().to_str().unwrap(),
         DIRECT_KERNEL_BOOT_CMDLINE,
+        false,
+        "",
     );
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
@@ -538,6 +609,29 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path.push("Image");
 
     kernel_path
+}
+
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
+
+    // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+    // Please add directory as volume to docker container as /igvm_files
+    // Refer ./scripts/dev_cli.sh for this
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
+    } else {
+        PathBuf::from("")
+    }
 }
 
 fn edk2_path() -> PathBuf {
@@ -979,24 +1073,33 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
         kernel_path = fw_path.as_str();
     }
 
-    let mut child = GuestCommand::new(&guest)
-        .args([
-            "--cpus",
-            &format!(
-                "boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"
-            ),
-        ])
-        .args(["--memory", "size=512M"])
-        .args(["--kernel", kernel_path])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-        .default_disks()
-        .default_net()
-        .capture_output()
-        .spawn()
-        .unwrap();
+    let mut cmd = GuestCommand::new(&guest);
+    cmd.args([
+        "--cpus",
+        &format!("boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"),
+    ])
+    .args(["--memory", "size=512M"])
+    .default_disks()
+    .default_net()
+    .capture_output();
+
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel_path,
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
         assert_eq!(
             guest.get_cpu_count().unwrap_or_default(),
             u32::from(total_vcpus)
@@ -1167,17 +1270,28 @@ fn _test_power_button(acpi: bool) {
 
     cmd.args(["--cpus", "boot=1"])
         .args(["--memory", "size=512M"])
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .capture_output()
         .default_disks()
         .default_net()
         .args(["--api-socket", &api_socket]);
 
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel_path.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
     let child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
         assert!(remote_command(&api_socket, "power-button", None));
     });
 
@@ -1871,8 +1985,6 @@ fn _test_virtio_vsock(hotplug: bool) {
     cmd.args(["--api-socket", &api_socket]);
     cmd.args(["--cpus", "boot=1"]);
     cmd.args(["--memory", "size=512M"]);
-    cmd.args(["--kernel", kernel_path.to_str().unwrap()]);
-    cmd.args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
     cmd.default_disks();
     cmd.default_net();
 
@@ -1880,10 +1992,22 @@ fn _test_virtio_vsock(hotplug: bool) {
         cmd.args(["--vsock", format!("cid=3,socket={socket}").as_str()]);
     }
 
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    cmd = extend_guest_cmd(
+        cmd,
+        kernel_path.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
     let mut child = cmd.capture_output().spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         if hotplug {
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -1941,20 +2065,31 @@ fn test_memory_mergeable(mergeable: bool) {
 
     let focal1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(focal1));
-    let mut child1 = GuestCommand::new(&guest1)
-        .args(["--cpus", "boot=1"])
+    let mut cmd1 = GuestCommand::new(&guest1);
+    cmd1.args(["--cpus", "boot=1"])
         .args(["--memory", format!("size=512M,{memory_param}").as_str()])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", guest1.default_net_string().as_str()])
         .args(["--serial", "tty", "--console", "off"])
-        .capture_output()
-        .spawn()
-        .unwrap();
+        .capture_output();
 
+    let igvm = direct_igvm_boot_path(Some("hvc0"));
+    let kernel = direct_kernel_boot_path();
+    cmd1 = extend_guest_cmd(
+        cmd1,
+        kernel.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child1 = cmd1.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest1.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest1.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest1.wait_vm_boot(None).unwrap();
+        }
     });
     if r.is_err() {
         kill_child(&mut child1);
@@ -1967,20 +2102,29 @@ fn test_memory_mergeable(mergeable: bool) {
 
     let focal2 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest2 = Guest::new(Box::new(focal2));
-    let mut child2 = GuestCommand::new(&guest2)
-        .args(["--cpus", "boot=1"])
+    let mut cmd2 = GuestCommand::new(&guest2);
+    cmd2.args(["--cpus", "boot=1"])
         .args(["--memory", format!("size=512M,{memory_param}").as_str()])
-        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", guest2.default_net_string().as_str()])
         .args(["--serial", "tty", "--console", "off"])
-        .capture_output()
-        .spawn()
-        .unwrap();
+        .capture_output();
 
+    cmd2 = extend_guest_cmd(
+        cmd2,
+        kernel.to_str().unwrap(),
+        Some(DIRECT_KERNEL_BOOT_CMDLINE),
+        igvm.to_str().unwrap(),
+        None,
+    );
+
+    let mut child2 = cmd2.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest2.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest2.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest2.wait_vm_boot(None).unwrap();
+        }
         let ksm_ps_guest2 = get_ksm_pages_shared();
 
         if mergeable {
@@ -2065,6 +2209,8 @@ fn process_rss_kib(pid: u32) -> usize {
 
 // 10MB is our maximum accepted overhead.
 const MAXIMUM_VMM_OVERHEAD_KB: u32 = 10 * 1024;
+// 17MB is our maximum accepted overhead for CVM.
+const MAXIMUM_VMM_CVM_OVERHEAD_KB: u32 = 18 * 1024;
 
 #[derive(PartialEq, Eq, PartialOrd)]
 struct Counters {
@@ -2453,16 +2599,28 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=2,max=4"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(120)).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
@@ -2551,19 +2709,30 @@ mod common_parallel {
                 >= 4
         );
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             let pid = child.id();
             let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
@@ -2592,11 +2761,9 @@ mod common_parallel {
                 >= 4
         );
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=4"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=4"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
                 format!(
@@ -2611,12 +2778,26 @@ mod common_parallel {
                 .as_str(),
             ])
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             let pid = child.id();
             let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_q0.stdout).trim(), "0,2");
@@ -2862,15 +3043,27 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         #[cfg(target_arch = "x86_64")]
         let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
@@ -2902,15 +3095,27 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--net", guest.default_net_string_w_mtu(3000).as_str()])
             .capture_output()
             .default_disks();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         #[cfg(target_arch = "aarch64")]
         let iface = "enp0s4";
@@ -2964,12 +3169,6 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--platform",
-                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
-            ])
             .args([
                 "--disk",
                 format!(
@@ -2982,14 +3181,29 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={test_disk_path},pci_segment=15").as_str(),
+                format!("path={test_disk_path},pci_segment=6").as_str(),
             ])
             .capture_output()
             .default_net();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel_path = direct_kernel_boot_path();
+        let platform: &str = &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
 
@@ -3130,24 +3344,40 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let kernel_path = direct_kernel_boot_path();
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            if is_guest_vm_type_cvm() {
+                // CVM guest will have little less memory,
+                // we will assert based on guest vm type
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+            } else {
+                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            }
 
             let grep_cmd = if cfg!(target_arch = "x86_64") {
                 "grep -c PCI-MSI /proc/interrupts"
@@ -3231,13 +3461,9 @@ mod common_parallel {
         let mut blk_file_path = workload_path;
         blk_file_path.push("blk.img");
 
-        let kernel_path = direct_kernel_boot_path();
-
-        let mut cloud_child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=4"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=4"])
             .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
                 format!(
@@ -3259,12 +3485,26 @@ mod common_parallel {
                 .as_str(),
             ])
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut cloud_child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 16M.
             assert_eq!(
@@ -3410,11 +3650,9 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
 
-        let mut cloud_child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
                 format!(
@@ -3430,12 +3668,24 @@ mod common_parallel {
                 format!("path={vhdx_path}").as_str(),
             ])
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut cloud_child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 100 MiB.
             assert_eq!(
@@ -3489,10 +3739,9 @@ mod common_parallel {
         )
         .expect("copying of OS disk failed");
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--disk",
                 format!("path={},direct=on", os_path.as_path().to_str().unwrap()).as_str(),
@@ -3503,12 +3752,19 @@ mod common_parallel {
                 .as_str(),
             ])
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = fw_path(FwType::RustHypervisorFirmware);
+        cmd = extend_guest_cmd(cmd, kernel.as_str(), None, igvm.to_str().unwrap(), None);
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(120)).unwrap();
+            }
         });
 
         kill_child(&mut child);
@@ -3599,19 +3855,30 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3645,20 +3912,31 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", "serial_number=a=b;c=d"])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        let platform: &str = "serial_number=a=b;c=d";
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3681,20 +3959,31 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        let platform: &str = "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a";
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3722,20 +4011,32 @@ mod common_parallel {
 
         let oem_strings = format!("oem_strings=[{s1},{s2}]");
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", &oem_strings])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        let platform: &str = oem_strings.as_str();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -3781,13 +4082,13 @@ mod common_parallel {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, true, Some(6))
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
-        _test_virtio_fs(&prepare_virtiofsd, false, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, false, Some(6))
     }
 
     #[test]
@@ -3862,11 +4163,9 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args([
                 "--net",
@@ -3874,12 +4173,25 @@ mod common_parallel {
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
                 "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
             ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let tap_count = exec_host_command_output("ip link | grep -c mytap1");
             assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
@@ -3943,20 +4255,32 @@ mod common_parallel {
     fn test_serial_off() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .args(["--serial", "off"])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is no ttyS0
             assert_eq!(
@@ -3988,23 +4312,30 @@ mod common_parallel {
 
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args([
-                "--cmdline",
-                DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
-                    .as_str(),
-            ])
             .default_disks()
             .default_net()
             .args(["--serial", "null"])
             .args(["--console", "off"])
             .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let kernel = direct_kernel_boot_path();
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.replace("console=hvc0 ", console_str);
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(cmdline.as_str()),
+            igvm.to_str().unwrap(),
+            None,
+        );
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4041,26 +4372,32 @@ mod common_parallel {
         #[cfg(target_arch = "aarch64")]
         let console_str: &str = "console=ttyAMA0";
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--cmdline",
-                DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
-                    .as_str(),
-            ])
             .default_disks()
             .default_net()
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.replace("console=hvc0 ", console_str);
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(cmdline.as_str()),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4081,8 +4418,12 @@ mod common_parallel {
         let output = child.wait_with_output().unwrap();
         handle_child_output(r, &output);
 
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let ansi_escape_regex = Regex::new(r"\x1B\[([\d;]+)m").unwrap();
+        let clean_output = ansi_escape_regex.replace_all(&output_str, "").to_string();
+
         let r = std::panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&output.stdout).contains(CONSOLE_TEST_STRING));
+            assert!(&clean_output.contains(CONSOLE_TEST_STRING));
         });
 
         handle_child_output(r, &output);
@@ -4099,28 +4440,35 @@ mod common_parallel {
         #[cfg(target_arch = "aarch64")]
         let console_str: &str = "console=ttyAMA0";
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args([
-                "--cmdline",
-                DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
-                    .as_str(),
-            ])
             .default_disks()
             .default_net()
             .args([
                 "--serial",
                 format!("file={}", serial_path.to_str().unwrap()).as_str(),
             ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let kernel = direct_kernel_boot_path();
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.replace("console=hvc0 ", console_str);
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(cmdline.as_str()),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4150,7 +4498,11 @@ mod common_parallel {
             let mut f = std::fs::File::open(serial_path).unwrap();
             let mut buf = String::new();
             f.read_to_string(&mut buf).unwrap();
-            assert!(buf.contains(CONSOLE_TEST_STRING));
+
+            let color_regex = Regex::new("\x1B\\[[0-9;]*[mK]").unwrap();
+            let cleaned_buf = color_regex.replace_all(&buf, "");
+
+            assert!(cleaned_buf.contains(CONSOLE_TEST_STRING));
         });
 
         handle_child_output(r, &output);
@@ -4168,21 +4520,34 @@ mod common_parallel {
         };
         let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", &cmdline])
             .default_disks()
             .default_net()
             .args(["--serial", "null"])
             .args(["--console", "pty"])
-            .args(["--api-socket", &api_socket])
-            .spawn()
-            .unwrap();
+            .args(["--api-socket", &api_socket]);
+
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(cmdline.as_str()),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
+
             // Get pty fd for console
             let console_path = get_pty_path(&api_socket, "console");
             _test_pty_interaction(console_path);
@@ -4215,23 +4580,35 @@ mod common_parallel {
         };
         let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.to_owned() + serial_option;
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", &cmdline])
             .default_disks()
             .default_net()
             .args(["--console", "null"])
             .args([
                 "--serial",
                 format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
-            ])
-            .spawn()
-            .unwrap();
+            ]);
+
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(&cmdline),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
 
         let _ = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
         });
 
         let mut socat_command = Command::new("socat");
@@ -4279,24 +4656,35 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut child = GuestCommand::new(&guest)
+        let mut guest_cmd = GuestCommand::new(&guest);
+        guest_cmd
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .args(["--console", "tty"])
             .args(["--serial", "null"])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        guest_cmd = extend_guest_cmd(
+            guest_cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = guest_cmd.spawn().unwrap();
         let text = String::from("On a branch floating down river a cricket, singing.");
         let cmd = format!("echo {text} | sudo tee /dev/hvc0");
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert!(guest
                 .does_device_vendor_pair_match("0x1043", "0x1af4")
@@ -4322,26 +4710,42 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let console_path = guest.tmp_dir.as_path().join("console-output");
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .args([
                 "--console",
                 format!("file={}", console_path.to_str().unwrap()).as_str(),
             ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
-        guest.wait_vm_boot(None).unwrap();
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
+
+        if is_guest_vm_type_cvm() {
+            guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+        } else {
+            guest.wait_vm_boot(None).unwrap();
+        }
 
         guest.ssh_command("sudo shutdown -h now").unwrap();
 
-        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        if is_guest_vm_type_cvm() {
+            let _ = child.wait_timeout(std::time::Duration::from_secs(30));
+        } else {
+            let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        }
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
 
@@ -4355,12 +4759,15 @@ mod common_parallel {
             let mut buf = String::new();
             f.read_to_string(&mut buf).unwrap();
 
-            if !buf.contains(CONSOLE_TEST_STRING) {
+            let color_regex = Regex::new("\x1B\\[[0-9;]*[mK]").unwrap();
+            let cleaned_buf = color_regex.replace_all(&buf, "");
+
+            if !cleaned_buf.contains(CONSOLE_TEST_STRING) {
                 eprintln!(
                     "\n\n==== Console file output ====\n\n{buf}\n\n==== End console file output ===="
                 );
             }
-            assert!(buf.contains(CONSOLE_TEST_STRING));
+            assert!(cleaned_buf.contains(CONSOLE_TEST_STRING));
         });
 
         handle_child_output(r, &output);
@@ -4619,25 +5026,39 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--cmdline",
-                format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=off").as_str(),
-            ])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let cmdline = format!("{DIRECT_KERNEL_BOOT_CMDLINE} acpi=off");
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(cmdline.as_str()),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            if is_guest_vm_type_cvm() {
+                // CVM guest will have little less memory,
+                // we will assert based on guest vm type
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+            } else {
+                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            }
         });
 
         kill_child(&mut child);
@@ -4712,23 +5133,33 @@ mod common_parallel {
         #[cfg(target_arch = "aarch64")]
         let kernel_path = edk2_path();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args([
                 "--net",
                 guest.default_net_string().as_str(),
                 "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
             ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
@@ -5116,23 +5547,38 @@ mod common_parallel {
 
         let guest_memory_size_kb = 512 * 1024;
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", format!("size={guest_memory_size_kb}K").as_str()])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_net()
             .default_disks()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
-        guest.wait_vm_boot(None).unwrap();
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
+        if is_guest_vm_type_cvm() {
+            thread::sleep(std::time::Duration::new(CVM_TIMEOUT.try_into().unwrap(), 0));
+        } else {
+            thread::sleep(std::time::Duration::new(20, 0));
+        }
 
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
-            eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
-            assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+            if is_guest_vm_type_cvm() {
+                eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_CVM_OVERHEAD_KB}");
+                assert!(overhead <= MAXIMUM_VMM_CVM_OVERHEAD_KB);
+            } else {
+                eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
+                assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+            }
         });
 
         kill_child(&mut child);
@@ -5157,21 +5603,30 @@ mod common_parallel {
 
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--landlock"])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
 
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5235,16 +5690,26 @@ mod common_parallel {
         cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .capture_output();
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
 
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5545,11 +6010,9 @@ mod common_parallel {
 
         let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
                 "--disk",
                 format!(
@@ -5565,12 +6028,24 @@ mod common_parallel {
                 format!("path={}", &loop_dev).as_str(),
             ])
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // MIN-IO column
             assert_eq!(
@@ -5744,7 +6219,7 @@ mod common_parallel {
 
     #[test]
     fn test_pmem_multi_segment_hotplug() {
-        _test_pmem_hotplug(Some(15))
+        _test_pmem_hotplug(Some(6))
     }
 
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
@@ -5887,7 +6362,7 @@ mod common_parallel {
 
     #[test]
     fn test_net_multi_segment_hotplug() {
-        _test_net_hotplug(Some(15))
+        _test_net_hotplug(Some(6))
     }
 
     fn _test_net_hotplug(pci_segment: Option<u16>) {
@@ -5907,21 +6382,34 @@ mod common_parallel {
         cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .capture_output();
 
-        if pci_segment.is_some() {
-            cmd.args([
-                "--platform",
-                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
-            ]);
-        }
+        let pltfrm_string = format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
+        let platform = if pci_segment.is_some() {
+            Some(pltfrm_string.as_str())
+        } else {
+            None
+        };
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            platform,
+        );
 
         let mut child = cmd.spawn().unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
+        if is_guest_vm_type_cvm() {
+            // wait until guest boot, cvm guest take little long to boot
+            // This way we will wait for 120 second (default timeout)
+            thread::sleep(std::time::Duration::new(CVM_TIMEOUT.try_into().unwrap(), 0));
+        } else {
+            thread::sleep(std::time::Duration::new(20, 0));
+        }
 
         let r = std::panic::catch_unwind(|| {
             // Add network
@@ -6088,17 +6576,29 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--api-socket", &api_socket])
             .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let orig_counters = get_counters(&api_socket);
             guest
@@ -6208,14 +6708,11 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let kernel_path = direct_kernel_boot_path();
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--watchdog"])
@@ -6223,10 +6720,24 @@ mod common_parallel {
             .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             let mut expected_reboot_count = 1;
 
@@ -6297,8 +6808,6 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
             .args(["--pvpanic"])
@@ -6306,10 +6815,23 @@ mod common_parallel {
             .args(["--event-monitor", format!("path={event_path}").as_str()])
             .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Trigger guest a panic
             make_guest_panic(&guest);
@@ -6356,11 +6878,9 @@ mod common_parallel {
         )
         .unwrap();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", &format!("boot={num_queue_pairs}")])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", &format!("boot={num_queue_pairs}")])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args([
                 "--net",
@@ -6372,12 +6892,23 @@ mod common_parallel {
                     num_queue_pairs * 2
                 ),
             ])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
 
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             assert_eq!(
                 guest
@@ -6476,10 +7007,17 @@ mod common_parallel {
         guest_command
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .args(["--api-socket", &api_socket]);
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        guest_command = extend_guest_cmd(
+            guest_command,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
 
         let net_params = format!(
             "fd=[{},{}],mac={},num_queues=4",
@@ -6513,8 +7051,11 @@ mod common_parallel {
         // gets tested through wait_vm_boot() as it expects to receive a
         // HTTP request, and through the SSH command as well.
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
-
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
@@ -6835,22 +7376,32 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=2"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M,hugepages=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .args(["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
-            .args(["--platform", "num_pci_segments=2,iommu_segments=1"])
             .args(["--api-socket", &api_socket])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let platform: &str = "num_pci_segments=2,iommu_segments=1";
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check both if /dev/vdc exists and if the block size is 128M.
             assert_eq!(
@@ -6957,20 +7508,30 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=2"])
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", "boot=2"])
             .args(["--memory", "size=512M,hugepages=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
             .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
 
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
 
             // Check we can find network interface related to vDPA device
             assert_eq!(
@@ -7084,13 +7645,6 @@ mod common_parallel {
 
         cmd.args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args([
-                "--cmdline",
-                DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", tty_str)
-                    .as_str(),
-            ])
             .capture_output()
             .default_disks()
             .default_net()
@@ -7098,10 +7652,24 @@ mod common_parallel {
             .args(["--console", "tty"])
             .args(["--api-socket", &api_socket]);
 
+        let igvm = direct_igvm_boot_path(Some("ttyS0"));
+        let cmdline = DIRECT_KERNEL_BOOT_CMDLINE.replace("console=hvc0 ", tty_str);
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel_path.to_str().unwrap(),
+            Some(&cmdline),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let mut r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
         });
 
         kill_child(&mut child);
@@ -7167,6 +7735,220 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_guest_clock_sync_with_host() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let cpu_count: u8 = 1;
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", &format!("boot={cpu_count}")])
+            .args(["--memory", "size=512M"])
+            .default_disks()
+            .default_net()
+            .capture_output();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            None,
+        );
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(CVM_TIMEOUT)).unwrap();
+            } else {
+                guest.wait_vm_boot(None).unwrap();
+            }
+
+            let output = exec_host_command_output("date +%s");
+            let host_time_str = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>();
+            let guest_time_str = guest.ssh_command("date +%s").unwrap().trim().parse::<u64>();
+
+            assert!(host_time_str.is_ok(), "Can not parse Host time string");
+            assert!(guest_time_str.is_ok(), "Can not parse Guest time string");
+
+            let host_time: u64 = host_time_str.unwrap();
+            let guest_time: u64 = guest_time_str.unwrap();
+            let difference = host_time.abs_diff(guest_time);
+
+            assert!(
+                difference < 5,
+                "Host and Guest clock time has more than 5 seconds difference"
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_multi_pci_disks_with_16_vcpu() {
+        test_multi_pci_disks(16, 32, 186)
+    }
+
+    fn test_multi_pci_disks(vcpus: u32, memory_gb: u32, total_pci_disk: u32) {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let mut cmd = GuestCommand::new(&guest);
+        cmd.args(["--cpus", format!("boot={}", vcpus).as_str()])
+            .args(["--memory", format!("size={}G", memory_gb).as_str()])
+            .default_net()
+            .verbosity(VerbosityLevel::Info)
+            .capture_output();
+
+        // Attach 186 disk with readonly mode
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let mut blk_file_path = workload_path;
+        blk_file_path.push("blk.img");
+
+        let mut total_segments = total_pci_disk / 31;
+        total_segments += 1;
+
+        if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
+            panic!(
+                "{}",
+                format!(
+                    "Number of disks are {} overflows the total PCI segment",
+                    total_pci_disk
+                )
+            );
+        }
+
+        let remaining_disk_count = total_pci_disk % 31;
+        let mut disk_arg: Vec<String> = vec![
+            "--disk".to_string(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            ),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            ),
+        ];
+        for segment in 1..total_segments {
+            for id in 0..31 {
+                let dev_id = format!("{}{}", segment, id);
+                disk_arg.push(format!(
+                    "path={},readonly=true,pci_segment={},id={}",
+                    blk_file_path.to_str().unwrap(),
+                    segment,
+                    dev_id,
+                ));
+            }
+        }
+
+        let last_segment = total_segments;
+        for id in 0..remaining_disk_count {
+            let dev_id = format!("{}{}", last_segment, id);
+            disk_arg.push(format!(
+                "path={},readonly=true,pci_segment={},id={}",
+                blk_file_path.to_str().unwrap(),
+                last_segment,
+                dev_id,
+            ));
+        }
+        cmd.args(disk_arg);
+
+        let platform_string = format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
+        let platform = platform_string.as_str();
+
+        let igvm = direct_igvm_boot_path(Some("hvc0"));
+        let kernel = direct_kernel_boot_path();
+        cmd = extend_guest_cmd(
+            cmd,
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            igvm.to_str().unwrap(),
+            Some(platform),
+        );
+
+        // Increase open files to test large num of PCI disk device attachment
+        exec_host_command_output("ulimit -n 65536");
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            if is_guest_vm_type_cvm() {
+                guest.wait_vm_boot(Some(400)).unwrap();
+            } else {
+                guest.wait_vm_boot(Some(300)).unwrap();
+            }
+
+            assert_eq!(
+                guest
+                    .ssh_command("lspci | grep 'Mass storage controller' | grep -v 0000 | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                total_pci_disk
+            );
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vd.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                total_pci_disk
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "mshv", feature = "igvm", feature = "sev_snp"))]
+    fn test_sev_snp_boot_without_host_data() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let cpu_count: u8 = 1;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", &format!("boot={cpu_count}")])
+            .args(["--memory", "size=512M"])
+            .args([
+                "--igvm",
+                direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+            ])
+            .args(["--platform", "sev_snp=on"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
@@ -7198,11 +7980,23 @@ mod dbus_api {
 
         // Create the VM first
         let cpu_count: u8 = 4;
-        let request_body = guest.api_create_body(
-            cpu_count,
-            direct_kernel_boot_path().to_str().unwrap(),
-            DIRECT_KERNEL_BOOT_CMDLINE,
-        );
+        let request_body = if is_guest_vm_type_cvm() {
+            guest.api_create_body(
+                cpu_count,
+                direct_igvm_boot_path(Some("hvc0")).to_str().unwrap(),
+                DIRECT_KERNEL_BOOT_CMDLINE,
+                true,
+                generate_host_data().as_str(),
+            )
+        } else {
+            guest.api_create_body(
+                cpu_count,
+                direct_kernel_boot_path().to_str().unwrap(),
+                DIRECT_KERNEL_BOOT_CMDLINE,
+                false,
+                "",
+            )
+        };
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
         std::fs::write(&temp_config_path, request_body).unwrap();
@@ -7218,7 +8012,13 @@ mod dbus_api {
 
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            if is_guest_vm_type_cvm() {
+                // CVM guest will have little less memory,
+                // we will assert based on guest vm type
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+            } else {
+                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            }
 
             // Sync and shutdown without powering off to prevent filesystem
             // corruption.
@@ -7237,7 +8037,13 @@ mod dbus_api {
 
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            if is_guest_vm_type_cvm() {
+                // CVM guest will have little less memory,
+                // we will assert based on guest vm type
+                assert!(guest.get_total_memory().unwrap_or_default() > 407_000);
+            } else {
+                assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            }
         });
 
         kill_child(&mut child);

@@ -160,6 +160,7 @@ pub trait VsockChannel {
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
 
+#[cfg(not(feature = "sev_snp"))]
 #[cfg(any(test, fuzzing))]
 pub mod tests {
     use std::os::unix::io::AsRawFd;

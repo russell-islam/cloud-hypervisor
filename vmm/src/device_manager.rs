@@ -1105,6 +1105,7 @@ impl DeviceManager {
     pub fn new(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1169,8 +1170,46 @@ impl DeviceManager {
             }
         }
 
-        let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        // HACK: Allocate address space after 1 TB for PCI segments.
+        // The idea is here is to make sure that bar address space do not collide
+        // with guest address. Most likely we are not going to launch guest with
+        // 1 TB memory and if in future if we decide to do then we need to revisit
+        // this hack. Or remove this hack once we have a way to dynamically
+        // inject ACPI tables. Currently we are assuming that each segments gets 4G
+        // and we are supporting 10 segs only so we are saying that end of the device
+        // area is 40G.
+        assert!(num_pci_segments <= 10);
+        let phys_width =
+            crate::vm::physical_bits(&hypervisor, config.lock().unwrap().cpus.max_phys_bits);
+
+        #[cfg(not(feature = "sev_snp"))]
+        let sev_snp_enabled = false;
+        #[cfg(feature = "sev_snp")]
+        let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
+
+        let mut start_of_device_area = 0x10000000000;
+        if phys_width < 41 {
+            if sev_snp_enabled {
+                error!(
+                    "Cannot start a SEV-SNP guest with max gpa_width: {:?} < 41",
+                    phys_width
+                );
+            }
+            start_of_device_area = (1 << phys_width) - (num_pci_segments + 1) as u64 * (4 << 30);
+        }
+
+        let end_of_device_area = start_of_device_area + (num_pci_segments as u64 * (4 << 30)) - 1;
+
+        #[allow(unused_assignments, unused_mut)]
+        let mut start_of_mmio64_area = start_of_device_area;
+        #[allow(unused_assignments, unused_mut)]
+        let mut end_of_mmio64_area = end_of_device_area;
+
+        if !sev_snp_enabled {
+            start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
+            end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        }
+
         let pci_mmio64_allocators = create_mmio_allocators(
             start_of_mmio64_area,
             end_of_mmio64_area,

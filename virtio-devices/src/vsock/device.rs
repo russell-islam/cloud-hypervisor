@@ -523,6 +523,7 @@ impl<B> Transportable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use libc::EFD_NONBLOCK;
 

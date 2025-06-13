@@ -5,6 +5,7 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
+use rand::{rng, Rng};
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io::{Read, Write};
@@ -19,6 +20,7 @@ use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
 use once_cell::sync::Lazy;
+pub use regex::Regex;
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -963,16 +965,58 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
-        format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
-                 cpu_count,
-                 cpu_count,
-                 kernel_path,
-                 kernel_cmd,
-                 self.network.host_ip,
-                 self.network.guest_mac,
-                 self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+    pub fn api_create_body(
+        &self,
+        cpu_count: u8,
+        kernel_path: &str,
+        kernel_cmd: &str,
+        is_cvm: bool,
+        host_data: &str,
+    ) -> String {
+        if is_cvm {
+            format!(
+                // Add sev_snp flag under platform element
+                // Add host-data under payload element
+                r#"{{
+                    "platform":{{"sev_snp":true}},
+                    "cpus":{{"boot_vcpus":{},"max_vcpus":{}}},
+                    "payload":{{"igvm":"{}","cmdline": "{}","host_data": "{}"}},
+                    "net":[{{"ip":"{}", "mask":"255.255.255.0", "mac":"{}"}}],
+                    "disks":[{{"path":"{}"}}, {{"path":"{}"}}]
+                }}"#,
+                cpu_count,
+                cpu_count,
+                kernel_path,
+                kernel_cmd,
+                host_data,
+                self.network.host_ip,
+                self.network.guest_mac,
+                self.disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap()
+                    .as_str(),
+                self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+            )
+        } else {
+            format!(
+                r#"{{
+                    "cpus":{{"boot_vcpus":{},"max_vcpus":{}}},
+                    "payload":{{"kernel":"{}","cmdline": "{}"}},
+                    "net":[{{"ip":"{}", "mask":"255.255.255.0", "mac":"{}"}}],
+                    "disks":[{{"path":"{}"}}, {{"path":"{}"}}]
+                }}"#,
+                cpu_count,
+                cpu_count,
+                kernel_path,
+                kernel_cmd,
+                self.network.host_ip,
+                self.network.guest_mac,
+                self.disk_config
+                    .disk(DiskType::OperatingSystem)
+                    .unwrap()
+                    .as_str(),
+                self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+            )
         }
     }
 
@@ -1706,12 +1750,22 @@ pub fn parse_ethr_latency_output(output: &[u8]) -> Result<Vec<f64>, Error> {
             let v: Value = serde_json::from_str(l).expect("'ethr' parse error: invalid json line");
             // Skip header/summary lines
             if let Some(avg) = v["Avg"].as_str() {
-                // Assume the latency unit is always "us"
-                latency.push(
-                    avg.split("us").collect::<Vec<&str>>()[0]
-                        .parse::<f64>()
-                        .expect("'ethr' parse error: invalid 'Avg' entry"),
-                );
+                if avg.ends_with("us") {
+                    latency.push(
+                        avg.split("us").collect::<Vec<&str>>()[0]
+                            .parse::<f64>()
+                            .expect("'ethr' parse error: invalid 'Avg' entry"),
+                    );
+                } else if avg.ends_with("ms") {
+                    latency.push(
+                        avg.split("ms").collect::<Vec<&str>>()[0]
+                            .parse::<f64>()
+                            .expect("'ethr' parse error: invalid 'Avg' entry")
+                            * 1000.0, // Convert ms to us
+                    );
+                } else {
+                    panic!("'ethr' parse error: unsupported latency unit in 'Avg' entry");
+                }
             }
         }
 
@@ -1782,4 +1836,70 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     // Parse the ethr latency test output
     let content = fs::read(log_file).map_err(Error::EthrLogFile)?;
     parse_ethr_latency_output(&content)
+}
+
+pub fn get_env_var(var_name: &str) -> Option<String> {
+    env::var(var_name).ok()
+}
+
+pub fn is_guest_vm_type_cvm() -> bool {
+    get_env_var("GUEST_VM_TYPE") == Some("CVM".to_string())
+}
+
+pub fn run_block_io_with_datadisk() -> bool {
+    get_env_var("USE_DATADISK") == Some("1".to_string())
+}
+
+pub fn get_block_io_datadisk() -> Option<String> {
+    get_env_var("DATADISK_NAME")
+}
+
+pub fn get_block_size() -> Option<String> {
+    get_env_var("PERF_BLOCK_SIZE_KB")
+}
+
+pub fn run_block_io_without_cache() -> bool {
+    get_env_var("DISABLE_DATADISK_CACHING") == Some("1".to_string())
+}
+
+pub fn generate_host_data() -> String {
+    let mut rng = rng();
+    #[allow(clippy::format_collect)]
+    let hex_string: String = (0..64)
+        .map(|_| rng.random_range(0..=15))
+        .map(|num| format!("{:x}", num))
+        .collect();
+
+    hex_string
+}
+
+pub fn extend_guest_cmd<'a>(
+    mut cmd: GuestCommand<'a>,
+    kernel: &'a str,
+    cmdline: Option<&'a str>,
+    igvm: &'a str,
+    platform: Option<&'a str>,
+) -> GuestCommand<'a> {
+    if is_guest_vm_type_cvm() {
+        cmd.args(["--igvm", igvm]);
+        cmd.args(["--host-data", generate_host_data().as_str()]);
+
+        if let Some(platform_arg) = platform {
+            cmd.args(["--platform", &format!("{platform_arg},sev_snp=on")]);
+        } else {
+            cmd.args(["--platform", "sev_snp=on"]);
+        }
+    } else {
+        cmd.args(["--kernel", kernel]);
+
+        if let Some(cmdline_arg) = cmdline {
+            cmd.args(["--cmdline", cmdline_arg]);
+        }
+
+        if let Some(platform_arg) = platform {
+            cmd.args(["--platform", platform_arg]);
+        }
+    }
+
+    cmd
 }

@@ -100,7 +100,12 @@ fi
 popd || exit
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
+# We will build kernel only if we are not running integration test for CVM
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+if [ ! -f "$VMLINUX_IMAGE" ]  &&  [ "$GUEST_VM_TYPE" != "CVM" ]; then
+    build_custom_linux
+fi
+
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     # Prepare linux image (build from source or download pre-built)
     prepare_linux
@@ -147,9 +152,11 @@ rm -rf "$VFIO_DIR" "$VFIO_DISK_IMAGE"
 mkdir -p "$VFIO_DIR"
 cp "$FOCAL_OS_RAW_IMAGE" "$VFIO_DIR"
 cp "$FW" "$VFIO_DIR"
-cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
+if [ "$GUEST_VM_TYPE" != "CVM" ]; then
+    cp $VMLINUX_IMAGE $VFIO_DIR || exit 1
+fi
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+cargo build --features "kvm,mshv,igvm,sev_snp" --all  --release --target $BUILD_TARGET
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/"$BUILD_TARGET"/release/cloud-hypervisor "$VFIO_DIR"
@@ -173,6 +180,9 @@ ulimit -l unlimited
 # Set number of open descriptors high enough for VFIO tests to run
 ulimit -n 4096
 
+# Set number of open descriptors high enough for VFIO tests to run
+ulimit -n 4096
+
 export RUST_BACKTRACE=1
 time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
@@ -186,11 +196,12 @@ if [ $RES -eq 0 ]; then
 fi
 
 # Run tests on dbus_api
-if [ $RES -eq 0 ]; then
-    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    # integration tests now do not reply on build feature "dbus_api"
-    time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}
+cargo build --features "mshv,dbus_api,igvm,sev_snp" --all --release --target "$BUILD_TARGET"
+export RUST_BACKTRACE=1
+# integration tests now do not reply on build feature "dbus_api"
+time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}
+
+if [ $? -ne 0 ]; then
     RES=$?
 fi
 

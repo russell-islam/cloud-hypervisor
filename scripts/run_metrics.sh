@@ -80,6 +80,12 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
 fi
 
+# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
+# We will build kernel only if we are not running perf-metrics test for CVM
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+if [ ! -f "$VMLINUX_IMAGE" ] && [ "$GUEST_VM_TYPE" != "CVM" ]; then
+    build_custom_linux
+fi
 # Prepare linux image (build from source or download pre-built)
 prepare_linux
 
@@ -89,12 +95,19 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+cargo build --features "kvm,mshv,igvm,sev_snp" --all --release --target $BUILD_TARGET
+
+# Get the total memory in gb
+TOTAL_MEM_GB=$(free -g | grep Mem | awk '{print $2}')
 
 # setup hugepages
-HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
-PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
-echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
+HUGEPAGESIZE=`grep Hugepagesize /proc/meminfo | awk '{print $2}'`
+if [ "$TOTAL_MEM_GB" -lt 192 ]; then
+    PAGE_NUM=`echo $((12288 * 1024 / $HUGEPAGESIZE))`
+else
+    PAGE_NUM=`echo $((128 * 1024 * 1024 / $HUGEPAGESIZE))`
+fi
+echo $PAGE_NUM | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 if [ -n "$test_filter" ]; then

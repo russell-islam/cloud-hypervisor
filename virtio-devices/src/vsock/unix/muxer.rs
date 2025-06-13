@@ -846,6 +846,7 @@ impl VsockMuxer {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use std::io::Write;
     use std::path::{Path, PathBuf};

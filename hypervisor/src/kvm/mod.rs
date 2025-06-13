@@ -1022,6 +1022,10 @@ impl vm::Vm for KvmVm {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    #[cfg(feature = "sev_snp")]
+    fn gain_page_access(&self, _gpa: u64, _size: u32) -> vm::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "tdx")]
@@ -1149,7 +1153,12 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         vm_type: u64,
         #[cfg(feature = "sev_snp")] _mem_size: u64,
     ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        self.create_vm_with_type(vm_type)
+        self.create_vm_with_type(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            _mem_size,
+        )
+        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))
     }
 
     /// Create a KVM vm object of a specific VM type and return the object as Vm trait object
@@ -1162,7 +1171,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// let hypervisor = KvmHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm_with_type(0).unwrap();
     /// ```
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm_with_type(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let fd: VmFd;
         loop {
             match self.kvm.create_vm_with_type(vm_type) {
@@ -1224,7 +1237,10 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// let hypervisor = KvmHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap();
     /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(
+        &self,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         #[allow(unused_mut)]
         let mut vm_type: u64 = 0; // Create with default platform type
 
@@ -1236,7 +1252,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             vm_type = self.kvm.get_host_ipa_limit().try_into().unwrap();
         }
 
-        self.create_vm_with_type(vm_type)
+        self.create_vm_with_type(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            _mem_size,
+        )
     }
 
     fn check_required_extensions(&self) -> hypervisor::Result<()> {

@@ -33,6 +33,7 @@ use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
+
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
@@ -404,9 +405,13 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         )
     }
 
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+    fn create_vm_with_type(
+        &self,
+        _vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         self.create_vm_with_type_and_memory_int(
-            vm_type,
+            _vm_type,
             #[cfg(feature = "sev_snp")]
             None,
         )
@@ -423,9 +428,16 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// let hypervisor = MshvHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap();
     /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(
+        &self,
+        #[cfg(feature = "sev_snp")] mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let vm_type = 0;
-        self.create_vm_with_type(vm_type)
+        self.create_vm_with_type(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            mem_size,
+        )
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -802,6 +814,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+
                     debug!(
                         "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
                         gfn_start, gfn_count
@@ -909,6 +922,7 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
 
                     match ghcb_op {
+                        GHCB_INFO_SPECIAL_DBGPRINT => {}
                         GHCB_INFO_HYP_FEATURE_REQUEST => {
                             // Pre-condition: GHCB data must be zero
                             assert!(ghcb_data == 0);
@@ -1711,10 +1725,11 @@ impl MshvVcpu {
         if let Some(reg_page) = self.fd.get_vp_reg_page() {
             let vp_reg_page = reg_page.0;
             set_gp_regs_field_ptr!(vp_reg_page, rax, ret_rax);
-            // SAFETY: access union fields
+            // SAFETY: access raw pointer to reg page, access union fields
             unsafe {
                 (*vp_reg_page).__bindgen_anon_1.__bindgen_anon_1.rip = info.header.rip + insn_len;
                 (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
+                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_GENERAL;
             }
         } else {
             let arr_reg_name_value = [

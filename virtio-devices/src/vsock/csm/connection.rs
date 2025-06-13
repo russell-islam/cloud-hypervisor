@@ -670,6 +670,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "sev_snp"))]
 mod tests {
     use std::io::{Error as IoError, Result as IoResult};
 
@@ -820,6 +821,8 @@ mod tests {
                     .unwrap()
                     .next()
                     .unwrap(),
+                None,
+                #[cfg(feature = "sev_snp")]
                 None,
             )
             .unwrap();

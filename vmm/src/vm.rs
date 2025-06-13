@@ -482,6 +482,7 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+    sev_snp_enabled: bool,
 }
 
 impl Vm {
@@ -520,6 +521,8 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
+        #[cfg(not(feature = "sev_snp"))]
+        let sev_snp_enabled = false;
         #[cfg(feature = "sev_snp")]
         let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "tdx")]
@@ -528,7 +531,6 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
-
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
         #[cfg(not(feature = "guest_debug"))]
@@ -605,6 +607,7 @@ impl Vm {
         let device_manager = DeviceManager::new(
             io_bus,
             mmio_bus,
+            hypervisor.clone(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
@@ -770,6 +773,7 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             load_payload_handle,
+            sev_snp_enabled,
         })
     }
 
@@ -2333,13 +2337,15 @@ impl Vm {
 
         #[cfg(not(target_arch = "riscv64"))]
         // Configure shared state based on loaded kernel
-        entry_point
-            .map(|entry_point| {
-                // Safe to unwrap rsdp_addr as we know it can't be None when
-                // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap(), entry_point)
-            })
-            .transpose()?;
+        if !self.sev_snp_enabled {
+            entry_point
+                .map(|entry_point| {
+                    // Safe to unwrap rsdp_addr as we know it can't be None when
+                    // the entry_point is Some.
+                    self.configure_system(rsdp_addr.unwrap(), entry_point)
+                })
+                .transpose()?;
+        }
 
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
@@ -3408,6 +3414,7 @@ mod tests {
 }
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(not(feature = "sev_snp"))]
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;
