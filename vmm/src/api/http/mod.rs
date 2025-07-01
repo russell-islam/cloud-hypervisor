@@ -64,8 +64,8 @@ impl Display for HttpError {
             BadRequest => write!(f, "Bad Request"),
             NotFound => write!(f, "Not Found"),
             InternalServerError => write!(f, "Internal Server Error"),
-            SerdeJsonDeserialize(serde_error) => write!(f, "{}", serde_error),
-            ApiError(api_error) => write!(f, "{}", api_error),
+            SerdeJsonDeserialize(serde_error) => write!(f, "{serde_error}"),
+            ApiError(api_error) => write!(f, "{api_error}"),
         }
     }
 }

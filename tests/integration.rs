@@ -1012,9 +1012,8 @@ fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> 
     if !ret {
         eprintln!(
             "\n\n==== Start 'check_sequential_events' failed ==== \
-             \n\nexpected_events={:?}\nactual_events={:?} \
+             \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
              \n\n==== End 'check_sequential_events' failed ====",
-            expected_events, json_events,
         );
     }
 
@@ -1032,9 +1031,8 @@ fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &st
         if !expected_events[idx].match_with_json_event(e) {
             eprintln!(
                 "\n\n==== Start 'check_sequential_events_exact' failed ==== \
-                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
                  \n\n==== End 'check_sequential_events_exact' failed ====",
-                expected_events, json_events,
             );
 
             return false;
@@ -1055,9 +1053,8 @@ fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> 
         if !latest_events[idx].match_with_json_event(e) {
             eprintln!(
                 "\n\n==== Start 'check_latest_events_exact' failed ==== \
-                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\nexpected_events={latest_events:?}\nactual_events={json_events:?} \
                  \n\n==== End 'check_latest_events_exact' failed ====",
-                latest_events, json_events,
             );
 
             return false;
@@ -5686,7 +5683,7 @@ mod common_parallel {
         if landlock_enabled {
             cmd.args(["--landlock"]).args([
                 "--landlock-rules",
-                format!("path={:?},access=rw", blk_file_path).as_str(),
+                format!("path={blk_file_path:?},access=rw").as_str(),
             ]);
         }
 
@@ -7793,8 +7790,8 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(["--cpus", format!("boot={}", vcpus).as_str()])
-            .args(["--memory", format!("size={}G", memory_gb).as_str()])
+        cmd.args(["--cpus", format!("boot={vcpus}").as_str()])
+            .args(["--memory", format!("size={memory_gb}G").as_str()])
             .default_net()
             .verbosity(VerbosityLevel::Info)
             .capture_output();
@@ -7811,10 +7808,7 @@ mod common_parallel {
         if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
             panic!(
                 "{}",
-                format!(
-                    "Number of disks are {} overflows the total PCI segment",
-                    total_pci_disk
-                )
+                format!("Number of disks are {total_pci_disk} overflows the total PCI segment")
             );
         }
 
@@ -7832,24 +7826,20 @@ mod common_parallel {
         ];
         for segment in 1..total_segments {
             for id in 0..31 {
-                let dev_id = format!("{}{}", segment, id);
+                let dev_id = format!("{segment}{id}");
                 disk_arg.push(format!(
-                    "path={},readonly=true,pci_segment={},id={}",
-                    blk_file_path.to_str().unwrap(),
-                    segment,
-                    dev_id,
+                    "path={},readonly=true,pci_segment={segment},id={dev_id}",
+                    blk_file_path.to_str().unwrap()
                 ));
             }
         }
 
         let last_segment = total_segments;
         for id in 0..remaining_disk_count {
-            let dev_id = format!("{}{}", last_segment, id);
+            let dev_id = format!("{last_segment}{id}");
             disk_arg.push(format!(
-                "path={},readonly=true,pci_segment={},id={}",
-                blk_file_path.to_str().unwrap(),
-                last_segment,
-                dev_id,
+                "path={},readonly=true,pci_segment={last_segment},id={dev_id}",
+                blk_file_path.to_str().unwrap()
             ));
         }
         cmd.args(disk_arg);
@@ -8437,7 +8427,7 @@ mod common_sequential {
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .args(["--cpus", format!("boot={}", n_cpu).as_str()])
+            .args(["--cpus", format!("boot={n_cpu}").as_str()])
             .args(["--memory", "size=1G"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
@@ -8637,13 +8627,13 @@ mod common_sequential {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=1G"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .default_disks()
             .default_net()
-            .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(device_params)
             .capture_output()
@@ -11502,7 +11492,7 @@ mod rate_limiter {
             let test_img_path = String::from(
                 test_img_dir
                     .as_path()
-                    .join(format!("blk{}.img", i))
+                    .join(format!("blk{i}.img"))
                     .to_str()
                     .unwrap(),
             );

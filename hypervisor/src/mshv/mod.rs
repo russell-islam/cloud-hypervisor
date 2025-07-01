@@ -974,8 +974,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         }
                                         _ => {
                                             panic!(
-                                                "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {:0x}",
-                                                exit_info1
+                                                "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {exit_info1:0x}"
                                             );
                                         }
                                     }
@@ -1132,13 +1131,12 @@ impl cpu::Vcpu for MshvVcpu {
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
                                     self.clear_swexit_info1(ghcb_gpa)?;
                                 }
-                                _ => panic!(
-                                    "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
-                                    exit_code
-                                ),
+                                _ => {
+                                    panic!("GHCB_INFO_NORMAL: Unhandled exit code: {exit_code:0x}")
+                                }
                             }
                         }
-                        _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
+                        _ => panic!("Unsupported VMGEXIT operation: {ghcb_op:0x}"),
                     }
 
                     Ok(cpu::VmExit::Ignore)

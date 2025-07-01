@@ -83,7 +83,7 @@ fn direct_kernel_boot_path() -> PathBuf {
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = std::process::Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -542,7 +542,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
             );
             disk_args.push(disk_arg.to_string());
         } else {
-            println!("SKIPPED: Disk does not exist: {:?}", disk);
+            println!("SKIPPED: Disk does not exist: {disk:?}");
             return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
         }
     } else {
@@ -695,7 +695,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64>
         assert!(remote_command(
             &api_socket_source,
             "snapshot",
-            Some(format!("file://{}", snapshot_dir).as_str()),
+            Some(format!("file://{snapshot_dir}").as_str()),
         ));
 
         let _ = child.kill();
@@ -706,9 +706,9 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64>
         let c = cmd
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()]);
+            .args(["--event-monitor", format!("path={event_path}").as_str()]);
 
         measure_restore_time(c, event_path.as_str(), control.test_timeout).unwrap()
     });

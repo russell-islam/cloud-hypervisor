@@ -730,7 +730,7 @@ pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Dur
     for _ in 0..retries {
         let s = exec_host_command_output(command).status;
         if !s.success() {
-            eprintln!("\n\n==== retrying in {:?} ===\n\n", interval);
+            eprintln!("\n\n==== retrying in {interval:?} ===\n\n");
             thread::sleep(interval);
         } else {
             return true;
@@ -748,7 +748,7 @@ pub fn exec_host_command_output(command: &str) -> Output {
     let output = std::process::Command::new("bash")
         .args(["-c", command])
         .output()
-        .unwrap_or_else(|e| panic!("Expected '{command}' to run. Error: {:?}", e));
+        .unwrap_or_else(|e| panic!("Expected '{command}' to run. Error: {e:?}"));
 
     if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1831,7 +1831,7 @@ pub fn generate_host_data() -> String {
     #[allow(clippy::format_collect)]
     let hex_string: String = (0..64)
         .map(|_| rng.gen_range(0..=15))
-        .map(|num| format!("{:x}", num))
+        .map(|num| format!("{num:x}"))
         .collect();
 
     hex_string
