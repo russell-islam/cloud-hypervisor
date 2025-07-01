@@ -7790,8 +7790,8 @@ mod common_parallel {
         let guest = Guest::new(Box::new(focal));
 
         let mut cmd = GuestCommand::new(&guest);
-        cmd.args(["--cpus", format!("boot={}", vcpus).as_str()])
-            .args(["--memory", format!("size={}G", memory_gb).as_str()])
+        cmd.args(["--cpus", format!("boot={vcpus}").as_str()])
+            .args(["--memory", format!("size={memory_gb}G").as_str()])
             .default_net()
             .verbosity(VerbosityLevel::Info)
             .capture_output();
@@ -7808,10 +7808,7 @@ mod common_parallel {
         if total_segments >= MAX_NUM_PCI_SEGMENTS.into() {
             panic!(
                 "{}",
-                format!(
-                    "Number of disks are {} overflows the total PCI segment",
-                    total_pci_disk
-                )
+                format!("Number of disks are {total_pci_disk} overflows the total PCI segment")
             );
         }
 
@@ -7829,24 +7826,20 @@ mod common_parallel {
         ];
         for segment in 1..total_segments {
             for id in 0..31 {
-                let dev_id = format!("{}{}", segment, id);
+                let dev_id = format!("{segment}{id}");
                 disk_arg.push(format!(
-                    "path={},readonly=true,pci_segment={},id={}",
-                    blk_file_path.to_str().unwrap(),
-                    segment,
-                    dev_id,
+                    "path={},readonly=true,pci_segment={segment},id={dev_id}",
+                    blk_file_path.to_str().unwrap()
                 ));
             }
         }
 
         let last_segment = total_segments;
         for id in 0..remaining_disk_count {
-            let dev_id = format!("{}{}", last_segment, id);
+            let dev_id = format!("{last_segment}{id}");
             disk_arg.push(format!(
-                "path={},readonly=true,pci_segment={},id={}",
-                blk_file_path.to_str().unwrap(),
-                last_segment,
-                dev_id,
+                "path={},readonly=true,pci_segment={last_segment},id={dev_id}",
+                blk_file_path.to_str().unwrap()
             ));
         }
         cmd.args(disk_arg);

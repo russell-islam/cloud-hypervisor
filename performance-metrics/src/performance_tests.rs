@@ -542,7 +542,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
             );
             disk_args.push(disk_arg.to_string());
         } else {
-            println!("SKIPPED: Disk does not exist: {:?}", disk);
+            println!("SKIPPED: Disk does not exist: {disk:?}");
             return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
         }
     } else {

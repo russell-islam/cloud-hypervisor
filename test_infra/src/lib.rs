@@ -1831,7 +1831,7 @@ pub fn generate_host_data() -> String {
     #[allow(clippy::format_collect)]
     let hex_string: String = (0..64)
         .map(|_| rng.gen_range(0..=15))
-        .map(|num| format!("{:x}", num))
+        .map(|num| format!("{num:x}"))
         .collect();
 
     hex_string
