@@ -1267,7 +1267,7 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 [[package]]
 name = "mshv-bindings"
 version = "0.3.0"
-source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#fda05380ea4c68b807996299d5ffb2854ca6d01d"
+source = "git+https://github.com/praveen-pk/mshv?branch=msft/ch/pci_pass_fix#cf6365a2f588758d426efa18372f880be50fd2c6"
 dependencies = [
  "libc",
  "num_enum",
@@ -1280,7 +1280,7 @@ dependencies = [
 [[package]]
 name = "mshv-ioctls"
 version = "0.3.0"
-source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#fda05380ea4c68b807996299d5ffb2854ca6d01d"
+source = "git+https://github.com/praveen-pk/mshv?branch=msft/ch/pci_pass_fix#cf6365a2f588758d426efa18372f880be50fd2c6"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -2239,7 +2239,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/NunoDasNeves/vfio?branch=nudasnev/mshv-ioctls-v0.3.0#12f4cd0378b166d1f5d199f2a4df25442a4d3fe4"
+source = "git+https://github.com/praveen-pk/vfio?branch=msft/ch/pci_pass_fix#a98ecd0c3a0cb0810e7d35dd55f63240359a2678"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -2247,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/NunoDasNeves/vfio?branch=nudasnev/mshv-ioctls-v0.3.0#12f4cd0378b166d1f5d199f2a4df25442a4d3fe4"
+source = "git+https://github.com/praveen-pk/vfio?branch=msft/ch/pci_pass_fix#a98ecd0c3a0cb0810e7d35dd55f63240359a2678"
 dependencies = [
  "byteorder",
  "kvm-bindings",

@@ -54,8 +54,12 @@ vmm-sys-util = "0.12.1"
 zbus = { version = "4.1.2", optional = true }
 
 [patch."https://github.com/rust-vmm/vfio"]
-vfio-ioctls = { git = "https://github.com/NunoDasNeves/vfio", branch = "nudasnev/mshv-ioctls-v0.3.0" }
-vfio-bindings = { git = "https://github.com/NunoDasNeves/vfio", branch = "nudasnev/mshv-ioctls-v0.3.0" }
+vfio-ioctls = { git = "https://github.com/praveen-pk/vfio", branch ="msft/ch/pci_pass_fix" }
+vfio-bindings = { git = "https://github.com/praveen-pk/vfio", branch ="msft/ch/pci_pass_fix" }
+
+[patch."https://github.com/rust-vmm/mshv"]
+mshv-ioctls = { git = "https://github.com/praveen-pk/mshv", branch = "msft/ch/pci_pass_fix" }
+mshv-bindings = { git = "https://github.com/praveen-pk/mshv", branch ="msft/ch/pci_pass_fix" }
 
 [dev-dependencies]
 dirs = "5.0.1"
