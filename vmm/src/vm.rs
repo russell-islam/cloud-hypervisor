@@ -591,12 +591,7 @@ impl Vm {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
-        #[cfg(feature = "kvm")]
-        let is_kvm = matches!(
-            hypervisor.hypervisor_type(),
-            hypervisor::HypervisorType::Kvm
-        );
-        #[cfg(feature = "mshv")]
+        #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
         let is_mshv = matches!(
             hypervisor.hypervisor_type(),
             hypervisor::HypervisorType::Mshv
@@ -625,7 +620,7 @@ impl Vm {
 
         // For MSHV, we need to create the interrupt controller before we initialize the VM.
         // Because we need to set the base address of GICD before we initialize the VM.
-        #[cfg(feature = "mshv")]
+        #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
         {
             if is_mshv {
                 let ic = device_manager
@@ -633,7 +628,6 @@ impl Vm {
                     .unwrap()
                     .create_interrupt_controller()
                     .map_err(Error::DeviceManager)?;
-
                 vm.init().map_err(Error::InitializeVm)?;
 
                 device_manager
@@ -689,23 +683,21 @@ impl Vm {
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
         // This means that we need to create interrupt controller after we restore in case of KVM guests.
-        #[cfg(feature = "kvm")]
+        #[cfg(any(feature = "kvm", all(feature = "mshv", target_arch = "x86_64")))]
         {
-            if is_kvm {
-                let ic = device_manager
-                    .lock()
-                    .unwrap()
-                    .create_interrupt_controller()
-                    .map_err(Error::DeviceManager)?;
+            let ic = device_manager
+                .lock()
+                .unwrap()
+                .create_interrupt_controller()
+                .map_err(Error::DeviceManager)?;
 
-                vm.init().map_err(Error::InitializeVm)?;
+            vm.init().map_err(Error::InitializeVm)?;
 
-                device_manager
-                    .lock()
-                    .unwrap()
-                    .create_devices(console_info, console_resize_pipe, original_termios, ic)
-                    .map_err(Error::DeviceManager)?;
-            }
+            device_manager
+                .lock()
+                .unwrap()
+                .create_devices(console_info, console_resize_pipe, original_termios, ic)
+                .map_err(Error::DeviceManager)?;
         }
 
         // This initial SEV-SNP configuration must be done immediately after
