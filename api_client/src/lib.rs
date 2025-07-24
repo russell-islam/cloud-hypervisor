@@ -5,23 +5,30 @@
 
 use std::io::{Read, Write};
 use std::os::unix::io::RawFd;
+
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Error writing to or reading from HTTP socket: {0}")]
-    Socket(std::io::Error),
-    #[error("Error sending file descriptors: {0}")]
-    SocketSendFds(vmm_sys_util::errno::Error),
-    #[error("Error parsing HTTP status code: {0}")]
-    StatusCodeParsing(std::num::ParseIntError),
+    #[error("Error writing to or reading from HTTP socket")]
+    Socket(#[source] std::io::Error),
+    #[error("Error sending file descriptors")]
+    SocketSendFds(#[source] vmm_sys_util::errno::Error),
+    #[error("Error parsing HTTP status code")]
+    StatusCodeParsing(#[source] std::num::ParseIntError),
     #[error("HTTP output is missing protocol statement")]
     MissingProtocol,
-    #[error("Error parsing HTTP Content-Length field: {0}")]
-    ContentLengthParsing(std::num::ParseIntError),
-    #[error("Server responded with an error: {0:?}")]
-    ServerResponse(StatusCode, Option<String>),
+    #[error("Error parsing HTTP Content-Length field")]
+    ContentLengthParsing(#[source] std::num::ParseIntError),
+    #[error("Server responded with error {0:?}: {1:?}")]
+    ServerResponse(
+        StatusCode,
+        // TODO: Move `api` module from `vmm` to dedicated crate and use a common type definition
+        Option<
+            String, /* Untyped: Currently Vec<String> of error messages from top to root cause */
+        >,
+    ),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -31,6 +38,7 @@ pub enum StatusCode {
     NoContent,
     BadRequest,
     NotFound,
+    TooManyRequests,
     InternalServerError,
     NotImplemented,
     Unknown,
@@ -44,6 +52,7 @@ impl StatusCode {
             204 => StatusCode::NoContent,
             400 => StatusCode::BadRequest,
             404 => StatusCode::NotFound,
+            429 => StatusCode::TooManyRequests,
             500 => StatusCode::InternalServerError,
             501 => StatusCode::NotImplemented,
             _ => StatusCode::Unknown,

@@ -9,11 +9,11 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
-use super::interrupt_controller::{Error, InterruptController};
-use byteorder::{ByteOrder, LittleEndian};
-use serde::{Deserialize, Serialize};
 use std::result;
 use std::sync::{Arc, Barrier};
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     MsiIrqGroupConfig, MsiIrqSourceConfig,
@@ -22,6 +22,8 @@ use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::interrupt_controller::{Error, InterruptController};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -416,7 +418,7 @@ impl InterruptController for Ioapic {
         self.interrupt_source_group
             .trigger(irq as InterruptIndex)
             .map_err(Error::TriggerInterrupt)?;
-        debug!("Interrupt {irq} successfully delivered");
+        trace!("Interrupt {irq} successfully delivered");
 
         // If trigger mode is level sensitive, set the Remote IRR bit.
         // It will be cleared when the EOI is received.

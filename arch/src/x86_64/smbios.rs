@@ -6,15 +6,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::layout::SMBIOS_START;
-use crate::GuestMemoryMmap;
-use std::mem;
-use std::result;
-use std::slice;
+use std::{mem, result, slice};
+
 use thiserror::Error;
 use uuid::Uuid;
-use vm_memory::ByteValued;
-use vm_memory::{Address, Bytes, GuestAddress};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
+
+use crate::layout::SMBIOS_START;
+use crate::GuestMemoryMmap;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -34,8 +33,8 @@ pub enum Error {
     #[error("Failure to write additional data to memory")]
     WriteData,
     /// Failure to parse uuid, uuid format may be error
-    #[error("Failure to parse uuid: {0}")]
-    ParseUuid(uuid::Error),
+    #[error("Failure to parse uuid")]
+    ParseUuid(#[source] uuid::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;

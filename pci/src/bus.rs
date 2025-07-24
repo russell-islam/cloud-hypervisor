@@ -4,38 +4,48 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::configuration::{
-    PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
-};
-use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
-use crate::PciBarConfiguration;
-use byteorder::{ByteOrder, LittleEndian};
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
+
+use byteorder::{ByteOrder, LittleEndian};
+use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
+
+use crate::configuration::{
+    PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
+};
+use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
+use crate::PciBarConfiguration;
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
 const NUM_DEVICE_IDS: usize = 32;
 
 /// Errors for device manager.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum PciRootError {
     /// Could not allocate device address space for the device.
-    AllocateDeviceAddrs(PciDeviceError),
+    #[error("Could not allocate device address space for the device")]
+    AllocateDeviceAddrs(#[source] PciDeviceError),
     /// Could not allocate an IRQ number.
+    #[error("Could not allocate an IRQ number")]
     AllocateIrq,
     /// Could not add a device to the port io bus.
-    PioInsert(vm_device::BusError),
+    #[error("Could not add a device to the port io bus")]
+    PioInsert(#[source] vm_device::BusError),
     /// Could not add a device to the mmio bus.
-    MmioInsert(vm_device::BusError),
+    #[error("Could not add a device to the mmio bus")]
+    MmioInsert(#[source] vm_device::BusError),
     /// Could not find an available device slot on the PCI bus.
+    #[error("Could not find an available device slot on the PCI bus")]
     NoPciDeviceSlotAvailable,
     /// Invalid PCI device identifier provided.
+    #[error("Invalid PCI device identifier provided")]
     InvalidPciDeviceSlot(usize),
     /// Valid PCI device identifier but already used.
+    #[error("Valid PCI device identifier but already used")]
     AlreadyInUsePciDeviceSlot(usize),
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
@@ -79,16 +89,18 @@ impl PciDevice for PciRoot {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.config.write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.config.write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         self.config.read_reg(reg_idx)
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
@@ -123,19 +135,16 @@ impl PciBus {
     pub fn register_mapping(
         &self,
         dev: Arc<dyn BusDeviceSync>,
-        #[cfg(target_arch = "x86_64")] io_bus: &Bus,
+        io_bus: &Bus,
         mmio_bus: &Bus,
         bars: Vec<PciBarConfiguration>,
     ) -> Result<()> {
         for bar in bars {
             match bar.region_type() {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "x86_64")]
                     io_bus
                         .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
-                    #[cfg(target_arch = "aarch64")]
-                    error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     mmio_bus
@@ -257,9 +266,11 @@ impl PciConfigIo {
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed, and
-            // reprogram it if needed.
-            if let Some(params) = device.detect_bar_reprogramming(register, data) {
+            // Update the register value
+            let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
+
+            // Move the device's BAR if needed
+            for params in &bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
@@ -274,8 +285,7 @@ impl PciConfigIo {
                 }
             }
 
-            // Update the register value
-            device.write_config_register(register, offset, data)
+            ret
         } else {
             None
         }
@@ -381,9 +391,11 @@ impl PciConfigMmio {
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed, and
-            // reprogram it if needed.
-            if let Some(params) = device.detect_bar_reprogramming(register, data) {
+            // Update the register value
+            let (bar_reprogram, _) = device.write_config_register(register, offset, data);
+
+            // Move the device's BAR if needed
+            for params in &bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
@@ -397,9 +409,6 @@ impl PciConfigMmio {
                     );
                 }
             }
-
-            // Update the register value
-            device.write_config_register(register, offset, data);
         }
     }
 }

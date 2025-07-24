@@ -1,21 +1,23 @@
 // Copyright © 2021 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
-use crate::GuestMemoryMmap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::str::FromStr;
+
 use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
 
+use crate::GuestMemoryMmap;
+
 #[derive(Error, Debug)]
 pub enum TdvfError {
-    #[error("Failed read TDVF descriptor: {0}")]
+    #[error("Failed read TDVF descriptor")]
     ReadDescriptor(#[source] std::io::Error),
-    #[error("Failed read TDVF descriptor offset: {0}")]
+    #[error("Failed read TDVF descriptor offset")]
     ReadDescriptorOffset(#[source] std::io::Error),
-    #[error("Failed read GUID table: {0}")]
+    #[error("Failed read GUID table")]
     ReadGuidTable(#[source] std::io::Error),
     #[error("Invalid descriptor signature")]
     InvalidDescriptorSignature,
@@ -23,9 +25,9 @@ pub enum TdvfError {
     InvalidDescriptorSize,
     #[error("Invalid descriptor version")]
     InvalidDescriptorVersion,
-    #[error("Failed to write HOB details to guest memory: {0}")]
+    #[error("Failed to write HOB details to guest memory")]
     GuestMemoryWriteHob(#[source] GuestMemoryError),
-    #[error("Failed to create Uuid: {0}")]
+    #[error("Failed to create Uuid")]
     UuidCreation(#[source] uuid::Error),
 }
 

@@ -5,15 +5,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use std::{mem, result, slice};
+
+use libc::c_uchar;
+use thiserror::Error;
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
 use crate::GuestMemoryMmap;
-use libc::c_uchar;
-use std::mem;
-use std::result;
-use std::slice;
-use thiserror::Error;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -59,32 +59,32 @@ pub enum Error {
     #[error("The MP table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
-    #[error("Failure while zeroing out the memory for the MP table: {0}")]
-    Clear(GuestMemoryError),
+    #[error("Failure while zeroing out the memory for the MP table")]
+    Clear(#[source] GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
     #[error("Number of CPUs exceeds the maximum supported CPUs")]
     TooManyCpus,
     /// Failure to write the MP floating pointer.
-    #[error("Failure to write the MP floating pointer: {0}")]
-    WriteMpfIntel(GuestMemoryError),
+    #[error("Failure to write the MP floating pointer")]
+    WriteMpfIntel(#[source] GuestMemoryError),
     /// Failure to write MP CPU entry.
-    #[error("Failure to write MP CPU entry: {0}")]
-    WriteMpcCpu(GuestMemoryError),
+    #[error("Failure to write MP CPU entry")]
+    WriteMpcCpu(#[source] GuestMemoryError),
     /// Failure to write MP ioapic entry.
-    #[error("Failure to write MP ioapic entry: {0}")]
-    WriteMpcIoapic(GuestMemoryError),
+    #[error("Failure to write MP ioapic entry")]
+    WriteMpcIoapic(#[source] GuestMemoryError),
     /// Failure to write MP bus entry.
-    #[error("Failure to write MP bus entry: {0}")]
-    WriteMpcBus(GuestMemoryError),
+    #[error("Failure to write MP bus entry")]
+    WriteMpcBus(#[source] GuestMemoryError),
     /// Failure to write MP interrupt source entry.
-    #[error("Failure to write MP interrupt source entry: {0}")]
-    WriteMpcIntsrc(GuestMemoryError),
+    #[error("Failure to write MP interrupt source entry")]
+    WriteMpcIntsrc(#[source] GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
-    #[error("Failure to write MP local interrupt source entry: {0}")]
-    WriteMpcLintsrc(GuestMemoryError),
+    #[error("Failure to write MP local interrupt source entry")]
+    WriteMpcLintsrc(#[source] GuestMemoryError),
     /// Failure to write MP table header.
-    #[error("Failure to write MP table header: {0}")]
-    WriteMpcTable(GuestMemoryError),
+    #[error("Failure to write MP table header")]
+    WriteMpcTable(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -106,7 +106,7 @@ const CPU_STEPPING: u32 = 0x600;
 const CPU_FEATURE_APIC: u32 = 0x200;
 const CPU_FEATURE_FPU: u32 = 0x001;
 
-fn compute_checksum<T: Copy>(v: &T) -> u8 {
+fn compute_checksum<T: Copy + ByteValued>(v: &T) -> u8 {
     // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
     let v_slice = unsafe { slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
     let mut checksum: u8 = 0;
@@ -304,11 +304,11 @@ pub fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
+
     use super::*;
     use crate::layout::MPTABLE_START;
-    use vm_memory::{
-        bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
-    };
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
@@ -336,7 +336,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus, None).is_err());
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap_err();
     }
 
     #[test]
@@ -433,6 +433,6 @@ mod tests {
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
         let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

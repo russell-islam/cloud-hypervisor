@@ -3,23 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashMap;
+use std::ffi::CString;
+use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::{io, result};
+
 use num_enum::TryFromPrimitive;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
     PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
-use std::{
-    collections::HashMap,
-    ffi::CString,
-    io, result,
-    sync::{Arc, Barrier, Mutex, RwLock},
-};
 use thiserror::Error;
-use vm_allocator::{page_size::get_page_size, AddressAllocator, SystemAllocator};
+use vm_allocator::page_size::get_page_size;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    bitmap::AtomicBitmap, Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory,
-    GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap, Le32, Le64,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap, Le32, Le64,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
@@ -35,7 +36,7 @@ const MINOR_VERSION: u64 = 0;
 #[derive(Error, Debug)]
 pub enum Error {
     // device errors
-    #[error("Guest gave us bad memory addresses: {0}")]
+    #[error("Guest gave us bad memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest sent us invalid request")]
     InvalidRequest,
@@ -50,7 +51,7 @@ pub enum Error {
     InvalidArgument(u64),
     #[error("Unknown function code: {0}")]
     UnknownFunctionCode(u64),
-    #[error("Libc call fail: {0}")]
+    #[error("Libc call fail")]
     LibcFail(#[source] std::io::Error),
 }
 
@@ -697,30 +698,24 @@ impl PciDevice for PvmemcontrolPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.configuration
+                .write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
         self.configuration.read_config_register(reg_idx)
     }
 
-    fn as_any(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(

@@ -3,17 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use once_cell::sync::OnceCell;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-static MONITOR: OnceCell<MonitorHandle> = OnceCell::new();
+use serde::Serialize;
+
+static MONITOR: OnceLock<MonitorHandle> = OnceLock::new();
 
 #[derive(Serialize)]
 struct Event<'a> {

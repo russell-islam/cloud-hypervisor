@@ -2,14 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::cpu::CpuManager;
-use crate::device_manager::DeviceManager;
-use crate::memory_manager::MemoryManager;
-use crate::pci_segment::PciSegment;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{rsdp::Rsdp, sdt::Sdt, Aml};
+use acpi_tables::sdt::Sdt;
+use acpi_tables::Aml;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]
@@ -17,11 +17,15 @@ use arch::DeviceType;
 use arch::NumaNodes;
 use bitflags::bitflags;
 use pci::PciBdf;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
-use zerocopy::AsBytes;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
+
+use crate::cpu::CpuManager;
+use crate::device_manager::DeviceManager;
+use crate::memory_manager::MemoryManager;
+use crate::pci_segment::PciSegment;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
@@ -41,7 +45,7 @@ pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct PciRangeEntry {
     pub base_address: u64,
     pub segment: u16,
@@ -52,7 +56,7 @@ struct PciRangeEntry {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct MemoryAffinity {
     pub type_: u8,
     pub length: u8,
@@ -69,7 +73,7 @@ struct MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorLocalX2ApicAffinity {
     pub type_: u8,
     pub length: u8,
@@ -83,7 +87,7 @@ struct ProcessorLocalX2ApicAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorGiccAffinity {
     pub type_: u8,
     pub length: u8,
@@ -144,7 +148,7 @@ impl MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotVirtioPciNode {
     pub type_: u8,
     _reserved: u8,
@@ -156,7 +160,7 @@ struct ViotVirtioPciNode {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotPciRangeNode {
     pub type_: u8,
     _reserved: u8,
@@ -785,7 +789,7 @@ pub fn create_acpi_tables(
         let slit_offset = srat_offset.checked_add(srat.len() as u64).unwrap();
         guest_mem
             .write_slice(slit.as_slice(), slit_offset)
-            .expect("Error writing SRAT table");
+            .expect("Error writing SLIT table");
         tables.push(slit_offset.0);
 
         prev_tbl_len = slit.len() as u64;

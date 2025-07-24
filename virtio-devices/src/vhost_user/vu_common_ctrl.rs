@@ -1,12 +1,6 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{Error, Result};
-use crate::vhost_user::Inflight;
-use crate::{
-    get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
-    VirtioInterruptType,
-};
 use std::ffi;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -15,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
 use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -23,12 +18,20 @@ use vhost::vhost_user::{
     Frontend, FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler,
 };
 use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
-use virtio_queue::{Descriptor, Queue, QueueT};
+use virtio_queue::desc::RawDescriptor;
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{
     Address, Error as MmapError, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion,
 };
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{Error, Result};
+use crate::vhost_user::Inflight;
+use crate::{
+    get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
+    VirtioInterruptType,
+};
 
 // Size of a dirty page for vhost-user.
 const VHOST_LOG_PAGE: u64 = 0x1000;
@@ -210,7 +213,7 @@ impl VhostUserHandle {
                 desc_table_addr: get_host_address_range(
                     mem,
                     GuestAddress(queue.desc_table()),
-                    actual_size * std::mem::size_of::<Descriptor>(),
+                    actual_size * std::mem::size_of::<RawDescriptor>(),
                 )
                 .ok_or(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},

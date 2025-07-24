@@ -11,17 +11,71 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
+use std::collections::{BTreeMap, HashMap};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Seek, SeekFrom, Write};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use std::mem::size_of;
+use std::num::Wrapping;
+use std::ops::Deref;
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex, RwLock};
+#[cfg(not(target_arch = "riscv64"))]
+use std::time::Instant;
+use std::{cmp, result, str, thread};
+
+use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
+#[cfg(feature = "tdx")]
+use arch::x86_64::tdx::TdvfSection;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use arch::PciSpaceInfo;
+use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
+#[cfg(target_arch = "aarch64")]
+use devices::interrupt_controller;
+use devices::AcpiNotificationFlags;
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+use hypervisor::{HypervisorVmError, VmOps};
+use libc::{termios, SIGWINCH};
+use linux_loader::cmdline::Cmdline;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use linux_loader::elf;
+#[cfg(target_arch = "x86_64")]
+use linux_loader::loader::bzimage::BzImage;
+#[cfg(target_arch = "x86_64")]
+use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
+use linux_loader::loader::KernelLoader;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tracer::trace_scoped;
+use vm_device::Bus;
+#[cfg(feature = "tdx")]
+use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
+use vm_memory::{
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
 };
-use crate::config::{NumaConfig, PayloadConfig};
+use vm_migration::protocol::{MemoryRangeTable, Request, Response};
+use vm_migration::{
+    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
+};
+use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+use crate::config::{add_to_config, ValidationError};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
-use crate::cpu;
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -37,118 +91,66 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
-use crate::GuestMemoryMmap;
+use crate::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PayloadConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+};
 use crate::{
-    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
+    cpu, GuestMemoryMmap, PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID,
+    MEMORY_MANAGER_SNAPSHOT_ID,
 };
-use anyhow::anyhow;
-use arch::get_host_cpu_phys_bits;
-#[cfg(target_arch = "x86_64")]
-use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
-#[cfg(feature = "tdx")]
-use arch::x86_64::tdx::TdvfSection;
-use arch::EntryPoint;
-#[cfg(target_arch = "aarch64")]
-use arch::PciSpaceInfo;
-use arch::{NumaNode, NumaNodes};
-#[cfg(target_arch = "aarch64")]
-use devices::interrupt_controller;
-use devices::AcpiNotificationFlags;
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
-use hypervisor::{HypervisorVmError, VmOps};
-use libc::{termios, SIGWINCH};
-use linux_loader::cmdline::Cmdline;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use linux_loader::elf;
-#[cfg(target_arch = "x86_64")]
-use linux_loader::loader::bzimage::BzImage;
-#[cfg(target_arch = "x86_64")]
-use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
-#[cfg(target_arch = "aarch64")]
-use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
-use linux_loader::loader::KernelLoader;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::cmp;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
-use std::num::Wrapping;
-use std::ops::Deref;
-use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
-use std::{result, str, thread};
-use thiserror::Error;
-use tracer::trace_scoped;
-use vm_device::Bus;
-#[cfg(feature = "tdx")]
-use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
-use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
-};
-use vm_migration::protocol::{Request, Response};
-use vm_migration::{
-    protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
-    Snapshottable, Transportable,
-};
-use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Cannot open kernel file: {0}")]
+    #[error("Cannot open kernel file")]
     KernelFile(#[source] io::Error),
 
-    #[error("Cannot open initramfs file: {0}")]
+    #[error("Cannot open initramfs file")]
     InitramfsFile(#[source] io::Error),
 
-    #[error("Cannot load the kernel into memory: {0}")]
+    #[error("Cannot load the kernel into memory")]
     KernelLoad(#[source] linux_loader::loader::Error),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Cannot load the UEFI binary in memory: {0:?}")]
-    UefiLoad(arch::aarch64::uefi::Error),
+    #[error("Cannot load the UEFI binary in memory")]
+    UefiLoad(#[source] arch::aarch64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
 
-    #[error("Cannot load the kernel command line in memory: {0}")]
+    #[error("Cannot load the kernel command line in memory")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
 
-    #[error("Failed to apply landlock config during vm_create: {0}")]
+    #[error("Failed to apply landlock config during vm_create")]
     ApplyLandlock(#[source] LandlockError),
 
-    #[error("Cannot modify the kernel command line: {0}")]
+    #[error("Cannot modify the kernel command line")]
     CmdLineInsertStr(#[source] linux_loader::cmdline::Error),
 
-    #[error("Cannot create the kernel command line: {0}")]
+    #[error("Cannot create the kernel command line")]
     CmdLineCreate(#[source] linux_loader::cmdline::Error),
 
-    #[error("Cannot configure system: {0}")]
+    #[error("Cannot configure system")]
     ConfigureSystem(#[source] arch::Error),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Cannot enable interrupt controller: {0:?}")]
-    EnableInterruptController(interrupt_controller::Error),
+    #[error("Cannot enable interrupt controller")]
+    EnableInterruptController(#[source] interrupt_controller::Error),
 
     #[error("VM state is poisoned")]
     PoisonedState,
 
-    #[error("Error from device manager: {0:?}")]
-    DeviceManager(DeviceManagerError),
+    #[error("Error from device manager")]
+    DeviceManager(#[source] DeviceManagerError),
+
+    #[error("Error initializing VM")]
+    InitializeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
 
-    #[error("Cannot spawn a signal handler thread: {0}")]
+    #[error("Cannot spawn a signal handler thread")]
     SignalHandlerSpawn(#[source] io::Error),
 
     #[error("Failed to join on threads: {0:?}")]
@@ -166,127 +168,127 @@ pub enum Error {
     #[error("VM is not running")]
     VmNotRunning,
 
-    #[error("Cannot clone EventFd: {0}")]
+    #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
 
     #[error("invalid VM state transition: {0:?} to {1:?}")]
     InvalidStateTransition(VmState, VmState),
 
-    #[error("Error from CPU manager: {0}")]
+    #[error("Error from CPU manager")]
     CpuManager(#[source] cpu::Error),
 
-    #[error("Cannot pause devices: {0}")]
+    #[error("Cannot pause devices")]
     PauseDevices(#[source] MigratableError),
 
-    #[error("Cannot resume devices: {0}")]
+    #[error("Cannot resume devices")]
     ResumeDevices(#[source] MigratableError),
 
-    #[error("Cannot pause CPUs: {0}")]
+    #[error("Cannot pause CPUs")]
     PauseCpus(#[source] MigratableError),
 
-    #[error("Cannot resume cpus: {0}")]
+    #[error("Cannot resume cpus")]
     ResumeCpus(#[source] MigratableError),
 
-    #[error("Cannot pause VM: {0}")]
+    #[error("Cannot pause VM")]
     Pause(#[source] MigratableError),
 
-    #[error("Cannot resume VM: {0}")]
+    #[error("Cannot resume VM")]
     Resume(#[source] MigratableError),
 
-    #[error("Memory manager error: {0:?}")]
-    MemoryManager(MemoryManagerError),
+    #[error("Memory manager error")]
+    MemoryManager(#[source] MemoryManagerError),
 
-    #[error("Eventfd write error: {0}")]
+    #[error("Eventfd write error")]
     EventfdError(#[source] std::io::Error),
 
-    #[error("Cannot snapshot VM: {0}")]
+    #[error("Cannot snapshot VM")]
     Snapshot(#[source] MigratableError),
 
-    #[error("Cannot restore VM: {0}")]
+    #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
 
-    #[error("Cannot send VM snapshot: {0}")]
+    #[error("Cannot send VM snapshot")]
     SnapshotSend(#[source] MigratableError),
 
     #[error("Invalid restore source URL")]
     InvalidRestoreSourceUrl,
 
-    #[error("Failed to validate config: {0}")]
+    #[error("Failed to validate config")]
     ConfigValidation(#[source] ValidationError),
 
     #[error("Too many virtio-vsock devices")]
     TooManyVsockDevices,
 
-    #[error("Failed serializing into JSON: {0}")]
+    #[error("Failed serializing into JSON")]
     SerializeJson(#[source] serde_json::Error),
 
     #[error("Invalid NUMA configuration")]
     InvalidNumaConfig,
 
-    #[error("Cannot create seccomp filter: {0}")]
+    #[error("Cannot create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
 
-    #[error("Cannot apply seccomp filter: {0}")]
+    #[error("Cannot apply seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 
     #[error("Failed resizing a memory zone")]
     ResizeZone,
 
-    #[error("Cannot activate virtio devices: {0:?}")]
-    ActivateVirtioDevices(DeviceManagerError),
+    #[error("Cannot activate virtio devices")]
+    ActivateVirtioDevices(#[source] DeviceManagerError),
 
-    #[error("Error triggering power button: {0:?}")]
-    PowerButton(DeviceManagerError),
+    #[error("Error triggering power button")]
+    PowerButton(#[source] DeviceManagerError),
 
     #[error("Kernel lacks PVH header")]
     KernelMissingPvhHeader,
 
-    #[error("Failed to allocate firmware RAM: {0:?}")]
-    AllocateFirmwareMemory(MemoryManagerError),
+    #[error("Failed to allocate firmware RAM")]
+    AllocateFirmwareMemory(#[source] MemoryManagerError),
 
-    #[error("Error manipulating firmware file: {0}")]
+    #[error("Error manipulating firmware file")]
     FirmwareFile(#[source] std::io::Error),
 
     #[error("Firmware too big")]
     FirmwareTooLarge,
 
-    #[error("Failed to copy firmware to memory: {0}")]
+    #[error("Failed to copy firmware to memory")]
     FirmwareLoad(#[source] vm_memory::GuestMemoryError),
 
     #[cfg(feature = "sev_snp")]
-    #[error("Error enabling SEV-SNP VM: {0}")]
+    #[error("Error enabling SEV-SNP VM")]
     InitializeSevSnpVm(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error performing I/O on TDX firmware file: {0}")]
+    #[error("Error performing I/O on TDX firmware file")]
     LoadTdvf(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error performing I/O on the TDX payload file: {0}")]
+    #[error("Error performing I/O on the TDX payload file")]
     LoadPayload(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error parsing TDVF: {0}")]
+    #[error("Error parsing TDVF")]
     ParseTdvf(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error populating TDX HOB: {0}")]
+    #[error("Error populating TDX HOB")]
     PopulateHob(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error allocating TDVF memory: {0:?}")]
-    AllocatingTdvfMemory(crate::memory_manager::Error),
+    #[error("Error allocating TDVF memory")]
+    AllocatingTdvfMemory(#[source] crate::memory_manager::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error enabling TDX VM: {0}")]
+    #[error("Error enabling TDX VM")]
     InitializeTdxVm(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error enabling TDX memory region: {0}")]
+    #[error("Error enabling TDX memory region")]
     InitializeTdxMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error finalizing TDX VM: {0}")]
+    #[error("Error finalizing TDX VM")]
     FinalizeTdx(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
@@ -298,11 +300,11 @@ pub enum Error {
     InvalidPayloadType,
 
     #[cfg(feature = "guest_debug")]
-    #[error("Error debugging VM: {0:?}")]
-    Debug(DebuggableError),
+    #[error("Error debugging VM")]
+    Debug(#[source] DebuggableError),
 
     #[error("Error spawning kernel loading thread")]
-    KernelLoadThreadSpawn(std::io::Error),
+    KernelLoadThreadSpawn(#[source] std::io::Error),
 
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
@@ -311,25 +313,28 @@ pub enum Error {
     InvalidPayload,
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    #[error("Error coredumping VM: {0:?}")]
-    Coredump(GuestDebuggableError),
+    #[error("Error coredumping VM")]
+    Coredump(#[source] GuestDebuggableError),
 
     #[cfg(feature = "igvm")]
-    #[error("Cannot open igvm file: {0}")]
+    #[error("Cannot open igvm file")]
     IgvmFile(#[source] io::Error),
 
     #[cfg(feature = "igvm")]
-    #[error("Cannot load the igvm into memory: {0}")]
+    #[error("Cannot load the igvm into memory")]
     IgvmLoad(#[source] igvm_loader::Error),
 
     #[error("Error injecting NMI")]
     ErrorNmi,
 
-    #[error("Error resuming the VM: {0}")]
+    #[error("Error resuming the VM")]
     ResumeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("Error creating console devices")]
-    CreateConsoleDevices(ConsoleDeviceError),
+    CreateConsoleDevices(#[source] ConsoleDeviceError),
+
+    #[error("Error locking disk images: Another instance likely holds a lock")]
+    LockingError(#[source] DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -470,9 +475,10 @@ pub struct Vm {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
-    #[allow(dead_code)]
+    #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
+    #[cfg(not(target_arch = "riscv64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
@@ -493,9 +499,9 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
-        timestamp: Instant,
+        #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self> {
@@ -506,13 +512,6 @@ impl Vm {
             .unwrap()
             .validate()
             .map_err(Error::ConfigValidation)?;
-
-        #[cfg(not(feature = "igvm"))]
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &config)?
-        } else {
-            None
-        };
 
         info!("Booting VM from config: {:?}", &config);
 
@@ -538,7 +537,6 @@ impl Vm {
         let stop_on_boot = false;
 
         let memory = memory_manager.lock().unwrap().guest_memory();
-        #[cfg(target_arch = "x86_64")]
         let io_bus = Arc::new(Bus::new());
         let mmio_bus = Arc::new(Bus::new());
 
@@ -580,40 +578,6 @@ impl Vm {
             )
             .map_err(Error::CpuManager)?;
 
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            println!("Coming into sev_snp_init");
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
-        }
-
-        // Loading the igvm file is pushed down here because
-        // igvm parser needs cpu_manager to retrieve cpuid leaf.
-        // For the regular case, we can start loading early, but for
-        // igvm case we have to wait until cpu_manager is created.
-        // Currently, Microsoft Hypervisor does not provide any
-        // Hypervisor specific common cpuid, we need to call get_cpuid_values
-        // per cpuid through cpu_manager.
-        #[cfg(feature = "igvm")]
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(
-                &memory_manager,
-                &config,
-                &cpu_manager,
-                #[cfg(feature = "sev_snp")]
-                sev_snp_enabled,
-            )?
-        } else {
-            None
-        };
         // The initial TDX configuration must be done before the vCPUs are
         // created
         #[cfg(feature = "tdx")]
@@ -629,8 +593,18 @@ impl Vm {
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
+        #[cfg(feature = "kvm")]
+        let is_kvm = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Kvm
+        );
+        #[cfg(feature = "mshv")]
+        let is_mshv = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Mshv
+        );
+
         let device_manager = DeviceManager::new(
-            #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             hypervisor.clone(),
@@ -645,17 +619,105 @@ impl Vm {
             &activate_evt,
             force_iommu,
             boot_id_list,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             snapshot_from_id(snapshot.as_ref(), DEVICE_MANAGER_SNAPSHOT_ID),
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
 
-        device_manager
+        // For MSHV, we need to create the interrupt controller before we initialize the VM.
+        // Because we need to set the base address of GICD before we initialize the VM.
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(
+                        console_info.clone(),
+                        console_resize_pipe.clone(),
+                        original_termios.clone(),
+                        ic,
+                    )
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        memory_manager
             .lock()
             .unwrap()
-            .create_devices(console_info, console_resize_pipe, original_termios)
-            .map_err(Error::DeviceManager)?;
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
+        #[cfg(target_arch = "aarch64")]
+        memory_manager
+            .lock()
+            .unwrap()
+            .add_uefi_flash()
+            .map_err(Error::MemoryManager)?;
+
+        // Loading the igvm file is pushed down here because
+        // igvm parser needs cpu_manager to retrieve cpuid leaf.
+        // Currently, Microsoft Hypervisor does not provide any
+        // Hypervisor specific common cpuid, we need to call get_cpuid_values
+        // per cpuid through cpu_manager.
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
+        } else {
+            None
+        };
+
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // For KVM, we need to create interrupt controller after we create boot vcpus.
+        // Because we restore GIC state from the snapshot as part of boot vcpu creation.
+        // This means that we need to create interrupt controller after we restore in case of KVM guests.
+        #[cfg(feature = "kvm")]
+        {
+            if is_kvm {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(console_info, console_resize_pipe, original_termios, ic)
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
         #[cfg(feature = "tdx")]
         let kernel = config
@@ -705,7 +767,9 @@ impl Vm {
             vm,
             #[cfg(target_arch = "x86_64")]
             saved_clock,
+            #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
+            #[cfg(not(target_arch = "riscv64"))]
             hypervisor,
             stop_on_boot,
             load_payload_handle,
@@ -807,7 +871,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
         source_url: Option<&str>,
@@ -815,6 +879,7 @@ impl Vm {
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
+        #[cfg(not(target_arch = "riscv64"))]
         let timestamp = Instant::now();
 
         #[cfg(feature = "tdx")]
@@ -885,6 +950,7 @@ impl Vm {
             seccomp_action,
             hypervisor,
             activate_evt,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             console_info,
             console_resize_pipe,
@@ -914,7 +980,7 @@ impl Vm {
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
-                    .create_vm_with_type(u64::from(sev_snp_enabled), mem_size)
+                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
@@ -955,14 +1021,16 @@ impl Vm {
 
     pub fn generate_cmdline(
         payload: &PayloadConfig,
-        #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] device_manager: &Arc<
+            Mutex<DeviceManager>,
+        >,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE).map_err(Error::CmdLineCreate)?;
         if let Some(s) = payload.cmdline.as_ref() {
             cmdline.insert_str(s).map_err(Error::CmdLineInsertStr)?;
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         for entry in device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
@@ -1010,6 +1078,47 @@ impl Vm {
             (Some(firmware), None) => {
                 Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
+            }
+            _ => return Err(Error::InvalidPayload),
+        };
+
+        Ok(EntryPoint { entry_addr })
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn load_kernel(
+        firmware: Option<File>,
+        kernel: Option<File>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+        let alignment = 0x20_0000;
+        let aligned_kernel_addr = arch::layout::KERNEL_START.0 + (alignment - 1) & !(alignment - 1);
+        let entry_addr = match (firmware, kernel) {
+            (None, Some(mut kernel)) => {
+                match linux_loader::loader::pe::PE::load(
+                    mem.deref(),
+                    Some(GuestAddress(aligned_kernel_addr)),
+                    &mut kernel,
+                    None,
+                ) {
+                    Ok(entry_addr) => entry_addr.kernel_load,
+                    // Try to load the binary as kernel PE file at first.
+                    // If failed, retry to load it as UEFI binary.
+                    // As the UEFI binary is formatless, it must be the last option to try.
+                    Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                        // TODO: UEFI for riscv64 is scheduled to next stage.
+                        unimplemented!()
+                    }
+                    Err(e) => {
+                        return Err(Error::KernelLoad(e));
+                    }
+                }
+            }
+            (Some(_firmware), None) => {
+                // TODO: UEFI for riscv64 is scheduled to next stage.
+                unimplemented!()
             }
             _ => return Err(Error::InvalidPayload),
         };
@@ -1145,7 +1254,7 @@ impl Vm {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1338,7 +1447,7 @@ impl Vm {
             .cpu_manager
             .lock()
             .unwrap()
-            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+            .init_pmu(AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
                     arch::aarch64::Error::VcpuInitPmu,
@@ -1357,6 +1466,72 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+        )
+        .map_err(Error::ConfigureSystem)?;
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn configure_system(&mut self) -> Result<()> {
+        let cmdline = Self::generate_cmdline(
+            self.config.lock().unwrap().payload.as_ref().unwrap(),
+            &self.device_manager,
+        )?;
+        let num_vcpu = self.cpu_manager.lock().unwrap().vcpus().len();
+        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
+        let initramfs_config = match self.initramfs {
+            Some(_) => Some(self.load_initramfs(&mem)?),
+            None => None,
+        };
+
+        let device_info = &self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_device_info()
+            .clone();
+
+        for pci_segment in self.device_manager.lock().unwrap().pci_segments().iter() {
+            let pci_space = PciSpaceInfo {
+                pci_segment_id: pci_segment.id,
+                mmio_config_address: pci_segment.mmio_config_address,
+                pci_device_space_start: pci_segment.start_of_mem64_area,
+                pci_device_space_size: pci_segment.end_of_mem64_area
+                    - pci_segment.start_of_mem64_area
+                    + 1,
+            };
+            pci_space_info.push(pci_space);
+        }
+
+        // TODO: IOMMU for riscv64 is not yet support in kernel.
+
+        let vaia = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_vaia()
+            .map_err(|_| {
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::riscv64::Error::SetupAia,
+                ))
+            })?;
+
+        // TODO: PMU support for riscv64 is scheduled to next stage.
+
+        arch::configure_system(
+            &mem,
+            cmdline.as_cstring().unwrap().to_str().unwrap(),
+            num_vcpu as u32,
+            device_info,
+            &initramfs_config,
+            &pci_space_info,
+            &vaia,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2029,7 +2204,7 @@ impl Vm {
     // In case of TDX being used, this is a no-op since the tables will be
     // created and passed when populating the HOB.
 
-    #[allow(dead_code)]
+    #[cfg(not(target_arch = "riscv64"))]
     fn create_acpi_tables(&self) -> Option<GuestAddress> {
         #[cfg(feature = "tdx")]
         if self.config.lock().unwrap().is_tdx_enabled() {
@@ -2066,6 +2241,14 @@ impl Vm {
             return self.resume().map_err(Error::Resume);
         }
 
+        // We acquire all advisory disk image locks here and not on device creation
+        // to enable live-migration without locking issues.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
+
         let new_state = if self.stop_on_boot {
             VmState::BreakPoint
         } else {
@@ -2098,6 +2281,21 @@ impl Vm {
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
 
+        #[cfg(target_arch = "aarch64")]
+        let vgic = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_vgic()
+            .unwrap();
+
+        #[cfg(target_arch = "aarch64")]
+        let redist_addr = vgic.lock().unwrap().device_properties();
+
         // Configure the vcpus that have been created
         let vcpus = self.cpu_manager.lock().unwrap().vcpus();
         for vcpu in vcpus {
@@ -2106,7 +2304,13 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, boot_setup)
+                .configure_vcpu(vcpu.clone(), boot_setup)
+                .map_err(Error::CpuManager)?;
+
+            #[cfg(target_arch = "aarch64")]
+            vcpu.lock()
+                .unwrap()
+                .set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
                 .map_err(Error::CpuManager)?;
         }
 
@@ -2131,6 +2335,7 @@ impl Vm {
         #[cfg(target_arch = "aarch64")]
         let rsdp_addr = self.create_acpi_tables();
 
+        #[cfg(not(target_arch = "riscv64"))]
         // Configure shared state based on loaded kernel
         if !self.sev_snp_enabled {
             entry_point
@@ -2142,19 +2347,8 @@ impl Vm {
                 .transpose()?;
         }
 
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        if !self.sev_snp_enabled {
-            self.memory_manager
-                .lock()
-                .unwrap()
-                .allocate_address_space()
-                .map_err(Error::MemoryManager)?;
-        }
+        #[cfg(target_arch = "riscv64")]
+        self.configure_system().unwrap();
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
@@ -2192,17 +2386,12 @@ impl Vm {
     pub fn restore(&mut self) -> Result<()> {
         event!("vm", "restoring");
 
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time for the restored VM.
-        self.memory_manager
+        // We acquire all advisory disk image locks again.
+        self.device_manager
             .lock()
             .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager
@@ -2317,6 +2506,21 @@ impl Vm {
         self.device_manager.lock().unwrap().device_tree()
     }
 
+    /// Release all advisory locks held for the disk images.
+    ///
+    /// This should only be called when the VM is stopped and the VMM supposed
+    /// to shut down. A new VMM, either after a live migration or a
+    /// state save/resume cycle, should then acquire all locks before the VM
+    /// starts to run.
+    pub fn release_disk_locks(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .release_disk_locks()
+            .map_err(Error::LockingError)?;
+        Ok(())
+    }
+
     pub fn activate_virtio_devices(&self) -> Result<()> {
         self.device_manager
             .lock()
@@ -2342,6 +2546,11 @@ impl Vm {
             .unwrap()
             .notify_power_button()
             .map_err(Error::PowerButton)
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    pub fn power_button(&self) -> Result<()> {
+        unimplemented!()
     }
 
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
@@ -2868,43 +3077,43 @@ mod tests {
         match state {
             VmState::Created => {
                 // Check the transitions from Created
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Running => {
                 // Check the transitions from Running
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_err());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap_err();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Shutdown => {
                 // Check the transitions from Shutdown
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::Paused => {
                 // Check the transitions from Paused
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::BreakPoint => {
                 // Check the transitions from Breakpoint
-                assert!(state.valid_transition(VmState::Created).is_ok());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
         }
     }
@@ -3138,11 +3347,12 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
+
+    use super::*;
 
     const LEN: u64 = 4096;
 
@@ -3186,7 +3396,7 @@ mod tests {
         let gic = vm
             .create_vgic(Gic::create_default_config(1))
             .expect("Cannot create gic");
-        assert!(create_fdt(
+        create_fdt(
             &mem,
             "console=tty0",
             vec![0],
@@ -3199,7 +3409,7 @@ mod tests {
             None,
             true,
         )
-        .is_ok())
+        .unwrap();
     }
 }
 
@@ -3251,10 +3461,10 @@ pub fn test_vm() {
     vcpu.set_sregs(&vcpu_sregs).expect("set sregs failed");
 
     let mut vcpu_regs = vcpu.get_regs().expect("get regs failed");
-    vcpu_regs.rip = 0x1000;
-    vcpu_regs.rax = 2;
-    vcpu_regs.rbx = 3;
-    vcpu_regs.rflags = 2;
+    vcpu_regs.set_rip(0x1000);
+    vcpu_regs.set_rax(2);
+    vcpu_regs.set_rbx(3);
+    vcpu_regs.set_rflags(2);
     vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
     loop {
