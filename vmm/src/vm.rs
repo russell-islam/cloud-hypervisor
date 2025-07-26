@@ -649,11 +649,14 @@ impl Vm {
             }
         }
 
-        memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+        #[cfg(feature = "sev_snp")]
+        if !sev_snp_enabled {
+            memory_manager
+                .lock()
+                .unwrap()
+                .allocate_address_space()
+                .map_err(Error::MemoryManager)?;
+        }
 
         #[cfg(target_arch = "aarch64")]
         memory_manager
@@ -2331,7 +2334,7 @@ impl Vm {
         #[cfg(target_arch = "aarch64")]
         let rsdp_addr = self.create_acpi_tables();
 
-        #[cfg(not(target_arch = "riscv64"))]
+        #[cfg(any(not(target_arch = "riscv64"), feature = "sev_snp"))]
         // Configure shared state based on loaded kernel
         entry_point
             .map(|entry_point| {
