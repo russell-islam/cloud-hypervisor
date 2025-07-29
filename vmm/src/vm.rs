@@ -482,7 +482,6 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
-    sev_snp_enabled: bool,
 }
 
 impl Vm {
@@ -521,8 +520,6 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
-        #[cfg(not(feature = "sev_snp"))]
-        let sev_snp_enabled = false;
         #[cfg(feature = "sev_snp")]
         let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "tdx")]
@@ -631,39 +628,22 @@ impl Vm {
         #[cfg(feature = "mshv")]
         {
             if is_mshv {
-                let ic = device_manager
-                    .lock()
-                    .unwrap()
-                    .create_interrupt_controller()
-                    .map_err(Error::DeviceManager)?;
-
                 vm.init().map_err(Error::InitializeVm)?;
-
-                device_manager
-                    .lock()
-                    .unwrap()
-                    .create_devices(
-                        console_info.clone(),
-                        console_resize_pipe.clone(),
-                        original_termios.clone(),
-                        ic,
-                    )
-                    .map_err(Error::DeviceManager)?;
             }
         }
-
-        memory_manager
+        cpu_manager
             .lock()
             .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
 
-        #[cfg(target_arch = "aarch64")]
-        memory_manager
-            .lock()
-            .unwrap()
-            .add_uefi_flash()
-            .map_err(Error::MemoryManager)?;
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
         // Loading the igvm file is pushed down here because
         // igvm parser needs cpu_manager to retrieve cpuid leaf.
@@ -682,12 +662,41 @@ impl Vm {
         } else {
             None
         };
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
 
-        cpu_manager
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(
+                        console_info.clone(),
+                        console_resize_pipe.clone(),
+                        original_termios.clone(),
+                        ic,
+                    )
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        #[cfg(not(feature = "sev_snp"))]
+        memory_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
+        #[cfg(target_arch = "aarch64")]
+        memory_manager
+            .lock()
+            .unwrap()
+            .add_uefi_flash()
+            .map_err(Error::MemoryManager)?;
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
@@ -709,14 +718,6 @@ impl Vm {
                     .create_devices(console_info, console_resize_pipe, original_termios, ic)
                     .map_err(Error::DeviceManager)?;
             }
-        }
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
@@ -773,7 +774,6 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             load_payload_handle,
-            sev_snp_enabled,
         })
     }
 
