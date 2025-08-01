@@ -8,44 +8,41 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
-use anyhow::anyhow;
-use block::{
-    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
-    RequestType, VirtioBlockConfig,
-};
-use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
-use rate_limiter::TokenType;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::io;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
+use std::{io, result};
+
+use anyhow::anyhow;
+use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
+use block::fcntl::{get_lock_state, LockError, LockType};
+use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
+use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use rate_limiter::TokenType;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
-use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_bindings::virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -60,28 +57,40 @@ const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // latency scale, for reduce precision loss in calculate.
 const LATENCY_SCALE: u64 = 10000;
 
+pub const MINIMUM_BLOCK_QUEUE_SIZE: u16 = 2;
+
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to parse the request: {0}")]
-    RequestParsing(block::Error),
-    #[error("Failed to execute the request: {0}")]
-    RequestExecuting(block::ExecuteError),
-    #[error("Failed to complete the request: {0}")]
-    RequestCompleting(block::Error),
+    #[error("Failed to parse the request")]
+    RequestParsing(#[source] block::Error),
+    #[error("Failed to execute the request")]
+    RequestExecuting(#[source] block::ExecuteError),
+    #[error("Failed to complete the request")]
+    RequestCompleting(#[source] block::Error),
     #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
     #[error("The asynchronous request returned with failure")]
     AsyncRequestFailure,
-    #[error("Failed synchronizing the file: {0}")]
-    Fsync(AsyncIoError),
-    #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
-    #[error("Failed creating an iterator over the queue: {0}")]
-    QueueIterator(virtio_queue::Error),
-    #[error("Failed to update request status: {0}")]
-    RequestStatus(GuestMemoryError),
-    #[error("Failed to enable notification: {0}")]
-    QueueEnableNotification(virtio_queue::Error),
+    #[error("Failed synchronizing the file")]
+    Fsync(#[source] AsyncIoError),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
+    #[error("Failed creating an iterator over the queue")]
+    QueueIterator(#[source] virtio_queue::Error),
+    #[error("Failed to update request status")]
+    RequestStatus(#[source] GuestMemoryError),
+    #[error("Failed to enable notification")]
+    QueueEnableNotification(#[source] virtio_queue::Error),
+    #[error("Failed to get {lock_type:?} lock for disk image: {path}")]
+    LockDiskImage {
+        /// The underlying error.
+        #[source]
+        error: LockError,
+        /// The requested lock type.
+        lock_type: LockType,
+        /// The path of the disk image.
+        path: PathBuf,
+    },
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -203,22 +212,29 @@ impl BlockEpollHandler {
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
-            if request
-                .execute_async(
-                    desc_chain.memory(),
-                    self.disk_nsectors,
-                    self.disk_image.as_mut(),
-                    &self.serial,
-                    desc_chain.head_index() as u64,
-                )
-                .map_err(Error::RequestExecuting)?
-            {
+            let result = request.execute_async(
+                desc_chain.memory(),
+                self.disk_nsectors,
+                self.disk_image.as_mut(),
+                &self.serial,
+                desc_chain.head_index() as u64,
+            );
+
+            if let Ok(true) = result {
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
             } else {
+                let status = match result {
+                    Ok(_) => VIRTIO_BLK_S_OK,
+                    Err(e) => {
+                        warn!("Request failed: {:x?} {:?}", request, e);
+                        VIRTIO_BLK_S_IOERR
+                    }
+                };
+
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_OK as u8, request.status_addr)
+                    .write_obj(status as u8, request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -235,11 +251,7 @@ impl BlockEpollHandler {
         Ok(())
     }
 
-    fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
-        self.process_queue_submit().map_err(|e| {
-            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
-        })?;
-
+    fn try_signal_used_queue(&mut self) -> result::Result<(), EpollHelperError> {
         if self
             .queue
             .needs_notification(self.mem.memory().deref())
@@ -256,6 +268,14 @@ impl BlockEpollHandler {
         }
 
         Ok(())
+    }
+
+    fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
+        self.process_queue_submit().map_err(|e| {
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+        })?;
+
+        self.try_signal_used_queue()
     }
 
     #[inline]
@@ -376,12 +396,12 @@ impl BlockEpollHandler {
 
                 (VIRTIO_BLK_S_OK as u8, result as u32)
             } else {
-                error!(
+                warn!(
                     "Request failed: {:x?} {:?}",
                     request,
                     io::Error::from_raw_os_error(-result)
                 );
-                return Err(Error::AsyncRequestFailure);
+                (VIRTIO_BLK_S_IOERR as u8, 0)
             };
 
             mem.write_obj(status, request.status_addr)
@@ -512,8 +532,14 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process queue (submit): {:?}",
+                            e
+                        ))
+                    })?;
                 }
+                self.try_signal_used_queue()?;
             }
             RATE_LIMITER_EVENT => {
                 if let Some(rate_limiter) = &mut self.rate_limiter {
@@ -616,8 +642,9 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
-                    | (1u64 << VIRTIO_RING_F_EVENT_IDX);
-
+                    | (1u64 << VIRTIO_BLK_F_SEG_MAX)
+                    | (1u64 << VIRTIO_RING_F_EVENT_IDX)
+                    | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }
@@ -651,6 +678,7 @@ impl Block {
                     physical_block_exp,
                     min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
                     opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
+                    seg_max: (queue_size - MINIMUM_BLOCK_QUEUE_SIZE) as u32,
                     ..Default::default()
                 };
 
@@ -690,6 +718,53 @@ impl Block {
             read_only,
             serial,
             queue_affinity,
+        })
+    }
+
+    /// Tries to set an advisory lock for the corresponding disk image.
+    pub fn try_lock_image(&mut self) -> Result<()> {
+        let lock_type = match self.read_only {
+            true => LockType::Read,
+            false => LockType::Write,
+        };
+        log::debug!(
+            "Attempting to acquire {lock_type:?} lock for disk image id={},path={}",
+            self.id,
+            self.disk_path.display()
+        );
+        let fd = self.disk_image.fd();
+        fcntl::try_acquire_lock(fd, lock_type).map_err(|error| {
+            let current_lock = get_lock_state(fd);
+            // Don't propagate the error to the outside, as it is not useful at all. Instead,
+            // we try to log additional help to the user.
+            if let Ok(current_lock) = current_lock {
+                log::error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
+            } else {
+                log::error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
+            }
+            Error::LockDiskImage {
+                path: self.disk_path.clone(),
+                error,
+                lock_type,
+            }
+        })?;
+        log::info!(
+            "Acquired {lock_type:?} lock for disk image id={},path={}",
+            self.id,
+            self.disk_path.display()
+        );
+        Ok(())
+    }
+
+    /// Releases the advisory lock held for the corresponding disk image.
+    pub fn unlock_image(&mut self) -> Result<()> {
+        // It is very unlikely that this fails;
+        // Should we remove the Result to simplify the error propagation on
+        // higher levels?
+        fcntl::clear_lock(self.disk_image.fd()).map_err(|error| Error::LockDiskImage {
+            path: self.disk_path.clone(),
+            error,
+            lock_type: LockType::Unlock,
         })
     }
 

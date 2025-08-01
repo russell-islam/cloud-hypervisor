@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -9,17 +11,21 @@
 //
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::{RegList, StandardRegisters, VcpuInit};
+use std::sync::Arc;
+
+use thiserror::Error;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::GuestAddress;
+
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
-};
+use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-use crate::CpuState;
-use crate::MpState;
-use thiserror::Error;
-use vm_memory::GuestAddress;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::RegList;
+#[cfg(target_arch = "aarch64")]
+use crate::VcpuInit;
+use crate::{CpuState, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
 #[derive(Copy, Clone, Default)]
@@ -37,166 +43,171 @@ pub enum HypervisorCpuError {
     ///
     /// Setting standard registers error
     ///
-    #[error("Failed to set standard register: {0}")]
+    #[error("Failed to set standard register")]
     SetStandardRegs(#[source] anyhow::Error),
     ///
     /// Setting standard registers error
     ///
-    #[error("Failed to get standard registers: {0}")]
+    #[error("Failed to get standard registers")]
     GetStandardRegs(#[source] anyhow::Error),
     ///
     /// Setting special register error
     ///
-    #[error("Failed to set special registers: {0}")]
+    #[error("Failed to set special registers")]
     SetSpecialRegs(#[source] anyhow::Error),
     ///
     /// Getting standard register error
     ///
-    #[error("Failed to get special registers: {0}")]
+    #[error("Failed to get special registers")]
     GetSpecialRegs(#[source] anyhow::Error),
     ///
     /// Setting floating point registers error
     ///
-    #[error("Failed to set floating point registers: {0}")]
+    #[error("Failed to set floating point registers")]
     SetFloatingPointRegs(#[source] anyhow::Error),
     ///
     /// Getting floating point register error
     ///
-    #[error("Failed to get floating points registers: {0}")]
+    #[error("Failed to get floating points registers")]
     GetFloatingPointRegs(#[source] anyhow::Error),
     ///
     /// Setting Cpuid error
     ///
-    #[error("Failed to set Cpuid: {0}")]
+    #[error("Failed to set Cpuid")]
     SetCpuid(#[source] anyhow::Error),
     ///
     /// Getting Cpuid error
     ///
-    #[error("Failed to get Cpuid: {0}")]
+    #[error("Failed to get Cpuid")]
     GetCpuid(#[source] anyhow::Error),
     ///
     /// Setting lapic state error
     ///
-    #[error("Failed to set Lapic state: {0}")]
+    #[error("Failed to set Lapic state")]
     SetLapicState(#[source] anyhow::Error),
     ///
     /// Getting Lapic state error
     ///
-    #[error("Failed to get Lapic state: {0}")]
+    #[error("Failed to get Lapic state")]
     GetlapicState(#[source] anyhow::Error),
     ///
     /// Setting MSR entries error
     ///
-    #[error("Failed to set Msr entries: {0}")]
+    #[error("Failed to set Msr entries")]
     SetMsrEntries(#[source] anyhow::Error),
     ///
     /// Getting Msr entries error
     ///
-    #[error("Failed to get Msr entries: {0}")]
+    #[error("Failed to get Msr entries")]
     GetMsrEntries(#[source] anyhow::Error),
     ///
     /// Setting multi-processing  state error
     ///
-    #[error("Failed to set MP state: {0}")]
+    #[error("Failed to set MP state")]
     SetMpState(#[source] anyhow::Error),
     ///
     /// Getting multi-processing  state error
     ///
-    #[error("Failed to get MP state: {0}")]
+    #[error("Failed to get MP state")]
     GetMpState(#[source] anyhow::Error),
     ///
     /// Setting Saved Processor Extended States error
     ///
     #[cfg(feature = "kvm")]
-    #[error("Failed to set Saved Processor Extended States: {0}")]
+    #[error("Failed to set Saved Processor Extended States")]
     SetXsaveState(#[source] anyhow::Error),
     ///
     /// Getting Saved Processor Extended States error
     ///
     #[cfg(feature = "kvm")]
-    #[error("Failed to get Saved Processor Extended States: {0}")]
+    #[error("Failed to get Saved Processor Extended States")]
     GetXsaveState(#[source] anyhow::Error),
     ///
     /// Getting the VP state components error
     ///
     #[cfg(feature = "mshv")]
-    #[error("Failed to get VP State Components: {0}")]
+    #[error("Failed to get VP State Components")]
     GetAllVpStateComponents(#[source] anyhow::Error),
     ///
     /// Setting the VP state components error
     ///
     #[cfg(feature = "mshv")]
-    #[error("Failed to set VP State Components: {0}")]
+    #[error("Failed to set VP State Components")]
     SetAllVpStateComponents(#[source] anyhow::Error),
     ///
     /// Setting Extended Control Registers error
     ///
-    #[error("Failed to set Extended Control Registers: {0}")]
+    #[error("Failed to set Extended Control Registers")]
     SetXcsr(#[source] anyhow::Error),
     ///
     /// Getting Extended Control Registers error
     ///
-    #[error("Failed to get Extended Control Registers: {0}")]
+    #[error("Failed to get Extended Control Registers")]
     GetXcsr(#[source] anyhow::Error),
     ///
     /// Running Vcpu error
     ///
-    #[error("Failed to run vcpu: {0}")]
+    #[error("Failed to run vcpu")]
     RunVcpu(#[source] anyhow::Error),
     ///
     /// Getting Vcpu events error
     ///
-    #[error("Failed to get Vcpu events: {0}")]
+    #[error("Failed to get Vcpu events")]
     GetVcpuEvents(#[source] anyhow::Error),
     ///
     /// Setting Vcpu events error
     ///
-    #[error("Failed to set Vcpu events: {0}")]
+    #[error("Failed to set Vcpu events")]
     SetVcpuEvents(#[source] anyhow::Error),
     ///
     /// Vcpu Init error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to init vcpu")]
     VcpuInit(#[source] anyhow::Error),
+    ///
+    /// Vcpu Finalize error
+    ///
+    #[error("Failed to finalize vcpu")]
+    VcpuFinalize(#[source] anyhow::Error),
     ///
     /// Setting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to set one reg")]
     SetRegister(#[source] anyhow::Error),
     ///
     /// Getting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to get one reg")]
     GetRegister(#[source] anyhow::Error),
     ///
     /// Getting guest clock paused error
     ///
-    #[error("Failed to notify guest its clock was paused: {0}")]
+    #[error("Failed to notify guest its clock was paused")]
     NotifyGuestClockPaused(#[source] anyhow::Error),
     ///
     /// Setting debug register error
     ///
-    #[error("Failed to set debug registers: {0}")]
+    #[error("Failed to set debug registers")]
     SetDebugRegs(#[source] anyhow::Error),
     ///
     /// Getting debug register error
     ///
-    #[error("Failed to get debug registers: {0}")]
+    #[error("Failed to get debug registers")]
     GetDebugRegs(#[source] anyhow::Error),
     ///
     /// Setting misc register error
     ///
-    #[error("Failed to set misc registers: {0}")]
+    #[error("Failed to set misc registers")]
     SetMiscRegs(#[source] anyhow::Error),
     ///
     /// Getting misc register error
     ///
-    #[error("Failed to get misc registers: {0}")]
+    #[error("Failed to get misc registers")]
     GetMiscRegs(#[source] anyhow::Error),
     ///
     /// Write to Guest Mem
     ///
-    #[error("Failed to write to Guest Mem at: {0}")]
+    #[error("Failed to write to Guest Mem at")]
     GuestMemWrite(#[source] anyhow::Error),
     /// Enabling HyperV SynIC error
     ///
@@ -205,48 +216,68 @@ pub enum HypervisorCpuError {
     ///
     /// Getting AArch64 core register error
     ///
-    #[error("Failed to get core register: {0}")]
-    GetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to get aarch64 core register")]
+    GetAarchCoreRegister(#[source] anyhow::Error),
     ///
     /// Setting AArch64 core register error
     ///
-    #[error("Failed to set core register: {0}")]
-    SetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to set aarch64 core register")]
+    SetAarchCoreRegister(#[source] anyhow::Error),
     ///
-    /// Getting AArch64 registers list error
+    /// Getting RISC-V 64-bit core register error
     ///
-    #[error("Failed to retrieve list of registers: {0}")]
+    #[error("Failed to get riscv64 core register")]
+    GetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit core register error
+    ///
+    #[error("Failed to set riscv64 core register")]
+    SetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Getting registers list error
+    ///
+    #[error("Failed to retrieve list of registers")]
     GetRegList(#[source] anyhow::Error),
     ///
     /// Getting AArch64 system register error
     ///
-    #[error("Failed to get system register: {0}")]
+    #[error("Failed to get system register")]
     GetSysRegister(#[source] anyhow::Error),
     ///
     /// Setting AArch64 system register error
     ///
-    #[error("Failed to set system register: {0}")]
+    #[error("Failed to set system register")]
     SetSysRegister(#[source] anyhow::Error),
+    ///
+    /// Getting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to get non-core register")]
+    GetNonCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to set non-core register")]
+    SetNonCoreRegister(#[source] anyhow::Error),
     ///
     /// GVA translation error
     ///
-    #[error("Failed to translate GVA: {0}")]
+    #[error("Failed to translate GVA")]
     TranslateVirtualAddress(#[source] anyhow::Error),
     ///
     /// Set cpu attribute error
     ///
-    #[error("Failed to set vcpu attribute: {0}")]
+    #[error("Failed to set vcpu attribute")]
     SetVcpuAttribute(#[source] anyhow::Error),
     ///
     /// Check if cpu has a certain attribute error
     ///
-    #[error("Failed to check if vcpu has attribute: {0}")]
+    #[error("Failed to check if vcpu has attribute")]
     HasVcpuAttribute(#[source] anyhow::Error),
     ///
     /// Failed to initialize TDX on CPU
     ///
     #[cfg(feature = "tdx")]
-    #[error("Failed to initialize TDX: {0}")]
+    #[error("Failed to initialize TDX")]
     InitializeTdx(#[source] std::io::Error),
     ///
     /// Unknown TDX VM call
@@ -264,35 +295,41 @@ pub enum HypervisorCpuError {
     ///
     /// Error getting TSC frequency
     ///
-    #[error("Failed to get TSC frequency: {0}")]
+    #[error("Failed to get TSC frequency")]
     GetTscKhz(#[source] anyhow::Error),
     ///
     /// Error setting TSC frequency
     ///
-    #[error("Failed to set TSC frequency: {0}")]
+    #[error("Failed to set TSC frequency")]
     SetTscKhz(#[source] anyhow::Error),
     ///
     /// Error reading value at given GPA
     ///
-    #[error("Failed to read from GPA: {0}")]
+    #[error("Failed to read from GPA")]
     GpaRead(#[source] anyhow::Error),
     ///
     /// Error writing value at given GPA
     ///
-    #[error("Failed to write to GPA: {0}")]
+    #[error("Failed to write to GPA")]
     GpaWrite(#[source] anyhow::Error),
     ///
     /// Error getting CPUID leaf
     ///
-    #[error("Failed to get CPUID entries: {0}")]
+    #[error("Failed to get CPUID entries")]
     GetCpuidVales(#[source] anyhow::Error),
     ///
     /// Setting SEV control register error
     ///
     #[cfg(feature = "sev_snp")]
-    #[error("Failed to set sev control register: {0}")]
+    #[error("Failed to set sev control register")]
     SetSevControlRegister(#[source] anyhow::Error),
-
+    ///
+    /// Unsupported SysReg registers
+    ///
+    #[cfg(target_arch = "aarch64")]
+    #[error("Unsupported SysReg registers: {0}")]
+    UnsupportedSysReg(u32),
+    ///
     /// Error injecting NMI
     ///
     #[error("Failed to inject NMI")]
@@ -321,6 +358,12 @@ pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 /// Trait to represent a generic Vcpu
 ///
 pub trait Vcpu: Send + Sync {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    fn create_standard_regs(&self) -> StandardRegisters {
+        unimplemented!();
+    }
     ///
     /// Returns the vCPU general purpose registers.
     ///
@@ -403,6 +446,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
+    #[cfg(not(target_arch = "riscv64"))]
     fn set_guest_debug(&self, _addrs: &[GuestAddress], _singlestep: bool) -> Result<()> {
         Err(HypervisorCpuError::SetDebugRegs(anyhow!("unimplemented")))
     }
@@ -411,11 +455,34 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> Result<()>;
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, feature: i32) -> Result<()>;
+    ///
+    /// Gets the features that have been finalized for a given CPU.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_get_finalized_features(&self) -> i32;
+    ///
+    /// Sets processor features for a given CPU.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        vm: &Arc<dyn crate::Vm>,
+        kvi: &mut VcpuInit,
+        id: u8,
+    ) -> Result<()>;
+    ///
+    /// Returns VcpuInit with default value set
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> VcpuInit;
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
     ///
     /// Gets the value of a system register
@@ -423,9 +490,14 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> Result<u64>;
     ///
+    /// Gets the value of a non-core register on RISC-V 64-bit
+    ///
+    #[cfg(target_arch = "riscv64")]
+    fn get_non_core_reg(&self, non_core_reg: u32) -> Result<u64>;
+    ///
     /// Configure core registers for a given CPU.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
     ///
     /// Check if the CPU supports PMU
@@ -518,7 +590,13 @@ pub trait Vcpu: Send + Sync {
     fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
         unimplemented!()
     }
-
+    ///
+    /// Sets the value of GIC redistributor address
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, _gicr_base_addr: u64) -> Result<()> {
+        Ok(())
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Trigger NMI interrupt

@@ -9,16 +9,14 @@ use std::io;
 use libc::EINVAL;
 use thiserror::Error;
 
-use crate::qcow::{
-    qcow_raw_file::QcowRawFile,
-    vec_cache::{CacheMap, Cacheable, VecCache},
-};
+use crate::qcow::qcow_raw_file::QcowRawFile;
+use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 
 #[derive(Debug, Error)]
 pub enum Error {
     /// `EvictingCache` - Error writing a refblock from the cache to disk.
-    #[error("Failed to write a refblock from the cache to disk: {0}")]
-    EvictingRefCounts(io::Error),
+    #[error("Failed to write a refblock from the cache to disk")]
+    EvictingRefCounts(#[source] io::Error),
     /// `InvalidIndex` - Address requested isn't within the range of the disk.
     #[error("Address requested is not within the range of the disk")]
     InvalidIndex,
@@ -29,8 +27,8 @@ pub enum Error {
     #[error("New cluster needs to be allocated for refcounts")]
     NeedNewCluster,
     /// `ReadingRefCounts` - Error reading the file into the refcount cache.
-    #[error("Failed to read the file into the refcount cache: {0}")]
-    ReadingRefCounts(io::Error),
+    #[error("Failed to read the file into the refcount cache")]
+    ReadingRefCounts(#[source] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

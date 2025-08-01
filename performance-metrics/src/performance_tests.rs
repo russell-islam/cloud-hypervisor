@@ -5,17 +5,16 @@
 
 // Performance tests
 
-use crate::{mean, PerformanceTestControl};
-use regex::Regex;
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::string::String;
-use std::thread;
 use std::time::Duration;
-use test_infra::Error as InfraError;
-use test_infra::*;
+use std::{fs, thread};
+
+use regex::Regex;
+use test_infra::{Error as InfraError, *};
+use thiserror::Error;
+
+use crate::{mean, PerformanceTestControl};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -23,17 +22,14 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
+    #[error("boot time could not be parsed")]
     BootTimeParse,
-    Infra(InfraError),
+    #[error("infrastructure failure")]
+    Infra(#[from] InfraError),
+    #[error("restore time could not be parsed")]
     RestoreTimeParse,
-}
-
-impl From<InfraError> for Error {
-    fn from(e: InfraError) -> Self {
-        Self::Infra(e)
-    }
 }
 
 const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
@@ -74,9 +70,9 @@ fn direct_kernel_boot_path() -> PathBuf {
 
     let mut kernel_path = workload_path;
     #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux");
+    kernel_path.push("vmlinux-x86_64");
     #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image");
+    kernel_path.push("Image-arm64");
 
     kernel_path
 }

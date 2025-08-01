@@ -2,37 +2,44 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::GuestMemoryMmap;
-use crate::Tap;
-use libc::c_uint;
 use std::sync::Arc;
+
+use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
-    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_F_GUEST_CSUM,
-    VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
-    VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_OK,
 };
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
-#[derive(Debug)]
+use super::virtio_features_to_tap_offload;
+use crate::{GuestMemoryMmap, Tap};
+
+#[derive(Error, Debug)]
 pub enum Error {
     /// Read queue failed.
-    GuestMemory(GuestMemoryError),
+    #[error("Read queue failed")]
+    GuestMemory(#[source] GuestMemoryError),
     /// No control header descriptor
+    #[error("No control header descriptor")]
     NoControlHeaderDescriptor,
     /// Missing the data descriptor in the chain.
+    #[error("Missing the data descriptor in the chain")]
     NoDataDescriptor,
     /// No status descriptor
+    #[error("No status descriptor")]
     NoStatusDescriptor,
     /// Failed adding used index
-    QueueAddUsed(virtio_queue::Error),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
     /// Failed creating an iterator over the queue
-    QueueIterator(virtio_queue::Error),
+    #[error("Failed creating an iterator over the queue")]
+    QueueIterator(#[source] virtio_queue::Error),
     /// Failed enabling notification for the queue
-    QueueEnableNotification(virtio_queue::Error),
+    #[error("Failed enabling notification for the queue")]
+    QueueEnableNotification(#[source] virtio_queue::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -153,25 +160,4 @@ impl CtrlQueue {
 
         Ok(())
     }
-}
-
-pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
-    let mut tap_offloads: c_uint = 0;
-    if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
-        tap_offloads |= net_gen::TUN_F_CSUM;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO4;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO6;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO_ECN;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
-        tap_offloads |= net_gen::TUN_F_UFO;
-    }
-
-    tap_offloads
 }

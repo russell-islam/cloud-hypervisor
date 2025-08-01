@@ -8,6 +8,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, RwLock};
+use std::{io, result};
+
+use anyhow::anyhow;
+use byteorder::{ByteOrder, LittleEndian};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::AccessPlatform;
+use vmm_sys_util::eventfd::EventFd;
+
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -29,32 +45,13 @@
 ///
 use super::{VsockBackend, VsockPacket};
 use crate::seccomp_filters::Thread;
-use crate::Error as DeviceError;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper, EpollHelperError,
-    EpollHelperHandler, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
+    GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
-use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, RwLock};
-use virtio_queue::Queue;
-use virtio_queue::QueueOwnedT;
-use virtio_queue::QueueT;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemoryAtomic;
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
-use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 3;
@@ -381,6 +378,11 @@ where
             acked_features: self.common.acked_features,
         }
     }
+
+    #[cfg(fuzzing)]
+    pub fn wait_for_epoll_threads(&mut self) {
+        self.common.wait_for_epoll_threads();
+    }
 }
 
 impl<B> Drop for Vsock<B>
@@ -523,11 +525,12 @@ impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 #[cfg(test)]
 #[cfg(not(feature = "sev_snp"))]
 mod tests {
+    use libc::EFD_NONBLOCK;
+
     use super::super::tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
     use crate::ActivateError;
-    use libc::EFD_NONBLOCK;
 
     #[test]
     fn test_virtio_device() {
@@ -631,7 +634,7 @@ mod tests {
             let ctx = test_ctx.create_epoll_handler_context();
 
             let _queue: Queue = Queue::new(256).unwrap();
-            assert!(ctx.handler.signal_used_queue(0).is_ok());
+            ctx.handler.signal_used_queue(0).unwrap();
         }
     }
 
@@ -714,10 +717,9 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -767,7 +769,7 @@ mod tests {
             ctx.guest_rxvq.dtable[0].len.set(0);
 
             // The chain should've been processed, without employing the backend.
-            assert!(ctx.handler.process_rx().is_ok());
+            ctx.handler.process_rx().unwrap();
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 1);
             assert_eq!(ctx.handler.backend.read().unwrap().rx_ok_cnt, 0);
         }
@@ -784,10 +786,9 @@ mod tests {
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 0);
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -805,10 +806,10 @@ mod tests {
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
             assert_eq!(ctx.guest_evvq.used.idx.get(), 0);
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -827,7 +828,7 @@ mod tests {
             let event = epoll::Event::new(events, BACKEND_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
-            assert!(ctx.handler.handle_event(&mut epoll_helper, &event).is_ok());
+            ctx.handler.handle_event(&mut epoll_helper, &event).unwrap();
 
             // The backend should've received this event.
             assert_eq!(
@@ -853,7 +854,7 @@ mod tests {
             let event = epoll::Event::new(events, BACKEND_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
-            assert!(ctx.handler.handle_event(&mut epoll_helper, &event).is_ok());
+            ctx.handler.handle_event(&mut epoll_helper, &event).unwrap();
 
             // The backend should've received this event.
             assert_eq!(
@@ -877,9 +878,8 @@ mod tests {
         let mut epoll_helper =
             EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-        assert!(
-            ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-            "handle_event() should have failed"
-        );
+        ctx.handler
+            .handle_event(&mut epoll_helper, &event)
+            .expect_err("handle_event() should have failed");
     }
 }

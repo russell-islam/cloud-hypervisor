@@ -15,8 +15,9 @@ extern crate event_monitor;
 #[macro_use]
 extern crate log;
 
-use serde::{Deserialize, Serialize};
 use std::io;
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[macro_use]
@@ -38,6 +39,10 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{GuestAddress, GuestMemory};
+use vm_virtio::VirtioDeviceType;
+
 pub use self::balloon::Balloon;
 pub use self::block::{Block, BlockState};
 pub use self::console::{Console, ConsoleResizer, Endpoint};
@@ -56,8 +61,6 @@ pub use self::rng::Rng;
 pub use self::vdpa::{Vdpa, VdpaDmaMapping};
 pub use self::vsock::Vsock;
 pub use self::watchdog::Watchdog;
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemory};
-use vm_virtio::VirtioDeviceType;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
@@ -84,20 +87,20 @@ const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,
-    #[error("Failed to clone exit event fd: {0}")]
-    CloneExitEventFd(std::io::Error),
-    #[error("Failed to spawn thread: {0}")]
-    ThreadSpawn(std::io::Error),
-    #[error("Failed to setup vhost-user-fs daemon: {0}")]
-    VhostUserFsSetup(vhost_user::Error),
-    #[error("Failed to setup vhost-user daemon: {0}")]
-    VhostUserSetup(vhost_user::Error),
-    #[error("Failed to create seccomp filter: {0}")]
-    CreateSeccompFilter(seccompiler::Error),
-    #[error("Failed to create rate limiter: {0}")]
-    CreateRateLimiter(std::io::Error),
-    #[error("Failed to activate the vDPA device: {0}")]
-    ActivateVdpa(vdpa::Error),
+    #[error("Failed to clone exit event fd")]
+    CloneExitEventFd(#[source] std::io::Error),
+    #[error("Failed to spawn thread")]
+    ThreadSpawn(#[source] std::io::Error),
+    #[error("Failed to setup vhost-user-fs daemon")]
+    VhostUserFsSetup(#[source] vhost_user::Error),
+    #[error("Failed to setup vhost-user daemon")]
+    VhostUserSetup(#[source] vhost_user::Error),
+    #[error("Failed to create seccomp filter")]
+    CreateSeccompFilter(#[source] seccompiler::Error),
+    #[error("Failed to create rate limiter")]
+    CreateRateLimiter(#[source] std::io::Error),
+    #[error("Failed to activate the vDPA device")]
+    ActivateVdpa(#[source] vdpa::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;
@@ -106,22 +109,22 @@ pub type DeviceEventT = u16;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to single used queue: {0}")]
-    FailedSignalingUsedQueue(io::Error),
-    #[error("I/O Error: {0}")]
-    IoError(io::Error),
-    #[error("Failed to update memory vhost-user: {0}")]
-    VhostUserUpdateMemory(vhost_user::Error),
-    #[error("Failed to add memory region vhost-user: {0}")]
-    VhostUserAddMemoryRegion(vhost_user::Error),
+    #[error("Failed to single used queue")]
+    FailedSignalingUsedQueue(#[source] io::Error),
+    #[error("I/O Error")]
+    IoError(#[source] io::Error),
+    #[error("Failed to update memory vhost-user")]
+    VhostUserUpdateMemory(#[source] vhost_user::Error),
+    #[error("Failed to add memory region vhost-user")]
+    VhostUserAddMemoryRegion(#[source] vhost_user::Error),
     #[error("Failed to set shared memory region")]
     SetShmRegionsNotSupported,
-    #[error("Failed to process net queue: {0}")]
-    NetQueuePair(::net_util::NetQueuePairError),
-    #[error("Failed to : {0}")]
-    QueueAddUsed(virtio_queue::Error),
-    #[error("Failed to : {0}")]
-    QueueIterator(virtio_queue::Error),
+    #[error("Failed to process net queue")]
+    NetQueuePair(#[source] ::net_util::NetQueuePairError),
+    #[error("Failed to ")]
+    QueueAddUsed(#[source] virtio_queue::Error),
+    #[error("Failed to ")]
+    QueueIterator(#[source] virtio_queue::Error),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

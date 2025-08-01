@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::device_manager::PciDeviceHandle;
-use pci::PciBdf;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use pci::PciBdf;
+use serde::{Deserialize, Serialize};
 use vm_device::Resource;
 use vm_migration::Migratable;
+
+use crate::device_manager::PciDeviceHandle;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceNode {
@@ -72,10 +74,10 @@ impl DeviceTree {
     pub fn remove(&mut self, k: &str) -> Option<DeviceNode> {
         self.0.remove(k)
     }
-    pub fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, String, DeviceNode> {
         self.0.iter()
     }
-    pub fn breadth_first_traversal(&self) -> BftIter {
+    pub fn breadth_first_traversal(&self) -> BftIter<'_> {
         BftIter::new(&self.0)
     }
     pub fn pci_devices(&self) -> Vec<&DeviceNode> {

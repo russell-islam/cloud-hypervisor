@@ -3,20 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use anyhow::anyhow;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+
+use anyhow::anyhow;
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Cannot connect to tpm Socket: {0}")]
+    #[error("Cannot connect to tpm Socket")]
     ConnectToSocket(#[source] anyhow::Error),
-    #[error("Failed to read from socket: {0}")]
+    #[error("Failed to read from socket")]
     ReadFromSocket(#[source] anyhow::Error),
-    #[error("Failed to write to socket: {0}")]
+    #[error("Failed to write to socket")]
     WriteToSocket(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;

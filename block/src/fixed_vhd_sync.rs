@@ -2,15 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, RawFd};
+
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
 use crate::BlockBackend;
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
-use vmm_sys_util::eventfd::EventFd;
 
 pub struct FixedVhdDiskSync(FixedVhd);
 
@@ -30,6 +32,10 @@ impl DiskFile for FixedVhdDiskSync {
             FixedVhdSync::new(self.0.as_raw_fd(), self.0.size().unwrap())
                 .map_err(DiskFileError::NewAsyncIo)?,
         ) as Box<dyn AsyncIo>)
+    }
+
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.0.as_raw_fd())
     }
 }
 

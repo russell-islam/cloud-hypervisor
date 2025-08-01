@@ -8,17 +8,16 @@ extern crate test_infra;
 
 mod performance_tests;
 
+use std::process::Command;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
+use std::time::Duration;
+use std::{env, fmt, thread};
+
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    env, fmt,
-    process::Command,
-    sync::{mpsc::channel, Arc},
-    thread,
-    time::Duration,
-};
-use test_infra::*;
+use test_infra::FioOps;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -763,6 +762,12 @@ fn run_test_with_timeout(
 fn date() -> String {
     let output = test_infra::exec_host_command_output("date");
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+// Stub implementation for is_guest_vm_type_cvm.
+// Replace this with the actual logic if needed.
+fn is_guest_vm_type_cvm() -> bool {
+    false
 }
 
 fn main() {

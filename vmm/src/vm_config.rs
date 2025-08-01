@@ -2,11 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::{landlock::LandlockError, Landlock};
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
+use std::{fs, result};
+
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{fs, net::Ipv4Addr, path::PathBuf, result};
 use virtio_devices::RateLimiterConfig;
+
+use crate::landlock::LandlockError;
+use crate::Landlock;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -83,12 +88,19 @@ pub fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
 }
 
+pub const DEFAULT_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
+pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
     #[serde(default)]
     pub iommu_segments: Option<Vec<u16>>,
+    #[serde(default = "default_platformconfig_iommu_address_width_bits")]
+    pub iommu_address_width_bits: u8,
     #[serde(default)]
     pub serial_number: Option<String>,
     #[serde(default)]
@@ -289,9 +301,9 @@ pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
     #[serde(default = "default_netconfig_ip")]
-    pub ip: Ipv4Addr,
+    pub ip: IpAddr,
     #[serde(default = "default_netconfig_mask")]
-    pub mask: Ipv4Addr,
+    pub mask: IpAddr,
     #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
     #[serde(default)]
@@ -337,12 +349,14 @@ pub fn default_netconfig_tap() -> Option<String> {
     None
 }
 
-pub fn default_netconfig_ip() -> Ipv4Addr {
-    Ipv4Addr::new(192, 168, 249, 1)
+pub fn default_netconfig_ip() -> IpAddr {
+    warn!("Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon.");
+    IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
 }
 
-pub fn default_netconfig_mask() -> Ipv4Addr {
-    Ipv4Addr::new(255, 255, 255, 0)
+pub fn default_netconfig_mask() -> IpAddr {
+    warn!("Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon.");
+    IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
 }
 
 pub fn default_netconfig_mac() -> MacAddr {
@@ -474,7 +488,8 @@ pub struct PmemConfig {
 
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.file.to_path_buf(), "rw")?;
+        let access = if self.discard_writes { "r" } else { "rw" };
+        landlock.add_rule_with_access(self.file.to_path_buf(), access)?;
         Ok(())
     }
 }

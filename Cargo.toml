@@ -7,15 +7,15 @@ edition = "2021"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
-version = "41.0.0"
+version = "47.0.0"
 # Minimum buildable version:
 # Keep in sync with version in .github/workflows/build.yaml
 # Policy on MSRV (see #4318):
-# Can only be bumped by:
+# Can only be bumped if satisfying any of the following:
 # a.) A dependency requires it,
 # b.) If we want to use a new feature and that MSRV is at least 6 months old,
 # c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.77.0"
+rust-version = "1.83.0"
 
 [profile.release]
 codegen-units = 1
@@ -29,43 +29,32 @@ inherits = "release"
 strip = false
 
 [dependencies]
-anyhow = "1.0.86"
+anyhow = "1.0.94"
 api_client = { path = "api_client" }
-clap = { version = "4.5.4", features = ["string"] }
+clap = { version = "4.5.13", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
+env_logger = { workspace = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.155"
+libc = "0.2.167"
 log = { version = "0.4.22", features = ["std"] }
 option_parser = { path = "option_parser" }
-regex = "1.5"
-seccompiler = "0.4.0"
-serde_json = "1.0.120"
-signal-hook = "0.3.17"
-thiserror = "1.0.62"
+seccompiler = { workspace = true }
+serde_json = { workspace = true }
+signal-hook = "0.3.18"
+thiserror = { workspace = true }
 tpm = { path = "tpm" }
 tracer = { path = "tracer" }
-vhost_user_block = { path = "vhost_user_block" }
-vhost_user_net = { path = "vhost_user_net" }
-vm-memory = "0.14.1"
+vm-memory = { workspace = true }
 vmm = { path = "vmm" }
-vmm-sys-util = "0.12.1"
-zbus = { version = "4.1.2", optional = true }
-
-[patch."https://github.com/rust-vmm/vfio"]
-vfio-ioctls = { git = "https://github.com/praveen-pk/vfio", branch ="msft/ch/pci_pass_fix" }
-vfio-bindings = { git = "https://github.com/praveen-pk/vfio", branch ="msft/ch/pci_pass_fix" }
-
-[patch."https://github.com/rust-vmm/mshv"]
-mshv-ioctls = { git = "https://github.com/praveen-pk/mshv", branch = "msft/ch/pci_pass_fix" }
-mshv-bindings = { git = "https://github.com/praveen-pk/mshv", branch ="msft/ch/pci_pass_fix" }
+vmm-sys-util = { workspace = true }
+zbus = { version = "5.7.1", optional = true }
 
 [dev-dependencies]
-dirs = "5.0.1"
+dirs = "6.0.0"
 net_util = { path = "net_util" }
-once_cell = "1.19.0"
-serde_json = "1.0.120"
+serde_json = { workspace = true }
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
@@ -81,7 +70,7 @@ io_uring = ["vmm/io_uring"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
-sev_snp = ["igvm", "mshv", "vhost_user_block/sev_snp", "vhost_user_net/sev_snp", "vmm/sev_snp"]
+sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
 
@@ -111,3 +100,37 @@ members = [
   "vm-virtio",
   "vmm",
 ]
+
+[workspace.dependencies]
+# rust-vmm crates
+acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
+kvm-bindings = "0.12.0"
+kvm-ioctls = "0.22.0"
+linux-loader = "0.13.0"
+mshv-bindings = "0.5.2"
+mshv-ioctls = "0.5.2"
+seccompiler = "0.5.0"
+vfio-bindings = { version = "0.5.0", default-features = false }
+vfio-ioctls = { version = "0.5.0", default-features = false }
+vfio_user = { version = "0.1.0", default-features = false }
+vhost = { version = "0.14.0", default-features = false }
+vhost-user-backend = { version = "0.20.0", default-features = false }
+virtio-bindings = "0.2.6"
+virtio-queue = "0.16.0"
+vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
+vm-memory = "0.16.1"
+vmm-sys-util = "0.14.0"
+
+# igvm crates
+# TODO: bump to 0.3.5 release
+igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
+igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
+
+# serde crates
+serde_json = "1.0.120"
+
+# other crates
+env_logger = "0.11.8"
+thiserror = "2.0.12"
+uuid = { version = "1.17.0" }
+zerocopy = { version = "0.8.26", default-features = false }

@@ -10,7 +10,9 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
-use std::{convert, error, fmt, io, result};
+use std::{convert, io, result};
+
+use thiserror::Error;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
 ///
@@ -51,25 +53,20 @@ impl<B: BusDevice> BusDeviceSync for Mutex<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// The insertion failed because the new device overlapped with an old device.
+    #[error("The insertion failed because the new device overlapped with an old device")]
     Overlap,
     /// Failed to operate on zero sized range.
+    #[error("Failed to operate on zero sized range")]
     ZeroSizedRange,
     /// Failed to find address range.
+    #[error("Failed to find address range")]
     MissingAddressRange,
 }
 
 pub type Result<T> = result::Result<T, Error>;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "bus_error: {self:?}")
-    }
-}
-
-impl error::Error for Error {}
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
@@ -288,21 +285,20 @@ mod tests {
     fn bus_insert() {
         let bus = Bus::new();
         let dummy = Arc::new(DummyDevice);
-        assert!(bus.insert(dummy.clone(), 0x10, 0).is_err());
-        assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
+        bus.insert(dummy.clone(), 0x10, 0).unwrap_err();
+        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
 
         let result = bus.insert(dummy.clone(), 0x0f, 0x10);
-        assert!(result.is_err());
         assert_eq!(format!("{result:?}"), "Err(Overlap)");
 
-        assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_err());
-        assert!(bus.insert(dummy.clone(), 0x10, 0x15).is_err());
-        assert!(bus.insert(dummy.clone(), 0x12, 0x15).is_err());
-        assert!(bus.insert(dummy.clone(), 0x12, 0x01).is_err());
-        assert!(bus.insert(dummy.clone(), 0x0, 0x20).is_err());
-        assert!(bus.insert(dummy.clone(), 0x20, 0x05).is_ok());
-        assert!(bus.insert(dummy.clone(), 0x25, 0x05).is_ok());
-        assert!(bus.insert(dummy, 0x0, 0x10).is_ok());
+        bus.insert(dummy.clone(), 0x10, 0x10).unwrap_err();
+        bus.insert(dummy.clone(), 0x10, 0x15).unwrap_err();
+        bus.insert(dummy.clone(), 0x12, 0x15).unwrap_err();
+        bus.insert(dummy.clone(), 0x12, 0x01).unwrap_err();
+        bus.insert(dummy.clone(), 0x0, 0x20).unwrap_err();
+        bus.insert(dummy.clone(), 0x20, 0x05).unwrap();
+        bus.insert(dummy.clone(), 0x25, 0x05).unwrap();
+        bus.insert(dummy, 0x0, 0x10).unwrap();
     }
 
     #[test]
@@ -310,17 +306,17 @@ mod tests {
     fn bus_read_write() {
         let bus = Bus::new();
         let dummy = Arc::new(DummyDevice);
-        assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
-        assert!(bus.read(0x10, &mut [0, 0, 0, 0]).is_ok());
-        assert!(bus.write(0x10, &[0, 0, 0, 0]).is_ok());
-        assert!(bus.read(0x11, &mut [0, 0, 0, 0]).is_ok());
-        assert!(bus.write(0x11, &[0, 0, 0, 0]).is_ok());
-        assert!(bus.read(0x16, &mut [0, 0, 0, 0]).is_ok());
-        assert!(bus.write(0x16, &[0, 0, 0, 0]).is_ok());
-        assert!(bus.read(0x20, &mut [0, 0, 0, 0]).is_err());
-        assert!(bus.write(0x20, &[0, 0, 0, 0]).is_err());
-        assert!(bus.read(0x06, &mut [0, 0, 0, 0]).is_err());
-        assert!(bus.write(0x06, &[0, 0, 0, 0]).is_err());
+        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        bus.read(0x10, &mut [0, 0, 0, 0]).unwrap();
+        bus.write(0x10, &[0, 0, 0, 0]).unwrap();
+        bus.read(0x11, &mut [0, 0, 0, 0]).unwrap();
+        bus.write(0x11, &[0, 0, 0, 0]).unwrap();
+        bus.read(0x16, &mut [0, 0, 0, 0]).unwrap();
+        bus.write(0x16, &[0, 0, 0, 0]).unwrap();
+        bus.read(0x20, &mut [0, 0, 0, 0]).unwrap_err();
+        bus.write(0x20, &[0, 0, 0, 0]).unwrap_err();
+        bus.read(0x06, &mut [0, 0, 0, 0]).unwrap_err();
+        bus.write(0x06, &[0, 0, 0, 0]).unwrap_err();
     }
 
     #[test]
@@ -328,15 +324,15 @@ mod tests {
     fn bus_read_write_values() {
         let bus = Bus::new();
         let dummy = Arc::new(ConstantDevice);
-        assert!(bus.insert(dummy.clone(), 0x10, 0x10).is_ok());
+        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
 
         let mut values = [0, 1, 2, 3];
-        assert!(bus.read(0x10, &mut values).is_ok());
+        bus.read(0x10, &mut values).unwrap();
         assert_eq!(values, [0, 1, 2, 3]);
-        assert!(bus.write(0x10, &values).is_ok());
-        assert!(bus.read(0x15, &mut values).is_ok());
+        bus.write(0x10, &values).unwrap();
+        bus.read(0x15, &mut values).unwrap();
         assert_eq!(values, [5, 6, 7, 8]);
-        assert!(bus.write(0x15, &values).is_ok());
+        bus.write(0x15, &values).unwrap();
     }
 
     #[test]
@@ -354,9 +350,9 @@ mod tests {
         let bus = Bus::new();
         let mut data = [1, 2, 3, 4];
         let device = Arc::new(DummyDevice);
-        assert!(bus.insert(device.clone(), 0x10, 0x10).is_ok());
-        assert!(bus.write(0x10, &data).is_ok());
-        assert!(bus.read(0x10, &mut data).is_ok());
+        bus.insert(device.clone(), 0x10, 0x10).unwrap();
+        bus.write(0x10, &data).unwrap();
+        bus.read(0x10, &mut data).unwrap();
         assert_eq!(data, [1, 2, 3, 4]);
     }
 

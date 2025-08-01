@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::fs::File;
+use std::io::Write;
+
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
 use linux_loader::elf;
-use std::fs::File;
-use std::io::Write;
+use thiserror::Error;
 use vm_memory::ByteValued;
 
 #[derive(Clone)]
@@ -32,12 +34,16 @@ pub struct DumpState {
     pub file: Option<File>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum GuestDebuggableError {
-    Coredump(anyhow::Error),
-    CoredumpFile(std::io::Error),
-    Pause(vm_migration::MigratableError),
-    Resume(vm_migration::MigratableError),
+    #[error("coredump")]
+    Coredump(#[source] anyhow::Error),
+    #[error("coredump file")]
+    CoredumpFile(#[source] std::io::Error),
+    #[error("Failed to pause")]
+    Pause(#[source] vm_migration::MigratableError),
+    #[error("Failed to resume")]
+    Resume(#[source] vm_migration::MigratableError),
 }
 
 pub trait GuestDebuggable: vm_migration::Pausable {

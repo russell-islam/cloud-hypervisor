@@ -4,49 +4,38 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::configuration::{self, PciBarRegionType};
-use crate::PciBarConfiguration;
 use std::any::Any;
-use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
+
+use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
 
-#[derive(Debug)]
+use crate::configuration::{self, PciBarRegionType};
+use crate::PciBarConfiguration;
+
+#[derive(Error, Debug)]
 pub enum Error {
     /// Setup of the device capabilities failed.
-    CapabilitiesSetup(configuration::Error),
+    #[error("Setup of the device capabilities failed")]
+    CapabilitiesSetup(#[source] configuration::Error),
     /// Allocating space for an IO BAR failed.
+    #[error("Allocating space for an IO BAR failed")]
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
-    IoRegistrationFailed(u64, configuration::Error),
+    #[error("Registering an IO BAR failed")]
+    IoRegistrationFailed(u64, #[source] configuration::Error),
     /// Expected resource not found.
+    #[error("Expected resource not found")]
     MissingResource,
     /// Invalid resource.
+    #[error("Invalid resource: {0:?}")]
     InvalidResource(Resource),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-
-        match self {
-            CapabilitiesSetup(e) => write!(f, "failed to add capability {e}"),
-            IoAllocationFailed(size) => {
-                write!(f, "failed to allocate space for an IO BAR, size={size}")
-            }
-            IoRegistrationFailed(addr, e) => {
-                write!(f, "failed to register an IO BAR, addr={addr} err={e}")
-            }
-            MissingResource => write!(f, "failed to find expected resource"),
-            InvalidResource(r) => write!(f, "invalid resource {r:?}"),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BarReprogrammingParams {
     pub old_base: u64,
     pub new_base: u64,
@@ -85,18 +74,10 @@ pub trait PciDevice: Send {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>>;
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>);
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&mut self, reg_idx: usize) -> u32;
-    /// Detects if a BAR is being reprogrammed.
-    fn detect_bar_reprogramming(
-        &mut self,
-        _reg_idx: usize,
-        _data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        None
-    }
     /// Reads from a BAR region mapped into the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.
@@ -113,7 +94,7 @@ pub trait PciDevice: Send {
     }
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
-    fn as_any(&mut self) -> &mut dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     /// Optionally returns a unique identifier.
     fn id(&self) -> Option<String>;

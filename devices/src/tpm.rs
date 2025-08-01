@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::cmp;
+use std::sync::{Arc, Barrier};
+
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{TPM_SIZE, TPM_START};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::layout::{TPM_SIZE, TPM_START};
-use std::cmp;
-use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use tpm::emulator::{BackendCmd, Emulator};
 use tpm::TPM_CRB_BUFFER_MAX;
@@ -17,9 +18,9 @@ use vm_device::BusDevice;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Emulator doesn't implement min required capabilities: {0}")]
+    #[error("Emulator doesn't implement min required capabilities")]
     CheckCaps(#[source] anyhow::Error),
-    #[error("Failed to initialize tpm: {0}")]
+    #[error("Failed to initialize tpm")]
     Init(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;

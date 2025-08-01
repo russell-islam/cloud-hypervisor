@@ -84,7 +84,7 @@ fi
 # We will build kernel only if we are not running perf-metrics test for CVM
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 if [ ! -f "$VMLINUX_IMAGE" ] && [ "$GUEST_VM_TYPE" != "CVM" ]; then
-    build_custom_linux
+    prepare_linux
 fi
 
 CFLAGS=""
