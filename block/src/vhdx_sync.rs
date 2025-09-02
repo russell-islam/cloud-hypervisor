@@ -52,7 +52,7 @@ impl VhdxSync {
 }
 
 impl AsyncAdaptor<Vhdx> for Arc<Mutex<Vhdx>> {
-    fn file(&mut self) -> MutexGuard<Vhdx> {
+    fn file(&mut self) -> MutexGuard<'_, Vhdx> {
         self.lock().unwrap()
     }
 }
