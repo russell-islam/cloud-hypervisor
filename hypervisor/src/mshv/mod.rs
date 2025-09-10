@@ -2419,6 +2419,7 @@ impl vm::Vm for MshvVm {
         // Set additional partition property for SEV-SNP partition.
         #[cfg(feature = "sev_snp")]
         if self.sev_snp_enabled {
+            warn!("MUISLAM: sen_snp vm init");
             let snp_policy = snp::get_default_snp_guest_policy();
             let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
             // SAFETY: access union fields
