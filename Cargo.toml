@@ -107,12 +107,12 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 kvm-bindings = "0.12.0"
 kvm-ioctls = "0.22.0"
 linux-loader = "0.13.0"
-mshv-bindings = "0.5.2"
-mshv-ioctls = "0.5.2"
+mshv-bindings = { path = "../mshv/mshv-bindings"}
+mshv-ioctls = { path = "../mshv/mshv-ioctls"}
 seccompiler = "0.5.0"
-vfio-bindings = { version = "0.5.0", default-features = false }
-vfio-ioctls = { version = "0.5.0", default-features = false }
-vfio_user = { version = "0.1.0", default-features = false }
+vfio-bindings = { path = "../vfio/vfio-bindings", default-features = false }
+vfio-ioctls = { path = "../vfio/vfio-ioctls", default-features = false }
+vfio_user = { path = "../vfio/vfio-user", default-features = false }
 vhost = { version = "0.14.0", default-features = false }
 vhost-user-backend = { version = "0.20.0", default-features = false }
 virtio-bindings = "0.2.6"
