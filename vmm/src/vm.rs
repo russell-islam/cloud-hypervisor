@@ -628,13 +628,48 @@ impl Vm {
         #[cfg(feature = "mshv")]
         {
             if is_mshv {
+                vm.init().map_err(Error::InitializeVm)?;
+            }
+        }
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
+
+        // Loading the igvm file is pushed down here because
+        // igvm parser needs cpu_manager to retrieve cpuid leaf.
+        // Currently, Microsoft Hypervisor does not provide any
+        // Hypervisor specific common cpuid, we need to call get_cpuid_values
+        // per cpuid through cpu_manager.
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
+        } else {
+            None
+        };
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
                 let ic = device_manager
                     .lock()
                     .unwrap()
                     .create_interrupt_controller()
                     .map_err(Error::DeviceManager)?;
-
-                vm.init().map_err(Error::InitializeVm)?;
 
                 device_manager
                     .lock()
@@ -663,36 +698,6 @@ impl Vm {
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
 
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
-        }
-        // Loading the igvm file is pushed down here because
-        // igvm parser needs cpu_manager to retrieve cpuid leaf.
-        // Currently, Microsoft Hypervisor does not provide any
-        // Hypervisor specific common cpuid, we need to call get_cpuid_values
-        // per cpuid through cpu_manager.
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(
-                &memory_manager,
-                &config,
-                #[cfg(feature = "igvm")]
-                &cpu_manager,
-                #[cfg(feature = "sev_snp")]
-                sev_snp_enabled,
-            )?
-        } else {
-            None
-        };
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
         // This means that we need to create interrupt controller after we restore in case of KVM guests.
@@ -714,7 +719,6 @@ impl Vm {
                     .map_err(Error::DeviceManager)?;
             }
         }
-
 
         #[cfg(feature = "tdx")]
         let kernel = config
