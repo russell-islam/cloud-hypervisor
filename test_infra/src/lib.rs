@@ -4,9 +4,6 @@
 //
 
 #![allow(clippy::undocumented_unsafe_blocks)]
-use rand::{rng, Rng};
-use ssh2::Session;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io::{Read, Write};
@@ -18,10 +15,12 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
-use std::{fmt, fs, io, thread};
+use std::{env, fmt, fs, io, thread};
 
+use rand::{rng, Rng};
 pub use regex::Regex;
 use serde_json::Value;
+use ssh2::Session;
 use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
@@ -1288,16 +1287,12 @@ impl Guest {
     }
 }
 
+#[derive(Default)]
 pub enum VerbosityLevel {
+    #[default]
     Warn,
     Info,
     Debug,
-}
-
-impl Default for VerbosityLevel {
-    fn default() -> Self {
-        Self::Warn
-    }
 }
 
 impl Display for VerbosityLevel {

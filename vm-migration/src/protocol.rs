@@ -50,8 +50,9 @@ use crate::MigratableError;
 // The source can at any time send an "abandon request" to cancel
 
 #[repr(u16)]
-#[derive(Copy, Clone)]
+#[derive(Default, Copy, Clone)]
 pub enum Command {
+    #[default]
     Invalid,
     Start,
     Config,
@@ -60,12 +61,6 @@ pub enum Command {
     Complete,
     Abandon,
     MemoryFd,
-}
-
-impl Default for Command {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 #[repr(C)]
@@ -139,17 +134,12 @@ impl Request {
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub enum Status {
+    #[default]
     Invalid,
     Ok,
     Error,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 #[repr(C)]
@@ -264,7 +254,7 @@ impl MemoryRangeTable {
     }
 
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
-        assert!(length as usize % std::mem::size_of::<MemoryRange>() == 0);
+        assert!((length as usize).is_multiple_of(std::mem::size_of::<MemoryRange>()));
 
         let mut data: Vec<MemoryRange> = Vec::new();
         data.resize_with(

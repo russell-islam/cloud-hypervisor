@@ -189,8 +189,8 @@ pub fn simple_api_full_command_with_fds<T: Read + Write + ScmSocket>(
         request_fds,
     )?;
 
-    if response.is_some() {
-        println!("{}", response.unwrap());
+    if let Some(rsp) = response {
+        println!("{}", rsp);
     }
 
     Ok(())

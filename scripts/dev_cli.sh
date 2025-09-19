@@ -191,9 +191,9 @@ process_igvm_files() {
     src=$1
     dest=$2
 
-    if [ -d $src ]; then
+    if [ -d "$src" ]; then
         say "Moving IGVM files from $src to $dest"
-        cp $src/* $dest
+        cp "$src"/* "$dest"
     else
         say_err "IGVM File path '$src' not found on host"
         exit 1
