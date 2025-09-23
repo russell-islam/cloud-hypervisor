@@ -12,26 +12,29 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
-use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
-use crate::RegionType;
-use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
+use std::mem;
+
+use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
-use std::collections::BTreeMap;
-use std::mem;
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryRegion, GuestUsize,
+    GuestMemoryRegion,
 };
+
+use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
 mod smbios;
 use std::arch::x86_64;
 #[cfg(feature = "tdx")]
 pub mod tdx;
+
+// While modern architectures support more than 255 CPUs via x2APIC,
+// legacy devices such as mptable support at most 254 CPUs.
+pub const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
 
 // CPUID feature bits
 #[cfg(feature = "kvm")]
@@ -57,6 +60,8 @@ const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
 
+const KVM_FEATURE_MSI_EXT_DEST_ID: u8 = 15;
+
 pub const _NSIG: i32 = 65;
 
 #[derive(Debug, Copy, Clone)]
@@ -73,55 +78,7 @@ pub struct EntryPoint {
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
-#[derive(Clone)]
-pub struct SgxEpcSection {
-    start: GuestAddress,
-    size: GuestUsize,
-}
-
-impl SgxEpcSection {
-    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
-        SgxEpcSection { start, size }
-    }
-    pub fn start(&self) -> GuestAddress {
-        self.start
-    }
-    pub fn size(&self) -> GuestUsize {
-        self.size
-    }
-}
-
-#[derive(Clone)]
-pub struct SgxEpcRegion {
-    start: GuestAddress,
-    size: GuestUsize,
-    epc_sections: BTreeMap<String, SgxEpcSection>,
-}
-
-impl SgxEpcRegion {
-    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
-        SgxEpcRegion {
-            start,
-            size,
-            epc_sections: BTreeMap::new(),
-        }
-    }
-    pub fn start(&self) -> GuestAddress {
-        self.start
-    }
-    pub fn size(&self) -> GuestUsize {
-        self.size
-    }
-    pub fn epc_sections(&self) -> &BTreeMap<String, SgxEpcSection> {
-        &self.epc_sections
-    }
-    pub fn insert(&mut self, id: String, epc_section: SgxEpcSection) {
-        self.epc_sections.insert(id, epc_section);
-    }
-}
-
 pub struct CpuidConfig {
-    pub sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     pub phys_bits: u8,
     pub kvm_hyperv: bool,
     #[cfg(feature = "tdx")]
@@ -132,94 +89,76 @@ pub struct CpuidConfig {
 #[derive(Debug, Error)]
 pub enum Error {
     /// Error writing MP table to memory.
-    #[error("Error writing MP table to memory: {0}")]
-    MpTableSetup(mptable::Error),
+    #[error("Error writing MP table to memory")]
+    MpTableSetup(#[source] mptable::Error),
 
     /// Error configuring the general purpose registers
-    #[error("Error configuring the general purpose registers: {0}")]
-    RegsConfiguration(regs::Error),
+    #[error("Error configuring the general purpose registers")]
+    RegsConfiguration(#[source] regs::Error),
 
     /// Error configuring the special registers
-    #[error("Error configuring the special registers: {0}")]
-    SregsConfiguration(regs::Error),
+    #[error("Error configuring the special registers")]
+    SregsConfiguration(#[source] regs::Error),
 
     /// Error configuring the floating point related registers
-    #[error("Error configuring the floating point related registers: {0}")]
-    FpuConfiguration(regs::Error),
+    #[error("Error configuring the floating point related registers")]
+    FpuConfiguration(#[source] regs::Error),
 
     /// Error configuring the MSR registers
-    #[error("Error configuring the MSR registers: {0}")]
-    MsrsConfiguration(regs::Error),
+    #[error("Error configuring the MSR registers")]
+    MsrsConfiguration(#[source] regs::Error),
 
     /// Failed to set supported CPUs.
-    #[error("Failed to set supported CPUs: {0}")]
-    SetSupportedCpusFailed(anyhow::Error),
+    #[error("Failed to set supported CPUs")]
+    SetSupportedCpusFailed(#[source] anyhow::Error),
 
     /// Cannot set the local interruption due to bad configuration.
-    #[error("Cannot set the local interruption due to bad configuration: {0}")]
-    LocalIntConfiguration(anyhow::Error),
+    #[error("Cannot set the local interruption due to bad configuration")]
+    LocalIntConfiguration(#[source] anyhow::Error),
 
     /// Error setting up SMBIOS table
-    #[error("Error setting up SMBIOS table: {0}")]
-    SmbiosSetup(smbios::Error),
-
-    /// Could not find any SGX EPC section
-    #[error("Could not find any SGX EPC section")]
-    NoSgxEpcSection,
-
-    /// Missing SGX CPU feature
-    #[error("Missing SGX CPU feature")]
-    MissingSgxFeature,
-
-    /// Missing SGX_LC CPU feature
-    #[error("Missing SGX_LC CPU feature")]
-    MissingSgxLaunchControlFeature,
+    #[error("Error setting up SMBIOS table")]
+    SmbiosSetup(#[source] smbios::Error),
 
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
-    #[error("Error getting supported CPUID through the hypervisor API: {0}")]
-    CpuidGetSupported(HypervisorError),
+    #[error("Error getting supported CPUID through the hypervisor API")]
+    CpuidGetSupported(#[source] HypervisorError),
 
     /// Error populating CPUID with KVM HyperV emulation details
-    #[error("Error populating CPUID with KVM HyperV emulation details: {0}")]
-    CpuidKvmHyperV(vmm_sys_util::fam::Error),
+    #[error("Error populating CPUID with KVM HyperV emulation details")]
+    CpuidKvmHyperV(#[source] vmm_sys_util::fam::Error),
 
     /// Error populating CPUID with CPU identification
-    #[error("Error populating CPUID with CPU identification: {0}")]
-    CpuidIdentification(vmm_sys_util::fam::Error),
+    #[error("Error populating CPUID with CPU identification")]
+    CpuidIdentification(#[source] vmm_sys_util::fam::Error),
 
     /// Error checking CPUID compatibility
     #[error("Error checking CPUID compatibility")]
     CpuidCheckCompatibility,
 
     // Error writing EBDA address
-    #[error("Error writing EBDA address: {0}")]
-    EbdaSetup(vm_memory::GuestMemoryError),
+    #[error("Error writing EBDA address")]
+    EbdaSetup(#[source] vm_memory::GuestMemoryError),
 
     // Error getting CPU TSC frequency
-    #[error("Error getting CPU TSC frequency: {0}")]
-    GetTscFrequency(HypervisorCpuError),
+    #[error("Error getting CPU TSC frequency")]
+    GetTscFrequency(#[source] HypervisorCpuError),
 
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
-    #[error("Error retrieving TDX capabilities through the hypervisor API: {0}")]
-    TdxCapabilities(HypervisorError),
+    #[error("Error retrieving TDX capabilities through the hypervisor API")]
+    TdxCapabilities(#[source] HypervisorError),
 
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
     E820Configuration,
 }
 
-impl From<Error> for super::Error {
-    fn from(e: Error) -> super::Error {
-        super::Error::PlatformSpecific(e)
-    }
-}
-
-pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
+pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u16, u16, u16, u16)>) -> u32 {
     if let Some(t) = topology {
-        let thread_mask_width = u8::BITS - (t.0 - 1).leading_zeros();
-        let core_mask_width = u8::BITS - (t.1 - 1).leading_zeros();
-        let die_mask_width = u8::BITS - (t.2 - 1).leading_zeros();
+        let thread_mask_width = u16::BITS - (t.0 - 1).leading_zeros();
+        let core_mask_width = u16::BITS - (t.1 - 1).leading_zeros();
+        let die_mask_width = u16::BITS - (t.2 - 1).leading_zeros();
 
         let thread_id = cpu_id % (t.0 as u32);
         let core_id = cpu_id / (t.0 as u32) % (t.1 as u32);
@@ -233,6 +172,13 @@ pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
     }
 
     cpu_id
+}
+
+pub fn get_max_x2apic_id(topology: (u16, u16, u16, u16)) -> u32 {
+    get_x2apic_id(
+        (topology.0 as u32 * topology.1 as u32 * topology.2 as u32 * topology.3 as u32) - 1,
+        Some(topology),
+    )
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -460,7 +406,7 @@ impl CpuidFeatureEntry {
                 feature_reg: CpuidReg::EDX,
                 compatible_check: CpuidCompatibleCheck::BitwiseSubset,
             },
-            // KVM CPUID bits: https://www.kernel.org/doc/html/latest/virt/kvm/cpuid.html
+            // KVM CPUID bits: https://www.kernel.org/doc/html/latest/virt/kvm/x86/cpuid.html
             // Leaf 0x4000_0000, EAX/EBX/ECX/EDX, KVM CPUID SIGNATURE
             CpuidFeatureEntry {
                 function: 0x4000_0000,
@@ -579,9 +525,13 @@ impl CpuidFeatureEntry {
                 error!(
                     "Detected incompatible CPUID entry: leaf={:#02x} (subleaf={:#02x}), register='{:?}', \
                     compatible_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
-                    entry.function, entry.index, entry.feature_reg,
-                    entry.compatible_check, src_vm_feature, dest_vm_feature
-                    );
+                    entry.function,
+                    entry.index,
+                    entry.feature_reg,
+                    entry.compatible_check,
+                    src_vm_feature,
+                    dest_vm_feature
+                );
 
                 compatible = false;
             }
@@ -668,10 +618,6 @@ pub fn generate_common_cpuid(
 
     CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
-    if let Some(sgx_epc_sections) = &config.sgx_epc_sections {
-        update_cpuid_sgx(&mut cpuid, sgx_epc_sections)?;
-    }
-
     #[cfg(feature = "tdx")]
     let tdx_capabilities = if config.tdx {
         let caps = hypervisor
@@ -744,6 +690,10 @@ pub fn generate_common_cpuid(
                 entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
             }
             0x4000_0001 => {
+                // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
+                // device interrupts to cpus with APIC IDs > 254 without interrupt remapping.
+                entry.eax |= 1 << KVM_FEATURE_MSI_EXT_DEST_ID;
+
                 // These features are not supported by TDX
                 #[cfg(feature = "tdx")]
                 if config.tdx {
@@ -826,14 +776,14 @@ pub fn generate_common_cpuid(
 
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
-    topology: Option<(u8, u8, u8)>,
+    topology: (u16, u16, u16, u16),
 ) -> super::Result<()> {
-    let x2apic_id = get_x2apic_id(id as u32, topology);
+    let x2apic_id = get_x2apic_id(id, Some(topology));
 
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
@@ -855,36 +805,31 @@ pub fn configure_vcpu(
     }
     assert!(apic_id_patched);
 
-    if let Some(t) = topology {
-        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
-    }
+    update_cpuid_topology(
+        &mut cpuid, topology.0, topology.1, topology.2, topology.3, cpu_vendor, id,
+    );
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
-    if !kvm_hyperv {
-        if let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
-            // Need to check that the TSC doesn't vary with dynamic frequency
-            // SAFETY: cpuid called with valid leaves
-            if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx
-                & (1u32 << INVARIANT_TSC_EDX_BIT)
-                > 0
-            {
-                CpuidPatch::set_cpuid_reg(
-                    &mut cpuid,
-                    0x4000_0000,
-                    None,
-                    CpuidReg::EAX,
-                    0x4000_0010,
-                );
-                cpuid.retain(|c| c.function != 0x4000_0010);
-                cpuid.push(CpuIdEntry {
-                    function: 0x4000_0010,
-                    eax: tsc_khz,
-                    ebx: 1000000, /* LAPIC resolution of 1ns (freq: 1GHz) is hardcoded in KVM's
-                                   * APIC_BUS_CYCLE_NS */
-                    ..Default::default()
-                });
-            };
-        }
+    if !kvm_hyperv && let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
+        // Need to check that the TSC doesn't vary with dynamic frequency
+        // SAFETY: cpuid called with valid leaves
+        if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT)
+            > 0
+        {
+            CpuidPatch::set_cpuid_reg(&mut cpuid, 0x4000_0000, None, CpuidReg::EAX, 0x4000_0010);
+            cpuid.retain(|c| c.function != 0x4000_0010);
+            cpuid.push(CpuIdEntry {
+                function: 0x4000_0010,
+                eax: tsc_khz,
+                ebx: 1000000, /* LAPIC resolution of 1ns (freq: 1GHz) is hardcoded in KVM's
+                               * APIC_BUS_CYCLE_NS */
+                ..Default::default()
+            });
+        };
+    }
+
+    for c in &cpuid {
+        debug!("{}", c);
     }
 
     vcpu.set_cpuid2(&cpuid)
@@ -898,7 +843,15 @@ pub fn configure_vcpu(
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
         regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+
+        // CPUs are required (by Intel sdm spec) to boot in x2apic mode if any
+        // of the apic IDs is larger than 255. Experimentally, the Linux kernel
+        // does not recognize the last vCPU if x2apic is not enabled when
+        // there are 256 vCPUs in a flat hierarchy (i.e. max x2apic ID is 255),
+        // so we need to enable x2apic in this case as well.
+        let enable_x2_apic_mode = get_max_x2apic_id(topology) > MAX_SUPPORTED_CPUS_LEGACY;
+        regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
+            .map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
@@ -948,14 +901,13 @@ pub fn configure_system(
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
-    _num_cpus: u8,
+    _num_cpus: u32,
     setup_header: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
     serial_number: Option<&str>,
     uuid: Option<&str>,
     oem_strings: Option<&[&str]>,
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u16, u16, u16, u16)>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
@@ -971,10 +923,10 @@ pub fn configure_system(
     mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
-    if let Some(rsdp_addr) = rsdp_addr {
-        if rsdp_addr.0 > guest_mem.last_addr().0 {
-            return Err(super::Error::RsdpPastRamEnd);
-        }
+    if let Some(rsdp_addr) = rsdp_addr
+        && rsdp_addr.0 > guest_mem.last_addr().0
+    {
+        return Err(super::Error::RsdpPastRamEnd);
     }
 
     match setup_header {
@@ -985,15 +937,8 @@ pub fn configure_system(
             initramfs,
             hdr,
             rsdp_addr,
-            sgx_epc_region,
         ),
-        None => configure_pvh(
-            guest_mem,
-            cmdline_addr,
-            initramfs,
-            rsdp_addr,
-            sgx_epc_region,
-        ),
+        None => configure_pvh(guest_mem, cmdline_addr, initramfs, rsdp_addr),
     }
 }
 
@@ -1085,7 +1030,6 @@ fn configure_pvh(
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
 
@@ -1151,15 +1095,6 @@ fn configure_pvh(
         E820_RESERVED,
     );
 
-    if let Some(sgx_epc_region) = sgx_epc_region {
-        add_memmap_entry(
-            &mut memmap,
-            sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size(),
-            E820_RESERVED,
-        );
-    }
-
     start_info.memmap_entries = memmap.len() as u32;
 
     // Copy the vector with the memmap table to the MEMMAP_START address
@@ -1206,7 +1141,6 @@ fn configure_32bit_entry(
     initramfs: &Option<InitramfsConfig>,
     setup_hdr: setup_header,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const KERNEL_LOADER_OTHER: u8 = 0xff;
 
@@ -1261,15 +1195,6 @@ fn configure_32bit_entry(
         layout::PCI_MMCONFIG_SIZE,
         E820_RESERVED,
     )?;
-
-    if let Some(sgx_epc_region) = sgx_epc_region {
-        add_e820_entry(
-            &mut params,
-            sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size(),
-            E820_RESERVED,
-        )?;
-    }
 
     if let Some(rsdp_addr) = rsdp_addr {
         params.acpi_rsdp_addr = rsdp_addr.0;
@@ -1363,21 +1288,24 @@ pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u
 
 fn update_cpuid_topology(
     cpuid: &mut Vec<CpuIdEntry>,
-    threads_per_core: u8,
-    cores_per_die: u8,
-    dies_per_package: u8,
+    threads_per_core: u16,
+    cores_per_die: u16,
+    dies_per_package: u16,
+    packages: u16,
     cpu_vendor: CpuVendor,
-    id: u8,
+    id: u32,
 ) {
     let x2apic_id = get_x2apic_id(
-        id as u32,
-        Some((threads_per_core, cores_per_die, dies_per_package)),
+        id,
+        Some((threads_per_core, cores_per_die, dies_per_package, packages)),
     );
 
-    let thread_width = 8 - (threads_per_core - 1).leading_zeros();
-    let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
-    let die_width = (8 - (dies_per_package - 1).leading_zeros()) + core_width;
+    // Note: the topology defined here is per "package" (~NUMA node).
+    let thread_width = u16::BITS - (threads_per_core - 1).leading_zeros();
+    let core_width = u16::BITS - (cores_per_die - 1).leading_zeros() + thread_width;
+    let die_width = u16::BITS - (dies_per_package - 1).leading_zeros() + core_width;
 
+    // The very old way: a flat number of logical CPUs per package: CPUID.1H:EBX[23:16] bits.
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
     cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
         & (0xff << 16);
@@ -1387,6 +1315,7 @@ fn update_cpuid_topology(
     cpu_edx |= 1 << 28;
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX, cpu_edx);
 
+    // The legacy way: threads+cores per package.
     // CPU Topology leaf 0xb
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EAX, thread_width);
     CpuidPatch::set_cpuid_reg(
@@ -1407,7 +1336,9 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EDX, x2apic_id);
 
+    // The modern way: many-level hierarchy (but we here only support four levels).
     // CPU Topology leaf 0x1f
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
     CpuidPatch::set_cpuid_reg(
@@ -1498,61 +1429,11 @@ fn update_cpuid_topology(
         }
     }
 }
-
-// The goal is to update the CPUID sub-leaves to reflect the number of EPC
-// sections exposed to the guest.
-fn update_cpuid_sgx(
-    cpuid: &mut Vec<CpuIdEntry>,
-    epc_sections: &[SgxEpcSection],
-) -> Result<(), Error> {
-    // Something's wrong if there's no EPC section.
-    if epc_sections.is_empty() {
-        return Err(Error::NoSgxEpcSection);
-    }
-    // We can't go further if the hypervisor does not support SGX feature.
-    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::EBX, 2) {
-        return Err(Error::MissingSgxFeature);
-    }
-    // We can't go further if the hypervisor does not support SGX_LC feature.
-    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::ECX, 30) {
-        return Err(Error::MissingSgxLaunchControlFeature);
-    }
-
-    // Get host CPUID for leaf 0x12, subleaf 0x2. This is to retrieve EPC
-    // properties such as confidentiality and integrity.
-    // SAFETY: call cpuid with valid leaves
-    let leaf = unsafe { std::arch::x86_64::__cpuid_count(0x12, 0x2) };
-
-    for (i, epc_section) in epc_sections.iter().enumerate() {
-        let subleaf_idx = i + 2;
-        let start = epc_section.start().raw_value();
-        let size = epc_section.size();
-        let eax = (start & 0xffff_f000) as u32 | 0x1;
-        let ebx = (start >> 32) as u32;
-        let ecx = (size & 0xffff_f000) as u32 | (leaf.ecx & 0xf);
-        let edx = (size >> 32) as u32;
-        // CPU Topology leaf 0x12
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, eax);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, ebx);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, ecx);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, edx);
-    }
-
-    // Add one NULL entry to terminate the dynamic list
-    let subleaf_idx = epc_sections.len() + 2;
-    // CPU Topology leaf 0x12
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, 0);
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use linux_loader::loader::bootparam::boot_e820_entry;
+
+    use super::*;
 
     #[test]
     fn regions_base_addr() {
@@ -1578,9 +1459,8 @@ mod tests {
             None,
             None,
             None,
-            None,
         );
-        assert!(config_err.is_err());
+        config_err.unwrap_err();
 
         // Now assigning some memory that falls before the 32bit memory hole.
         let arch_mem_regions = arch_memory_regions();
@@ -1597,7 +1477,6 @@ mod tests {
             0,
             &None,
             no_vcpus,
-            None,
             None,
             None,
             None,
@@ -1633,7 +1512,6 @@ mod tests {
             None,
             None,
             None,
-            None,
         )
         .unwrap();
 
@@ -1643,7 +1521,6 @@ mod tests {
             0,
             &None,
             no_vcpus,
-            None,
             None,
             None,
             None,
@@ -1685,13 +1562,13 @@ mod tests {
         // Exercise the scenario where the field storing the length of the e820 entry table is
         // is bigger than the allocated memory.
         params.e820_entries = params.e820_table.len() as u8 + 1;
-        assert!(add_e820_entry(
+        add_e820_entry(
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_
+            e820_table[0].type_,
         )
-        .is_err());
+        .unwrap_err();
     }
 
     #[test]
@@ -1721,22 +1598,27 @@ mod tests {
 
     #[test]
     fn test_get_x2apic_id() {
-        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 0);
 
-        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 1);
 
-        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 2);
 
-        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 8);
 
-        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 9);
 
-        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 10);
+
+        let x2apic_id = get_x2apic_id(257, Some((1, 312, 1, 1)));
+        assert_eq!(x2apic_id, 257);
+
+        assert_eq!(255, get_max_x2apic_id((1, 256, 1, 1)));
     }
 }

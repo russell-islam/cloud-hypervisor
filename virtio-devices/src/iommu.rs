@@ -2,25 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
+use std::collections::BTreeMap;
+use std::mem::size_of;
+use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::{io, result};
+
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::io;
-use std::mem::size_of;
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -31,6 +22,14 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
 const QUEUE_SIZE: u16 = 256;
@@ -293,8 +292,8 @@ unsafe impl ByteValued for VirtioIommuFault {}
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Guest gave us bad memory addresses: {0}")]
-    GuestMemory(GuestMemoryError),
+    #[error("Guest gave us bad memory addresses")]
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest gave us a read only descriptor that protocol says to write to")]
@@ -323,12 +322,12 @@ enum Error {
     InvalidUnmapRequestMissingDomain,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
-    #[error("Failed to performing external mapping: {0}")]
-    ExternalMapping(io::Error),
-    #[error("Failed to performing external unmapping: {0}")]
-    ExternalUnmapping(io::Error),
-    #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    #[error("Failed to performing external mapping")]
+    ExternalMapping(#[source] io::Error),
+    #[error("Failed to performing external unmapping")]
+    ExternalUnmapping(#[source] io::Error),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
 }
 
 struct Request {}
@@ -395,7 +394,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Attach request {:?}", req);
+                    debug!("Attach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -422,13 +421,12 @@ impl Request {
                     // If any other mappings exist in the domain for other containers,
                     // make sure to issue these mappings for the new endpoint/container
                     if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+                        && let Some(ext_map) = ext_mapping.get(&endpoint)
                     {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            for (virt_start, addr_map) in &domain_mappings.mappings {
-                                ext_map
-                                    .map(*virt_start, addr_map.gpa, addr_map.size)
-                                    .map_err(Error::ExternalUnmapping)?;
-                            }
+                        for (virt_start, addr_map) in &domain_mappings.mappings {
+                            ext_map
+                                .map(*virt_start, addr_map.gpa, addr_map.size)
+                                .map_err(Error::ExternalUnmapping)?;
                         }
                     }
 
@@ -450,7 +448,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Detach request {:?}", req);
+                    debug!("Detach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -469,7 +467,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Map request {:?}", req);
+                    debug!("Map request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -490,7 +488,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -532,7 +530,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Unmap request {:?}", req);
+                    debug!("Unmap request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -554,7 +552,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -576,7 +574,7 @@ impl Request {
                         .get_mut(&domain_id)
                         .unwrap()
                         .mappings
-                        .retain(|&x, _| (x < req.virt_start || x > req.virt_end));
+                        .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
                 VIRTIO_IOMMU_T_PROBE => {
                     if desc_size_left != size_of::<VirtioIommuReqProbe>() {
@@ -588,7 +586,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Probe request {:?}", req);
+                    debug!("Probe request 0x{:x?}", req);
 
                     let probe_prop = VirtioIommuProbeProperty {
                         type_: VIRTIO_IOMMU_PROBE_T_RESV_MEM,
@@ -655,13 +653,13 @@ fn detach_endpoint_from_domain(
     mapping.endpoints.write().unwrap().remove(&endpoint);
 
     // Trigger external unmapping for the endpoint if necessary.
-    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
-        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-            for (virt_start, addr_map) in &domain_mappings.mappings {
-                ext_map
-                    .unmap(*virt_start, addr_map.size)
-                    .map_err(Error::ExternalUnmapping)?;
-            }
+    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+        && let Some(ext_map) = ext_mapping.get(&endpoint)
+    {
+        for (virt_start, addr_map) in &domain_mappings.mappings {
+            ext_map
+                .unmap(*virt_start, addr_map.size)
+                .map_err(Error::ExternalUnmapping)?;
         }
     }
 
@@ -670,7 +668,7 @@ fn detach_endpoint_from_domain(
         .write()
         .unwrap()
         .iter()
-        .filter(|(_, &d)| d == domain_id)
+        .filter(|&(_, &d)| d == domain_id)
         .count()
         == 0
     {
@@ -905,9 +903,10 @@ impl Iommu {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
+        address_width_bits: u8,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
-        let (avail_features, acked_features, endpoints, domains, paused) =
+        let (mut avail_features, acked_features, endpoints, domains, paused) =
             if let Some(state) = state {
                 info!("Restoring virtio-iommu {}", id);
                 (
@@ -938,11 +937,19 @@ impl Iommu {
                 (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
             };
 
-        let config = VirtioIommuConfig {
+        let mut config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
             ..Default::default()
         };
+
+        if address_width_bits < 64 {
+            avail_features |= 1u64 << VIRTIO_IOMMU_F_INPUT_RANGE;
+            config.input_range = VirtioIommuRange64 {
+                start: 0,
+                end: (1u64 << address_width_bits) - 1,
+            }
+        }
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),

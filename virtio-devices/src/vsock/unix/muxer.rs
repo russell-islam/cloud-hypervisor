@@ -50,11 +50,9 @@ use super::super::packet::VsockPacket;
 use super::super::{
     Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener, VsockError,
 };
-use super::defs;
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
-use super::MuxerConnection;
-use super::{Error, Result};
+use super::{Error, MuxerConnection, Result, defs};
 
 /// A unique identifier of a `MuxerConnection` object. Connections are stored in a hash map,
 /// keyed by a `ConnMapKey` object.
@@ -439,10 +437,10 @@ impl VsockMuxer {
                 if let Some(EpollListener::LocalStream(stream)) = self.listener_map.get_mut(&fd) {
                     let port = Self::read_local_stream_port(&mut self.partial_command_map, stream);
 
-                    if let Err(Error::UnixRead(ref e)) = port {
-                        if e.kind() == ErrorKind::WouldBlock {
-                            return;
-                        }
+                    if let Err(Error::UnixRead(ref e)) = port
+                        && e.kind() == ErrorKind::WouldBlock
+                    {
+                        return;
                     }
 
                     let stream = match self.remove_listener(fd) {
@@ -495,15 +493,18 @@ impl VsockMuxer {
         const MIN_COMMAND_LEN: usize = 10;
 
         // Bring in the minimum number of bytes that we should be able to read.
-        stream
-            .read_exact(&mut command.buf[command.len..MIN_COMMAND_LEN])
-            .map_err(Error::UnixRead)?;
-        command.len = MIN_COMMAND_LEN;
+        if command.len < MIN_COMMAND_LEN {
+            command.len += stream
+                .read(&mut command.buf[command.len..MIN_COMMAND_LEN])
+                .map_err(Error::UnixRead)?;
+        }
 
         // Now, finish reading the destination port number, by bringing in one byte at a time,
         // until we reach an EOL terminator (or our buffer space runs out).  Yeah, not
         // particularly proud of this approach, but it will have to do for now.
-        while command.buf[command.len - 1] != b'\n' && command.len < command.buf.len() {
+        while command.len.checked_sub(1).map(|n| command.buf[n]) != Some(b'\n')
+            && command.len < command.buf.len()
+        {
             command.len += stream
                 .read(&mut command.buf[command.len..=command.len])
                 .map_err(Error::UnixRead)?;
@@ -850,12 +851,14 @@ impl VsockMuxer {
 #[cfg(test)]
 #[cfg(not(feature = "sev_snp"))]
 mod tests {
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    use virtio_queue::QueueOwnedT;
+
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use virtio_queue::QueueOwnedT;
 
     const PEER_CID: u32 = 3;
     const PEER_BUF_ALLOC: u32 = 64 * 1024;

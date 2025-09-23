@@ -1,47 +1,65 @@
 [package]
 authors = ["Microsoft Authors"]
-edition = "2021"
+edition.workspace = true
 license = "Apache-2.0 OR BSD-3-Clause"
 name = "hypervisor"
 version = "0.1.0"
 
 [features]
 kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
-mshv = ["iced-x86", "mshv-bindings", "mshv-ioctls", "vfio-ioctls/mshv"]
+mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
+mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["igvm", "igvm_defs"]
 tdx = []
 
 [dependencies]
-anyhow = "1.0.86"
-byteorder = "1.5.0"
-igvm = { version = "0.3.3", optional = true }
-igvm_defs = { version = "0.3.1", optional = true }
-kvm-bindings = { version = "0.8.1", optional = true, features = ["serde"] }
-kvm-ioctls = { version = "0.17.0", optional = true }
-libc = "0.2.155"
-log = "0.4.22"
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", features = [
+anyhow = { workspace = true }
+arc-swap = "1.7.1"
+bitfield-struct = "0.10.1"
+byteorder = { workspace = true }
+cfg-if = { workspace = true }
+concat-idents = "1.1.5"
+igvm = { workspace = true, optional = true }
+igvm_defs = { workspace = true, optional = true }
+kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
+kvm-ioctls = { workspace = true, optional = true }
+libc = { workspace = true }
+log = { workspace = true }
+mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
   "with-serde",
 ], optional = true }
-mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", optional = true }
-serde = { version = "1.0.197", features = ["derive", "rc"] }
-serde_with = { version = "3.9.0", default-features = false, features = [
+mshv-ioctls = { workspace = true, optional = true }
+open-enum = "0.5.2"
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }
-thiserror = "1.0.62"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.14.1", features = [
+thiserror = { workspace = true }
+vfio-ioctls = { workspace = true, default-features = false }
+vm-memory = { workspace = true, features = [
   "backend-atomic",
+  "backend-bitmap",
   "backend-mmap",
 ] }
-vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
+vmm-sys-util = { workspace = true, features = ["with-serde"] }
+zerocopy = { workspace = true, features = ["derive"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 default-features = false
-features = ["decoder", "fast_fmt", "instr_info", "op_code_info", "std"]
+features = [
+  "decoder",
+  "instr_info",
+  "no_d3now",
+  "no_evex",
+  "no_vex",
+  "no_xop",
+  "op_code_info",
+  "std",
+]
 optional = true
 version = "1.21.0"
 
 [dev-dependencies]
-env_logger = "0.11.3"
+env_logger = { workspace = true }

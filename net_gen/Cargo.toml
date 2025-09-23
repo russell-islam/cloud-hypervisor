@@ -1,8 +1,9 @@
 [package]
 authors = ["The Chromium OS Authors"]
 edition = "2021"
+#edition.workspace = true
 name = "net_gen"
 version = "0.1.0"
 
 [dependencies]
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }

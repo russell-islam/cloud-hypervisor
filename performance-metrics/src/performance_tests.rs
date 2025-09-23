@@ -5,17 +5,16 @@
 
 // Performance tests
 
-use crate::{mean, PerformanceTestControl};
-use regex::Regex;
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::string::String;
-use std::thread;
 use std::time::Duration;
-use test_infra::Error as InfraError;
-use test_infra::*;
+use std::{fs, thread};
+
+use regex::Regex;
+use test_infra::{Error as InfraError, *};
+use thiserror::Error;
+
+use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -23,29 +22,40 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
+    #[error("boot time could not be parsed")]
     BootTimeParse,
-    Infra(InfraError),
+    #[error("infrastructure failure")]
+    Infra(#[from] InfraError),
+    #[error("restore time could not be parsed")]
     RestoreTimeParse,
 }
 
-impl From<InfraError> for Error {
-    fn from(e: InfraError) -> Self {
-        Self::Infra(e)
-    }
-}
-
+// The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
+// as tmpfs does not support O_DIRECT
 const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
 
-pub fn init_tests() {
-    // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
-    // as tmpfs does not support O_DIRECT
-    assert!(exec_host_command_output(&format!(
-        "dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096"
-    ))
-    .status
-    .success());
+pub fn init_tests(overrides: &PerformanceTestOverrides) {
+    let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
+
+    if let Some(o) = overrides.test_image_format {
+        match o {
+            ImageFormat::Raw => { /* Nothing to do */ }
+            ImageFormat::Qcow2 => {
+                cmd =
+                    format!("qemu-img create -f qcow2 -o preallocation=full {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhd => {
+                cmd = format!("qemu-img create -f vpc -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhdx => {
+                cmd = format!("qemu-img create -f vhdx -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
+        }
+    }
+
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
@@ -74,9 +84,9 @@ fn direct_kernel_boot_path() -> PathBuf {
 
     let mut kernel_path = workload_path;
     #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux");
+    kernel_path.push("vmlinux-x86_64");
     #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image");
+    kernel_path.push("Image-arm64");
 
     kernel_path
 }
@@ -440,15 +450,13 @@ pub fn performance_boot_time_hugepage(control: &PerformanceTestControl) -> Vec<f
     let re = Regex::new(r"Mem:\s+(\d+)").unwrap();
 
     // Extract the total memory value
-    if let Some(captures) = re.captures(&output) {
-        if let Some(total_mem) = captures.get(1) {
-            let total_mem_value: u32 = total_mem.as_str().parse().unwrap();
-            if total_mem_value < 128 {
-                println!(
-                    "SKIPPED: testcase 'boot_time_32_vcpus_hugepage_ms' required 128G to be run"
-                );
-                return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
-            }
+    if let Some(captures) = re.captures(&output)
+        && let Some(total_mem) = captures.get(1)
+    {
+        let total_mem_value: u32 = total_mem.as_str().parse().unwrap();
+        if total_mem_value < 128 {
+            println!("SKIPPED: testcase 'boot_time_32_vcpus_hugepage_ms' required 128G to be run");
+            return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
         }
     }
 
@@ -732,12 +740,12 @@ pub fn get_cvm_boot_params(param: &str, output: String) -> f64 {
         _ => panic!("Invalid CVM param"),
     };
 
-    if let Some(captured) = re.unwrap().captures(output.as_str()) {
-        if let Some(matched) = captured.get(1) {
-            let number_str = matched.as_str();
-            if let Ok(number) = number_str.parse::<f64>() {
-                return number;
-            }
+    if let Some(captured) = re.unwrap().captures(output.as_str())
+        && let Some(matched) = captured.get(1)
+    {
+        let number_str = matched.as_str();
+        if let Ok(number) = number_str.parse::<f64>() {
+            return number;
         }
     }
     0.0

@@ -2,29 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-#[cfg(target_arch = "x86_64")]
-use crate::config::SgxEpcConfig;
-use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
-};
-use crate::migration::url_to_path;
-use crate::MEMORY_MANAGER_SNAPSHOT_ID;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use acpi_tables::{aml, Aml};
-use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
-use arch::RegionType;
-#[cfg(target_arch = "x86_64")]
-use devices::ioapic;
-#[cfg(target_arch = "aarch64")]
-use hypervisor::HypervisorVmError;
-use libc::_SC_NPROCESSORS_ONLN;
-#[cfg(target_arch = "x86_64")]
-use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
-use serde::{Deserialize, Serialize};
+
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -35,26 +13,45 @@ use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
-use std::result;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::{ffi, thread};
+use std::{ffi, result, thread};
+
+use acpi_tables::{Aml, aml};
+use anyhow::anyhow;
+use arch::RegionType;
+#[cfg(target_arch = "x86_64")]
+use devices::ioapic;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::HypervisorVmError;
+use libc::_SC_NPROCESSORS_ONLN;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
+use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
-    ReadVolatile,
+    Address, Error as MmapError, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion, ReadVolatile,
 };
+use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
-    protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
-    Snapshot, SnapshotData, Snapshottable, Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
+};
+use crate::migration::url_to_path;
+use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
@@ -64,9 +61,6 @@ const SNAPSHOT_FILENAME: &str = "memory-ranges";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
-
-#[cfg(target_arch = "x86_64")]
-const SGX_PAGE_SIZE: u64 = 1 << 12;
 
 const HOTPLUG_COUNT: usize = 8;
 
@@ -161,7 +155,8 @@ struct ArchMemRegion {
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    next_memory_slot: u32,
+    next_memory_slot: Arc<AtomicU32>,
+    memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     end_of_ram_area: GuestAddress,
@@ -179,8 +174,6 @@ pub struct MemoryManager {
     hugepage_size: Option<u64>,
     prefault: bool,
     thp: bool,
-    #[cfg(target_arch = "x86_64")]
-    sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
@@ -195,149 +188,164 @@ pub struct MemoryManager {
     guest_ram_mappings: Vec<GuestRamMapping>,
 
     pub acpi_address: Option<GuestAddress>,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create shared file.
-    SharedFileCreate(io::Error),
+    #[error("Failed to create shared file")]
+    SharedFileCreate(#[source] io::Error),
 
     /// Failed to set shared file length.
-    SharedFileSetLen(io::Error),
+    #[error("Failed to set shared file length")]
+    SharedFileSetLen(#[source] io::Error),
 
     /// Mmap backed guest memory error
-    GuestMemory(MmapError),
+    #[error("Mmap backed guest memory error")]
+    GuestMemory(#[source] MmapError),
 
     /// Failed to allocate a memory range.
+    #[error("Failed to allocate a memory range")]
     MemoryRangeAllocation,
 
     /// Error from region creation
-    GuestMemoryRegion(MmapRegionError),
+    #[error("Error from region creation")]
+    GuestMemoryRegion(#[source] MmapRegionError),
 
     /// No ACPI slot available
+    #[error("No ACPI slot available")]
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
+    #[error("Not enough space in the hotplug RAM region")]
     InsufficientHotplugRam,
 
     /// The requested hotplug memory addition is not a valid size
+    #[error("The requested hotplug memory addition is not a valid size")]
     InvalidSize,
 
     /// Failed to create the user memory region.
-    CreateUserMemoryRegion(hypervisor::HypervisorVmError),
+    #[error("Failed to create the user memory region")]
+    CreateUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to remove the user memory region.
-    RemoveUserMemoryRegion(hypervisor::HypervisorVmError),
+    #[error("Failed to remove the user memory region")]
+    RemoveUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
-    EventFdFail(io::Error),
+    #[error("Failed to EventFd")]
+    EventFdFail(#[source] io::Error),
 
     /// Eventfd write error
-    EventfdError(io::Error),
+    #[error("Eventfd write error")]
+    EventfdError(#[source] io::Error),
 
     /// Failed to virtio-mem resize
-    VirtioMemResizeFail(virtio_devices::mem::Error),
+    #[error("Failed to virtio-mem resize")]
+    VirtioMemResizeFail(#[source] virtio_devices::mem::Error),
 
     /// Cannot restore VM
-    Restore(MigratableError),
+    #[error("Cannot restore VM")]
+    Restore(#[source] MigratableError),
 
     /// Cannot restore VM because source URL is missing
+    #[error("Cannot restore VM because source URL is missing")]
     RestoreMissingSourceUrl,
 
     /// Cannot create the system allocator
+    #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
-
-    /// Invalid SGX EPC section size
-    #[cfg(target_arch = "x86_64")]
-    EpcSectionSizeInvalid,
-
-    /// Failed allocating SGX EPC region
-    #[cfg(target_arch = "x86_64")]
-    SgxEpcRangeAllocation,
-
-    /// Failed opening SGX virtual EPC device
-    #[cfg(target_arch = "x86_64")]
-    SgxVirtEpcOpen(io::Error),
-
-    /// Failed setting the SGX virtual EPC section size
-    #[cfg(target_arch = "x86_64")]
-    SgxVirtEpcFileSetLen(io::Error),
-
-    /// Failed opening SGX provisioning device
-    #[cfg(target_arch = "x86_64")]
-    SgxProvisionOpen(io::Error),
-
-    /// Failed enabling SGX provisioning
-    #[cfg(target_arch = "x86_64")]
-    SgxEnableProvisioning(hypervisor::HypervisorVmError),
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
-    NewMmapRegion(vm_memory::mmap::MmapRegionError),
+    #[error("Failed creating a new MmapRegion instance")]
+    NewMmapRegion(#[source] vm_memory::mmap::MmapRegionError),
 
     /// No memory zones found.
+    #[error("No memory zones found")]
     MissingMemoryZones,
 
     /// Memory configuration is not valid.
+    #[error("Memory configuration is not valid")]
     InvalidMemoryParameters,
 
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
+    #[error("Impossible to resize guest memory if it is backed by user defined memory regions")]
     InvalidResizeWithMemoryZones,
 
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
+    #[error(
+        "Invalid to try applying a NUMA policy to a memory zone that is memory mapped with MAP_SHARED"
+    )]
     InvalidSharedMemoryZoneWithHostNuma,
 
     /// Failed applying NUMA memory policy.
-    ApplyNumaPolicy(io::Error),
+    #[error("Failed applying NUMA memory policy")]
+    ApplyNumaPolicy(#[source] io::Error),
 
     /// Memory zone identifier is not unique.
+    #[error("Memory zone identifier is not unique")]
     DuplicateZoneId,
 
     /// No virtio-mem resizing handler found.
+    #[error("No virtio-mem resizing handler found")]
     MissingVirtioMemHandler,
 
     /// Unknown memory zone.
+    #[error("Unknown memory zone")]
     UnknownMemoryZone,
 
     /// Invalid size for resizing. Can be anything except 0.
+    #[error("Invalid size for resizing. Can be anything except 0")]
     InvalidHotplugSize,
 
     /// Invalid hotplug method associated with memory zones resizing capability.
+    #[error("Invalid hotplug method associated with memory zones resizing capability")]
     InvalidHotplugMethodWithMemoryZones,
 
     /// Could not find specified memory zone identifier from hash map.
+    #[error("Could not find specified memory zone identifier from hash map")]
     MissingZoneIdentifier,
 
     /// Resizing the memory zone failed.
+    #[error("Resizing the memory zone failed")]
     ResizeZone,
 
     /// Guest address overflow
+    #[error("Guest address overflow")]
     GuestAddressOverFlow,
 
     /// Error opening snapshot file
-    SnapshotOpen(io::Error),
+    #[error("Error opening snapshot file")]
+    SnapshotOpen(#[source] io::Error),
 
     // Error copying snapshot into region
-    SnapshotCopy(GuestMemoryError),
+    #[error("Error copying snapshot into region")]
+    SnapshotCopy(#[source] GuestMemoryError),
 
     /// Failed to allocate MMIO address
+    #[error("Failed to allocate MMIO address")]
     AllocateMmioAddress,
 
     #[cfg(target_arch = "aarch64")]
     /// Failed to create UEFI flash
-    CreateUefiFlash(HypervisorVmError),
+    #[error("Failed to create UEFI flash")]
+    CreateUefiFlash(#[source] HypervisorVmError),
 
     /// Using a directory as a backing file for memory is not supported
+    #[error("Using a directory as a backing file for memory is not supported")]
     DirectoryAsBackingFileForMemory,
 
     /// Failed to stat filesystem
-    GetFileSystemBlockSize(io::Error),
+    #[error("Failed to stat filesystem")]
+    GetFileSystemBlockSize(#[source] io::Error),
 
     /// Memory size is misaligned with default page size or its hugepage size
+    #[error("Memory size is misaligned with default page size or its hugepage size")]
     MisalignedMemorySize,
 }
 
@@ -949,7 +957,7 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn add_uefi_flash(&mut self) -> Result<(), Error> {
+    pub fn add_uefi_flash(&mut self) -> Result<(), Error> {
         // On AArch64, the UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
@@ -987,7 +995,6 @@ impl MemoryManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: Option<HashMap<u32, File>>,
-        #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1154,17 +1161,10 @@ impl MemoryManager {
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
-        // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
-                #[cfg(target_arch = "x86_64")]
-                {
-                    GuestAddress(0)
-                },
-                #[cfg(target_arch = "x86_64")]
-                {
-                    1 << 16
-                },
+                GuestAddress(0),
+                1 << 16,
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
                 #[cfg(target_arch = "x86_64")]
@@ -1196,15 +1196,16 @@ impl MemoryManager {
             None
         };
 
-        // If running on SGX the start of device area and RAM area may diverge but
-        // at this point they are next to each other.
+        // The start of device area and RAM area are placed next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
+        #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
-            next_memory_slot,
+            next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
+            memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
             start_of_device_area,
             end_of_device_area,
             end_of_ram_area,
@@ -1221,8 +1222,6 @@ impl MemoryManager {
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
             prefault: config.prefault,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc_region: None,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
@@ -1232,27 +1231,10 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             uefi_flash: None,
             thp: config.thp,
         };
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            // For Aarch64 we cannot lazily allocate the address space like we
-            // do for x86, because while restoring a VM from snapshot we would
-            // need the address space to be allocated to properly restore VGIC.
-            // And the restore of VGIC happens before we attempt to run the vCPUs
-            // for the first time, thus we need to allocate the address space
-            // beforehand.
-            memory_manager.allocate_address_space()?;
-            memory_manager.add_uefi_flash()?;
-        }
-
-        #[cfg(target_arch = "x86_64")]
-        if let Some(sgx_epc_config) = sgx_epc_config {
-            memory_manager.setup_sgx(sgx_epc_config)?;
-        }
 
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
@@ -1280,8 +1262,6 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
-                None,
-                #[cfg(target_arch = "x86_64")]
                 None,
             )?;
 
@@ -1610,6 +1590,7 @@ impl MemoryManager {
             .checked_add(1)
             .ok_or(Error::GuestAddressOverFlow)?;
 
+        #[cfg(not(target_arch = "riscv64"))]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             return Ok(arch::layout::RAM_64BIT_START);
         }
@@ -1669,13 +1650,17 @@ impl MemoryManager {
         }
 
         // "Inserted" DIMM must have a size that is a multiple of 128MiB
-        if size % (128 << 20) != 0 {
+        if !size.is_multiple_of(128 << 20) {
             return Err(Error::InvalidSize);
         }
 
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
-        if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.end_of_ram_area {
+        if start_addr
+            .checked_add((size - 1).try_into().unwrap())
+            .unwrap()
+            > self.end_of_ram_area
+        {
             return Err(Error::InsufficientHotplugRam);
         }
 
@@ -1724,10 +1709,14 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
+    pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
+        let memory_slot_free_list = Arc::clone(&self.memory_slot_free_list);
+        let next_memory_slot = Arc::clone(&self.next_memory_slot);
+        MemorySlotAllocator::new(next_memory_slot, memory_slot_free_list)
+    }
+
     pub fn allocate_memory_slot(&mut self) -> u32 {
-        let slot_id = self.next_memory_slot;
-        self.next_memory_slot += 1;
-        slot_id
+        self.memory_slot_allocator().next_memory_slot()
     }
 
     pub fn create_userspace_mapping(
@@ -1937,113 +1926,6 @@ impl MemoryManager {
         self.virtio_mem_resize(id, virtio_mem_size)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub fn setup_sgx(&mut self, sgx_epc_config: Vec<SgxEpcConfig>) -> Result<(), Error> {
-        let file = OpenOptions::new()
-            .read(true)
-            .open("/dev/sgx_provision")
-            .map_err(Error::SgxProvisionOpen)?;
-        self.vm
-            .enable_sgx_attribute(file)
-            .map_err(Error::SgxEnableProvisioning)?;
-
-        // Go over each EPC section and verify its size is a 4k multiple. At
-        // the same time, calculate the total size needed for the contiguous
-        // EPC region.
-        let mut epc_region_size = 0;
-        for epc_section in sgx_epc_config.iter() {
-            if epc_section.size == 0 {
-                return Err(Error::EpcSectionSizeInvalid);
-            }
-            if epc_section.size & (SGX_PAGE_SIZE - 1) != 0 {
-                return Err(Error::EpcSectionSizeInvalid);
-            }
-
-            epc_region_size += epc_section.size;
-        }
-
-        // Place the SGX EPC region on a 4k boundary between the RAM and the device area
-        let epc_region_start =
-            GuestAddress(self.start_of_device_area.0.div_ceil(SGX_PAGE_SIZE) * SGX_PAGE_SIZE);
-
-        self.start_of_device_area = epc_region_start
-            .checked_add(epc_region_size)
-            .ok_or(Error::GuestAddressOverFlow)?;
-
-        let mut sgx_epc_region = SgxEpcRegion::new(epc_region_start, epc_region_size as GuestUsize);
-        info!(
-            "SGX EPC region: 0x{:x} (0x{:x})",
-            epc_region_start.0, epc_region_size
-        );
-
-        // Each section can be memory mapped into the allocated region.
-        let mut epc_section_start = epc_region_start.raw_value();
-        for epc_section in sgx_epc_config.iter() {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open("/dev/sgx_vepc")
-                .map_err(Error::SgxVirtEpcOpen)?;
-
-            let prot = PROT_READ | PROT_WRITE;
-            let mut flags = MAP_NORESERVE | MAP_SHARED;
-            if epc_section.prefault {
-                flags |= MAP_POPULATE;
-            }
-
-            // We can't use the vm-memory crate to perform the memory mapping
-            // here as it would try to ensure the size of the backing file is
-            // matching the size of the expected mapping. The /dev/sgx_vepc
-            // device does not work that way, it provides a file descriptor
-            // which is not matching the mapping size, as it's a just a way to
-            // let KVM know that an EPC section is being created for the guest.
-            // SAFETY: FFI call with correct arguments
-            let host_addr = unsafe {
-                libc::mmap(
-                    std::ptr::null_mut(),
-                    epc_section.size as usize,
-                    prot,
-                    flags,
-                    file.as_raw_fd(),
-                    0,
-                )
-            } as u64;
-
-            info!(
-                "Adding SGX EPC section: 0x{:x} (0x{:x})",
-                epc_section_start, epc_section.size
-            );
-
-            let _mem_slot = self.create_userspace_mapping(
-                epc_section_start,
-                epc_section.size,
-                host_addr,
-                false,
-                false,
-                false,
-            )?;
-
-            sgx_epc_region.insert(
-                epc_section.id.clone(),
-                SgxEpcSection::new(
-                    GuestAddress(epc_section_start),
-                    epc_section.size as GuestUsize,
-                ),
-            );
-
-            epc_section_start += epc_section.size;
-        }
-
-        self.sgx_epc_region = Some(sgx_epc_region);
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
-        &self.sgx_epc_region
-    }
-
     pub fn is_hardlink(f: &File) -> bool {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: FFI call with correct arguments
@@ -2077,23 +1959,21 @@ impl MemoryManager {
             }
 
             for region in memory_zone.regions() {
-                if snapshot {
-                    if let Some(file_offset) = region.file_offset() {
-                        if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
-                            && Self::is_hardlink(file_offset.file())
-                        {
-                            // In this very specific case, we know the memory
-                            // region is backed by a file on the host filesystem
-                            // that can be accessed by the user, and additionally
-                            // the mapping is shared, which means that modifications
-                            // to the content are written to the actual file.
-                            // When meeting these conditions, we can skip the
-                            // copy of the memory content for this specific region,
-                            // as we can assume the user will have it saved through
-                            // the backing file already.
-                            continue;
-                        }
-                    }
+                if snapshot
+                    && let Some(file_offset) = region.file_offset()
+                    && (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
+                    && Self::is_hardlink(file_offset.file())
+                {
+                    // In this very specific case, we know the memory
+                    // region is backed by a file on the host filesystem
+                    // that can be accessed by the user, and additionally
+                    // the mapping is shared, which means that modifications
+                    // to the content are written to the actual file.
+                    // When meeting these conditions, we can skip the
+                    // copy of the memory content for this specific region,
+                    // as we can assume the user will have it saved through
+                    // the backing file already.
+                    continue;
                 }
 
                 table.push(MemoryRange {
@@ -2115,7 +1995,7 @@ impl MemoryManager {
             current_ram: self.current_ram,
             arch_mem_regions: self.arch_mem_regions.clone(),
             hotplug_slots: self.hotplug_slots.clone(),
-            next_memory_slot: self.next_memory_slot,
+            next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
         }
@@ -2145,7 +2025,7 @@ impl MemoryManager {
         self.guest_ram_mappings.len() as u32
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.uefi_flash.as_ref().unwrap().clone()
     }
@@ -2595,34 +2475,6 @@ impl Aml for MemoryManager {
             )
             .to_aml_bytes(sink);
         }
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(sgx_epc_region) = &self.sgx_epc_region {
-                let min = sgx_epc_region.start().raw_value();
-                let max = min + sgx_epc_region.size() - 1;
-                // SGX EPC region
-                aml::Device::new(
-                    "_SB_.EPC_".into(),
-                    vec![
-                        &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
-                        // QWORD describing the EPC region start and size
-                        &aml::Name::new(
-                            "_CRS".into(),
-                            &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                                aml::AddressSpaceCacheable::NotCacheable,
-                                true,
-                                min,
-                                max,
-                                None,
-                            )]),
-                        ),
-                        &aml::Method::new("_STA".into(), 0, false, vec![&aml::Return::new(&0xfu8)]),
-                    ],
-                )
-                .to_aml_bytes(sink);
-            }
-        }
     }
 }
 
@@ -2726,7 +2578,7 @@ impl Migratable for MemoryManager {
         })?;
 
         for r in self.guest_memory.memory().iter() {
-            r.bitmap().reset();
+            (**r).bitmap().reset();
         }
 
         Ok(())
@@ -2753,13 +2605,13 @@ impl Migratable for MemoryManager {
                 Some(region) => {
                     assert!(region.start_addr().raw_value() == r.gpa);
                     assert!(region.len() == r.size);
-                    region.bitmap().get_and_reset()
+                    (**region).bitmap().get_and_reset()
                 }
                 None => {
                     return Err(MigratableError::MigrateSend(anyhow!(
                         "Error finding 'guest memory region' with address {:x}",
                         r.gpa
-                    )))
+                    )));
                 }
             };
 

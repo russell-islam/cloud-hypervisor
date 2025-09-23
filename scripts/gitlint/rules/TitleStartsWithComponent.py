@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from gitlint.rules import LineRule, RuleViolation, CommitMessageTitle
 import re
 
@@ -54,6 +56,7 @@ class TitleStartsWithComponent(LineRule):
             'README',
             'resources',
             'scripts',
+            'seccomp',
             'serial_buffer',
             'test_data',
             'test_infra',

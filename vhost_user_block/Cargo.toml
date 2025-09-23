@@ -1,7 +1,7 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
 build = "../build.rs"
-edition = "2021"
+edition.workspace = true
 name = "vhost_user_block"
 version = "0.1.0"
 
@@ -12,15 +12,15 @@ sev_snp = []
 
 [dependencies]
 block = { path = "../block" }
-clap = { version = "4.5.4", features = ["cargo", "wrap_help"] }
-env_logger = "0.11.3"
-epoll = "4.3.3"
-libc = "0.2.155"
-log = "0.4.22"
+clap = { workspace = true, features = ["cargo", "wrap_help"] }
+env_logger = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
 option_parser = { path = "../option_parser" }
-vhost = { version = "0.11.0", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.15.0"
-virtio-bindings = "0.2.2"
-virtio-queue = "0.12.0"
-vm-memory = "0.14.1"
-vmm-sys-util = "0.12.1"
+thiserror = { workspace = true }
+vhost = { workspace = true, features = ["vhost-user-backend"] }
+vhost-user-backend = { workspace = true }
+virtio-bindings = { workspace = true }
+virtio-queue = { workspace = true }
+vm-memory = { workspace = true }
+vmm-sys-util = { workspace = true }

@@ -1,37 +1,50 @@
 [package]
 authors = ["The Chromium OS Authors"]
-edition = "2021"
+edition.workspace = true
 name = "devices"
 version = "0.1.0"
 
 [dependencies]
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-anyhow = "1.0.86"
+acpi_tables = { workspace = true }
+anyhow = { workspace = true }
 arch = { path = "../arch" }
-bitflags = "2.6.0"
-byteorder = "1.5.0"
+bitfield-struct = { version = "0.10.1", optional = true }
+bitflags = { workspace = true }
+byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.155"
-log = "0.4.22"
+libc = { workspace = true }
+linux-loader = { workspace = true, features = [
+  "bzimage",
+  "elf",
+  "pe",
+], optional = true }
+log = { workspace = true }
 num_enum = "0.7.2"
 pci = { path = "../pci" }
-serde = { version = "1.0.197", features = ["derive"] }
-thiserror = "1.0.62"
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }
+zerocopy = { version = "0.8.26", features = [
+  "alloc",
+  "derive",
+], optional = true }
 
-[target.'cfg(target_arch = "aarch64")'.dependencies]
+[target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }
 
 [features]
 default = []
+fw_cfg = ["arch/fw_cfg", "bitfield-struct", "linux-loader", "zerocopy"]
+ivshmem = []
+kvm = ["arch/kvm"]
 pvmemcontrol = []

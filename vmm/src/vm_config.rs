@@ -2,11 +2,19 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::{landlock::LandlockError, Landlock};
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::{Path, PathBuf};
+#[cfg(feature = "fw_cfg")]
+use std::str::FromStr;
+use std::{fs, result};
+
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{fs, net::Ipv4Addr, path::PathBuf, result};
+use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
+
+use crate::Landlock;
+use crate::landlock::LandlockError;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -18,7 +26,7 @@ pub(crate) trait ApplyLandlock {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
-    pub vcpu: u8,
+    pub vcpu: u32,
     pub host_cpus: Vec<usize>,
 }
 
@@ -31,10 +39,10 @@ pub struct CpuFeatures {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuTopology {
-    pub threads_per_core: u8,
-    pub cores_per_die: u8,
-    pub dies_per_package: u8,
-    pub packages: u8,
+    pub threads_per_core: u16,
+    pub cores_per_die: u16,
+    pub dies_per_package: u16,
+    pub packages: u16,
 }
 
 // When booting with PVH boot the maximum physical addressable size
@@ -48,8 +56,8 @@ pub fn default_cpuconfig_max_phys_bits() -> u8 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpusConfig {
-    pub boot_vcpus: u8,
-    pub max_vcpus: u8,
+    pub boot_vcpus: u32,
+    pub max_vcpus: u32,
     #[serde(default)]
     pub topology: Option<CpuTopology>,
     #[serde(default)]
@@ -62,7 +70,7 @@ pub struct CpusConfig {
     pub features: CpuFeatures,
 }
 
-pub const DEFAULT_VCPUS: u8 = 1;
+pub const DEFAULT_VCPUS: u32 = 1;
 
 impl Default for CpusConfig {
     fn default() -> Self {
@@ -83,12 +91,19 @@ pub fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
 }
 
+pub const DEFAULT_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
+pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
     #[serde(default)]
     pub iommu_segments: Option<Vec<u16>>,
+    #[serde(default = "default_platformconfig_iommu_address_width_bits")]
+    pub iommu_address_width_bits: u8,
     #[serde(default)]
     pub serial_number: Option<String>,
     #[serde(default)]
@@ -144,7 +159,7 @@ pub struct MemoryZoneConfig {
 impl ApplyLandlock for MemoryZoneConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         Ok(())
     }
@@ -266,7 +281,7 @@ pub struct DiskConfig {
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(path, "rw")?;
         }
         Ok(())
     }
@@ -289,9 +304,9 @@ pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
     #[serde(default = "default_netconfig_ip")]
-    pub ip: Ipv4Addr,
+    pub ip: IpAddr,
     #[serde(default = "default_netconfig_mask")]
-    pub mask: Ipv4Addr,
+    pub mask: IpAddr,
     #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
     #[serde(default)]
@@ -337,12 +352,18 @@ pub fn default_netconfig_tap() -> Option<String> {
     None
 }
 
-pub fn default_netconfig_ip() -> Ipv4Addr {
-    Ipv4Addr::new(192, 168, 249, 1)
+pub fn default_netconfig_ip() -> IpAddr {
+    warn!(
+        "Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon."
+    );
+    IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
 }
 
-pub fn default_netconfig_mask() -> Ipv4Addr {
-    Ipv4Addr::new(255, 255, 255, 0)
+pub fn default_netconfig_mask() -> IpAddr {
+    warn!(
+        "Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon."
+    );
+    IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
 }
 
 pub fn default_netconfig_mac() -> MacAddr {
@@ -366,7 +387,9 @@ where
     S: serde::Serializer,
 {
     if let Some(x) = x {
-        warn!("'NetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
+        warn!(
+            "'NetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs."
+        );
         let invalid_fds = vec![-1; x.len()];
         s.serialize_some(&invalid_fds)
     } else {
@@ -380,7 +403,9 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'NetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        warn!(
+            "'NetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs."
+        );
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)
@@ -408,7 +433,7 @@ impl Default for RngConfig {
 impl ApplyLandlock for RngConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Rng Path only need read access
-        landlock.add_rule_with_access(self.src.to_path_buf(), "r")?;
+        landlock.add_rule_with_access(&self.src, "r")?;
         Ok(())
     }
 }
@@ -452,7 +477,7 @@ pub fn default_fsconfig_queue_size() -> u16 {
 
 impl ApplyLandlock for FsConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -474,7 +499,8 @@ pub struct PmemConfig {
 
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.file.to_path_buf(), "rw")?;
+        let access = if self.discard_writes { "r" } else { "rw" };
+        landlock.add_rule_with_access(&self.file, access)?;
         Ok(())
     }
 }
@@ -506,10 +532,10 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
 impl ApplyLandlock for ConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         if let Some(socket) = &self.socket {
-            landlock.add_rule_with_access(socket.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(socket, "rw")?;
         }
         Ok(())
     }
@@ -539,7 +565,7 @@ impl Default for DebugConsoleConfig {
 impl ApplyLandlock for DebugConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         Ok(())
     }
@@ -567,8 +593,9 @@ impl ApplyLandlock for DeviceConfig {
             .to_str()
             .ok_or(LandlockError::InvalidPath)?;
 
-        let vfio_group_path = "/dev/vfio/".to_owned() + iommu_group_str;
-        landlock.add_rule_with_access(vfio_group_path.into(), "rw")?;
+        let mut vfio_group_path = PathBuf::from("/dev/vfio");
+        vfio_group_path.push(iommu_group_str);
+        landlock.add_rule_with_access(&vfio_group_path, "rw")?;
 
         Ok(())
     }
@@ -585,7 +612,7 @@ pub struct UserDeviceConfig {
 
 impl ApplyLandlock for UserDeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -609,7 +636,7 @@ pub fn default_vdpaconfig_num_queues() -> usize {
 
 impl ApplyLandlock for VdpaConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.path.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.path, "rw")?;
         Ok(())
     }
 }
@@ -628,19 +655,34 @@ pub struct VsockConfig {
 
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        if let Some(parent) = self.socket.parent() {
+            landlock.add_rule_with_access(parent, "w")?;
+        }
+
+        landlock.add_rule_with_access(&self.socket, "rw")?;
+
         Ok(())
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "ivshmem")]
+pub const DEFAULT_IVSHMEM_SIZE: usize = 128;
+
+#[cfg(feature = "ivshmem")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct SgxEpcConfig {
-    pub id: String,
-    #[serde(default)]
-    pub size: u64,
-    #[serde(default)]
-    pub prefault: bool,
+pub struct IvshmemConfig {
+    pub path: PathBuf,
+    pub size: usize,
+}
+
+#[cfg(feature = "ivshmem")]
+impl Default for IvshmemConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::new(),
+            size: DEFAULT_IVSHMEM_SIZE << 20,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -656,16 +698,28 @@ pub struct NumaConfig {
     #[serde(default)]
     pub guest_numa_id: u32,
     #[serde(default)]
-    pub cpus: Option<Vec<u8>>,
+    pub cpus: Option<Vec<u32>>,
     #[serde(default)]
     pub distances: Option<Vec<NumaDistance>>,
     #[serde(default)]
     pub memory_zones: Option<Vec<String>>,
-    #[cfg(target_arch = "x86_64")]
-    #[serde(default)]
-    pub sgx_epc_sections: Option<Vec<String>>,
     #[serde(default)]
     pub pci_segments: Option<Vec<u16>>,
+}
+
+/// Errors describing a misconfigured payload, i.e., a configuration that
+/// can't be booted by Cloud Hypervisor.
+///
+/// This typically is the case for invalid combinations of cmdline, kernel,
+/// firmware, and initrd.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PayloadConfigError {
+    /// Specifying a kernel is not supported when a firmware is provided.
+    #[error("Specifying a kernel is not supported when a firmware is provided")]
+    FirmwarePlusOtherPayloads,
+    /// No bootitem provided: neither firmware nor kernel.
+    #[error("No bootitem provided: neither firmware nor kernel")]
+    MissingBootitem,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -684,26 +738,128 @@ pub struct PayloadConfig {
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub host_data: Option<String>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg_config: Option<FwCfgConfig>,
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgConfig {
+    pub e820: bool,
+    pub kernel: bool,
+    pub cmdline: bool,
+    pub initramfs: bool,
+    pub acpi_tables: bool,
+    pub items: Option<FwCfgItemList>,
+}
+
+#[cfg(feature = "fw_cfg")]
+impl Default for FwCfgConfig {
+    fn default() -> Self {
+        FwCfgConfig {
+            e820: true,
+            kernel: true,
+            cmdline: true,
+            initramfs: true,
+            acpi_tables: true,
+            items: None,
+        }
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgItemList {
+    #[serde(default)]
+    pub item_list: Vec<FwCfgItem>,
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgItem {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub file: PathBuf,
+}
+
+#[cfg(feature = "fw_cfg")]
+pub enum FwCfgItemError {
+    InvalidValue(String),
+}
+
+#[cfg(feature = "fw_cfg")]
+impl FromStr for FwCfgItemList {
+    type Err = FwCfgItemError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let body = s
+            .trim()
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .ok_or_else(|| FwCfgItemError::InvalidValue(s.to_string()))?;
+
+        let mut fw_cfg_items: Vec<FwCfgItem> = vec![];
+        let items: Vec<&str> = body.split(':').collect();
+        for item in items {
+            fw_cfg_items.push(
+                FwCfgItem::parse(item)
+                    .map_err(|_| FwCfgItemError::InvalidValue(item.to_string()))?,
+            );
+        }
+        Ok(FwCfgItemList {
+            item_list: fw_cfg_items,
+        })
+    }
+}
+
+impl PayloadConfig {
+    /// Validates the payload config.
+    ///
+    /// Succeeds if Cloud Hypervisor will be able to boot the configuration.
+    /// Further, warns for some odd configurations.
+    pub fn validate(&mut self) -> Result<(), PayloadConfigError> {
+        match (&self.firmware, &self.kernel) {
+            (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
+            (Some(_firmware), None) => {
+                if self.cmdline.is_some() {
+                    log::warn!("Ignoring cmdline parameter as firmware is provided as the payload");
+                    self.cmdline = None;
+                }
+                if self.initramfs.is_some() {
+                    log::warn!(
+                        "Ignoring initramfs parameter as firmware is provided as the payload"
+                    );
+                    self.initramfs = None;
+                }
+                Ok(())
+            }
+            (None, Some(_kernel)) => Ok(()),
+            (None, None) => Err(PayloadConfigError::MissingBootitem),
+        }?;
+
+        Ok(())
+    }
 }
 
 impl ApplyLandlock for PayloadConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Payload only needs read access
         if let Some(firmware) = &self.firmware {
-            landlock.add_rule_with_access(firmware.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(firmware, "r")?;
         }
 
         if let Some(kernel) = &self.kernel {
-            landlock.add_rule_with_access(kernel.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(kernel, "r")?;
         }
 
         if let Some(initramfs) = &self.initramfs {
-            landlock.add_rule_with_access(initramfs.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(initramfs, "r")?;
         }
 
         #[cfg(feature = "igvm")]
         if let Some(igvm) = &self.igvm {
-            landlock.add_rule_with_access(igvm.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(igvm, "r")?;
         }
 
         Ok(())
@@ -735,7 +891,7 @@ pub struct TpmConfig {
 
 impl ApplyLandlock for TpmConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -748,7 +904,7 @@ pub struct LandlockConfig {
 
 impl ApplyLandlock for LandlockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.path.to_path_buf(), self.access.clone().as_str())?;
+        landlock.add_rule_with_access(&self.path, self.access.clone().as_str())?;
         Ok(())
     }
 }
@@ -786,8 +942,6 @@ pub struct VmConfig {
     pub pvpanic: bool,
     #[serde(default)]
     pub iommu: bool,
-    #[cfg(target_arch = "x86_64")]
-    pub sgx_epc: Option<Vec<SgxEpcConfig>>,
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
@@ -806,11 +960,18 @@ pub struct VmConfig {
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
+    #[cfg(feature = "ivshmem")]
+    pub ivshmem: Option<IvshmemConfig>,
 }
 
 impl VmConfig {
     pub(crate) fn apply_landlock(&self) -> LandlockResult<()> {
         let mut landlock = Landlock::new()?;
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            landlock.add_rule_with_access(Path::new("/sys/devices/system/cpu/cpu0/cache"), "r")?;
+        }
 
         if let Some(mem_zones) = &self.memory.zones {
             for zone in mem_zones.iter() {
@@ -848,7 +1009,7 @@ impl VmConfig {
         }
 
         if let Some(devices) = &self.devices {
-            landlock.add_rule_with_access("/dev/vfio/vfio".into(), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/vfio/vfio"), "rw")?;
 
             for device in devices.iter() {
                 device.apply_landlock(&mut landlock)?;
@@ -880,7 +1041,7 @@ impl VmConfig {
         }
 
         if self.net.is_some() {
-            landlock.add_rule_with_access("/dev/net/tun".into(), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/net/tun"), "rw")?;
         }
 
         if let Some(landlock_rules) = &self.landlock_rules {
@@ -892,5 +1053,19 @@ impl VmConfig {
         landlock.restrict_self()?;
 
         Ok(())
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    pub(crate) fn max_apic_id(&self) -> u32 {
+        if let Some(topology) = &self.cpus.topology {
+            arch::x86_64::get_max_x2apic_id((
+                topology.threads_per_core,
+                topology.cores_per_die,
+                topology.dies_per_package,
+                topology.packages,
+            ))
+        } else {
+            self.cpus.max_vcpus
+        }
     }
 }

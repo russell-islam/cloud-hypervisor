@@ -9,16 +9,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
-use acpi_tables::{aml, Aml};
+use std::sync::{Arc, Mutex};
+
+use acpi_tables::{Aml, aml};
 use arch::layout;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
-use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-use std::sync::{Arc, Mutex};
+use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDeviceSync;
+
+use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
 
 pub(crate) struct PciSegment {
     pub(crate) id: u16,
@@ -103,7 +105,12 @@ impl PciSegment {
 
         info!(
             "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}, mem64 area [0x{:x}-0x{:x}",
-            segment.id, segment.mmio_config_address, segment.start_of_mem32_area, segment.end_of_mem32_area, segment.start_of_mem64_area, segment.end_of_mem64_area
+            segment.id,
+            segment.mmio_config_address,
+            segment.start_of_mem32_area,
+            segment.end_of_mem32_area,
+            segment.start_of_mem64_area,
+            segment.end_of_mem64_area
         );
         Ok(segment)
     }
@@ -139,7 +146,7 @@ impl PciSegment {
         Ok(segment)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,

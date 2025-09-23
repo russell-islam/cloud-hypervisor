@@ -1,16 +1,17 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_ioctls::DeviceFd;
+
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
-    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
+    KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS, kvm_device_attr,
 };
-use kvm_ioctls::DeviceFd;
 
 /*
  Distributor registers as detailed at page 456 from
- https://static.docs.arm.com/ihi0069/c/IHI0069C_gic_architecture_specification.pdf.
+ https://developer.arm.com/documentation/ihi0069/c/?lang=en.
  Address offsets are relative to the Distributor base address defined
 by the system memory map. Unless otherwise stated in the register description,
 all GIC registers are 32-bits wide.
@@ -102,9 +103,8 @@ fn dist_attr_get(gic: &DeviceFd, offset: u32) -> Result<u32> {
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gic_dist_attr.addr is safe to write to.
-    gic.get_device_attr(&mut gic_dist_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut gic_dist_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
 
@@ -130,9 +130,8 @@ fn get_interrupts_num(gic: &DeviceFd) -> Result<u32> {
         addr: &mut num_irq as *mut u32 as u64,
         flags: 0,
     };
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: nr_irqs_attr.addr is safe to write to.
-    gic.get_device_attr(&mut nr_irqs_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut nr_irqs_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
     Ok(num_irq)
@@ -157,7 +156,7 @@ fn compute_reg_len(gic: &DeviceFd, reg: &DistReg, base: u32) -> Result<u32> {
         // that the model has. It is also the type of register where
         // a register relates to multiple interrupts.
         end = base + (reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE) / 8);
-        if reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE) % 8 > 0 {
+        if !(reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE)).is_multiple_of(8) {
             end += REG_SIZE as u32;
         }
     }

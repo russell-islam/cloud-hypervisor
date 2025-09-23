@@ -2,17 +2,17 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_ioctls::DeviceFd;
+
+use crate::CpuState;
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
-use crate::kvm::kvm_bindings::{
-    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
-};
-use crate::kvm::Register;
 use crate::kvm::VcpuKvmState;
-use crate::CpuState;
-use kvm_ioctls::DeviceFd;
+use crate::kvm::kvm_bindings::{
+    KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64, kvm_device_attr, kvm_one_reg,
+};
 
 // Relevant redistributor registers that we want to save/restore.
 const GICR_CTLR: u32 = 0x0000;
@@ -121,9 +121,8 @@ fn redist_attr_get(gic: &DeviceFd, offset: u32, typer: u64) -> Result<u32> {
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gic_redist_attr.addr is safe to write to.
-    gic.get_device_attr(&mut gic_redist_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut gic_redist_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
 
@@ -214,7 +213,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
         let state: VcpuKvmState = state.clone().into();
         let last = (index == vcpu_states.len() - 1) as u64;
         // state.sys_regs is a big collection of system registers, including MIPDR_EL1
-        let mpidr: Vec<Register> = state
+        let mpidr: Vec<kvm_one_reg> = state
             .sys_regs
             .into_iter()
             .filter(|reg| reg.id == KVM_ARM64_SYSREG_MPIDR_EL1)
@@ -222,7 +221,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
         //calculate affinity
         let mut cpu_affid = mpidr[0].addr & 1095233437695;
         cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
-        gicr_typers.push((cpu_affid << 32) | (1 << 24) | (index as u64) << 8 | (last << 4));
+        gicr_typers.push((cpu_affid << 32) | (1 << 24) | ((index as u64) << 8) | (last << 4));
     }
 
     gicr_typers

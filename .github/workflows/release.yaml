@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install musl-gcc
         if: contains(matrix.platform.target, 'musl')
         run: sudo apt install -y musl-tools
@@ -39,13 +39,13 @@ jobs:
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: rsync -rv --exclude=.git . ../cloud-hypervisor-${{ github.event.ref }}
       - name: Build ${{ matrix.platform.target }}
-        uses: houseabsolute/actions-rust-cross@v0
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: build
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.args  }}
           strip: true
-          toolchain: "1.77.0"
+          toolchain: "1.88.0"
       - name: Copy Release Binaries
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
         shell: bash
@@ -54,7 +54,7 @@ jobs:
           cp target/${{ matrix.platform.target }}/release/ch-remote ./${{ matrix.platform.name_ch_remote }}
       - name: Upload Release Artifacts
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Artifacts for ${{ matrix.platform.target }}
           path: |
@@ -80,13 +80,13 @@ jobs:
           github.event_name == 'create' && github.event.ref_type == 'tag' &&
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         id: upload-release-cloud-hypervisor-vendored-sources
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: cloud-hypervisor-${{ github.event.ref }}.tar.xz
           name: cloud-hypervisor-${{ github.event.ref }}.tar.xz
       - name: Create GitHub Release
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           files: |

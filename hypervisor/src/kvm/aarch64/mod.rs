@@ -10,41 +10,14 @@
 
 pub mod gic;
 
-use crate::kvm::{KvmError, KvmResult};
 use kvm_bindings::{
-    kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
-    KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32,
+    KVM_REG_SIZE_U64, kvm_mp_state, kvm_one_reg, kvm_regs,
 };
-pub use kvm_bindings::{
-    kvm_one_reg as Register, kvm_regs as StandardRegisters, kvm_vcpu_init as VcpuInit, RegList,
-};
+pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};
-pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
-// This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
-// an instance of that structure.
-#[macro_export]
-macro_rules! offset_of {
-    ($str:ty, $field:ident) => {{
-        let tmp: std::mem::MaybeUninit<$str> = std::mem::MaybeUninit::uninit();
-        let base = tmp.as_ptr();
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The pointer is valid and aligned, just not initialised. Using `addr_of` ensures
-        // that we don't actually read from `base` (which would be UB) nor create an intermediate
-        // reference.
-        let member = unsafe { core::ptr::addr_of!((*base).$field) } as *const u8;
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The two pointers are within the same allocated object `tmp`. All requirements
-        // from offset_from are upheld.
-        unsafe {
-            member.offset_from(base as *const u8) as usize
-        }
-    }};
-}
+use crate::kvm::{KvmError, KvmResult};
 
 // Following are macros that help with getting the ID of a aarch64 core register.
 // The core register are represented by the user_pt_regs structure. Look for it in

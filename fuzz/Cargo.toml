@@ -9,28 +9,38 @@ version = "0.0.0"
 cargo-fuzz = true
 
 [features]
+default = ["mshv_emulator"]
 igvm = []
+ivshmem = []
+mshv_emulator = ["hypervisor/mshv_emulator"]
 pvmemcontrol = []
 
 [dependencies]
+arbitrary = "1.4.1"
 block = { path = "../block" }
 devices = { path = "../devices" }
 epoll = "4.3.3"
+hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
 libc = "0.2.155"
 libfuzzer-sys = "0.4.7"
-linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
+# TODO: update to 0.13.1+
+linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main", features = [
+  "bzimage",
+  "elf",
+  "pe",
+] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
+mshv-bindings = "0.6.0"
 net_util = { path = "../net_util" }
-once_cell = "1.19.0"
-seccompiler = "0.4.0"
+seccompiler = "0.5.0"
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.12.0"
+virtio-queue = "0.16.0"
 vm-device = { path = "../vm-device" }
-vm-memory = "0.14.1"
+vm-memory = "0.16.0"
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm = { path = "../vmm", features = ["guest_debug"] }
-vmm-sys-util = "0.12.1"
+vmm-sys-util = "0.14.0"
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -128,6 +138,19 @@ test = false
 
 [[bin]]
 doc = false
+name = "vsock"
+path = "fuzz_targets/vsock.rs"
+test = false
+
+[[bin]]
+doc = false
 name = "watchdog"
 path = "fuzz_targets/watchdog.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "x86emul"
+path = "fuzz_targets/x86emul.rs"
+required-features = ["mshv_emulator"]
 test = false

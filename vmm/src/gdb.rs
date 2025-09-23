@@ -5,49 +5,56 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::GuestMemoryMmap;
-use gdbstub::{
-    arch::Arch,
-    common::{Signal, Tid},
-    conn::{Connection, ConnectionExt},
-    stub::{run_blocking, DisconnectReason, MultiThreadStopReason},
-    target::{
-        ext::{
-            base::{
-                multithread::{
-                    MultiThreadBase, MultiThreadResume, MultiThreadResumeOps,
-                    MultiThreadSingleStep, MultiThreadSingleStepOps,
-                },
-                BaseOps,
-            },
-            breakpoints::{Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps},
-        },
-        Target, TargetError, TargetResult,
-    },
+use std::os::unix::net::UnixListener;
+use std::sync::mpsc;
+
+use gdbstub::arch::Arch;
+use gdbstub::common::{Signal, Tid};
+use gdbstub::conn::{Connection, ConnectionExt};
+use gdbstub::stub::{DisconnectReason, MultiThreadStopReason, run_blocking};
+use gdbstub::target::ext::base::BaseOps;
+use gdbstub::target::ext::base::multithread::{
+    MultiThreadBase, MultiThreadResume, MultiThreadResumeOps, MultiThreadSingleStep,
+    MultiThreadSingleStepOps,
 };
-#[cfg(target_arch = "aarch64")]
-use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
+use gdbstub::target::ext::breakpoints::{
+    Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps,
+};
+use gdbstub::target::{Target, TargetError, TargetResult};
 #[cfg(target_arch = "aarch64")]
 use gdbstub_arch::aarch64::AArch64 as GdbArch;
-#[cfg(target_arch = "x86_64")]
-use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
-use std::{os::unix::net::UnixListener, sync::mpsc};
+#[cfg(target_arch = "x86_64")]
+use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+
+use crate::GuestMemoryMmap;
 
 type ArchUsize = u64;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum DebuggableError {
-    SetDebug(hypervisor::HypervisorCpuError),
-    Pause(vm_migration::MigratableError),
-    Resume(vm_migration::MigratableError),
-    ReadRegs(crate::cpu::Error),
-    WriteRegs(crate::cpu::Error),
-    ReadMem(GuestMemoryError),
-    WriteMem(GuestMemoryError),
-    TranslateGva(crate::cpu::Error),
+    #[error("Setting debug failed")]
+    SetDebug(#[source] hypervisor::HypervisorCpuError),
+    #[error("Pausing failed")]
+    Pause(#[source] vm_migration::MigratableError),
+    #[error("Resuming failed")]
+    Resume(#[source] vm_migration::MigratableError),
+    #[error("Reading registers failed")]
+    ReadRegs(#[source] crate::cpu::Error),
+    #[error("Writing registers failed")]
+    WriteRegs(#[source] crate::cpu::Error),
+    #[error("Reading memory failed")]
+    ReadMem(#[source] GuestMemoryError),
+    #[error("Writing memory failed")]
+    WriteMem(#[source] GuestMemoryError),
+    #[error("Translating GVA failed")]
+    TranslateGva(#[source] crate::cpu::Error),
+    #[error("The lock is poisened")]
     PoisonedState,
 }
 
@@ -83,13 +90,18 @@ pub trait Debuggable: vm_migration::Pausable {
     fn active_vcpus(&self) -> usize;
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Vm(crate::vm::Error),
+    #[error("VM failed")]
+    Vm(#[source] crate::vm::Error),
+    #[error("GDB request failed")]
     GdbRequest,
-    GdbResponseNotify(std::io::Error),
-    GdbResponse(mpsc::RecvError),
-    GdbResponseTimeout(mpsc::RecvTimeoutError),
+    #[error("GDB couldn't be notified")]
+    GdbResponseNotify(#[source] std::io::Error),
+    #[error("GDB response failed")]
+    GdbResponse(#[source] mpsc::RecvError),
+    #[error("GDB response timeout")]
+    GdbResponseTimeout(#[source] mpsc::RecvTimeoutError),
 }
 type GdbResult<T> = std::result::Result<T, Error>;
 

@@ -7,21 +7,18 @@ concurrency:
 jobs:
   build:
     name: Tests (Rate-Limiter)
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'jammy-rate-limiter' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bare-metal-9950x' }}
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
-      - name: Fix workspace permissions
-        if: ${{ github.event_name != 'pull_request' }}
-        run: sudo chown -R github-runner:github-runner ${GITHUB_WORKSPACE}
       - name: Code checkout
         if: ${{ github.event_name != 'pull_request' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Run rate-limiter integration tests
         if: ${{ github.event_name != 'pull_request' }}
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-rate-limiter
       - name: Skipping build for PR
         if: ${{ github.event_name == 'pull_request' }}

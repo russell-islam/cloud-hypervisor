@@ -6,29 +6,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use crate::{NumaNodes, PciSpaceInfo};
-use byteorder::{BigEndian, ByteOrder};
-use hypervisor::arch::aarch64::gic::Vgic;
-use std::cmp;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
-use std::result;
-use std::str;
-use std::sync::{Arc, Mutex};
-
-use super::super::DeviceType;
-use super::super::GuestMemoryMmap;
-use super::super::InitramfsConfig;
-use super::layout::{
-    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
-    PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
-};
-use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::{cmp, fs, result, str};
+
+use byteorder::{BigEndian, ByteOrder};
+use hypervisor::arch::aarch64::gic::Vgic;
+use hypervisor::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
+};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+
+use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
+use super::layout::{
+    GIC_V2M_COMPATIBLE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE,
+    MEM_PCI_IO_START, PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT, SPI_BASE, SPI_NUM,
+};
+use crate::{NumaNodes, PciSpaceInfo};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;
@@ -63,9 +63,6 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
 
-// PMU PPI interrupt number
-pub const AARCH64_PMU_IRQ: u32 = 7;
-
 // Keys and Buttons
 // System Power Down
 const KEY_POWER: u32 = 116;
@@ -84,8 +81,8 @@ pub trait DeviceInfoForFdt {
 #[derive(Debug, Error)]
 pub enum Error {
     /// Failure in writing FDT in memory.
-    #[error("Failure in writing FDT in memory: {0}")]
-    WriteFdtToMemory(GuestMemoryError),
+    #[error("Failure in writing FDT in memory")]
+    WriteFdtToMemory(#[source] GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -113,11 +110,8 @@ pub fn get_cache_size(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         // The content of the file is as simple as a size, like: "32K"
         let src = src.trim();
@@ -147,11 +141,8 @@ pub fn get_cache_coherency_line_size(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
     }
@@ -170,11 +161,8 @@ pub fn get_cache_number_of_sets(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
     }
@@ -198,11 +186,8 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         result = false;
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         let src = src.trim();
         if src.is_empty() {
@@ -221,7 +206,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: Vec<u64>,
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u16, u16, u16, u16)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
     initrd: &Option<InitramfsConfig>,
@@ -234,8 +219,8 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     let mut fdt = FdtWriter::new().unwrap();
 
     // For an explanation why these nodes were introduced in the blob take a look at
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L845
-    // Look for "Required nodes and properties".
+    // the "Device Node Requirements" chapter of the Devicetree Specification.
+    // https://www.devicetree.org/specifications/
 
     // Header or the root node as per above mentioned documentation.
     let root_node = fdt.begin_node("")?;
@@ -283,7 +268,7 @@ pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> R
 fn create_cpu_nodes(
     fdt: &mut FdtWriter,
     vcpu_mpidr: &[u64],
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u16, u16, u16, u16)>,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
@@ -292,8 +277,11 @@ fn create_cpu_nodes(
     fdt.property_u32("#size-cells", 0x0)?;
 
     let num_cpus = vcpu_mpidr.len();
-    let (threads_per_core, cores_per_package, packages) = vcpu_topology.unwrap_or((1, 1, 1));
-    let max_cpus: u32 = (threads_per_core * cores_per_package * packages).into();
+    let (threads_per_core, cores_per_die, dies_per_package, packages) =
+        vcpu_topology.unwrap_or((1, 1, 1, 1));
+    let cores_per_package = cores_per_die * dies_per_package;
+    let max_cpus: u32 =
+        threads_per_core as u32 * cores_per_die as u32 * dies_per_package as u32 * packages as u32;
 
     // Add cache info.
     // L1 Data Cache Info.
@@ -325,7 +313,6 @@ fn create_cpu_nodes(
     if !cache_exist {
         warn!("cache sysfs system does not exist.");
     } else {
-        info!("cache sysfs system exists.");
         // L1 Data Cache Info.
         l1_d_cache_size = get_cache_size(CacheLevel::L1D);
         l1_d_cache_line_size = get_cache_coherency_line_size(CacheLevel::L1D);
@@ -373,7 +360,7 @@ fn create_cpu_nodes(
         if numa_nodes.len() > 1 {
             for numa_node_idx in 0..numa_nodes.len() {
                 let numa_node = numa_nodes.get(&(numa_node_idx as u32));
-                if numa_node.unwrap().cpus.contains(&(cpu_id as u8)) {
+                if numa_node.unwrap().cpus.contains(&(cpu_id as u32)) {
                     fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
                 }
             }
@@ -426,9 +413,6 @@ fn create_cpu_nodes(
 
                 fdt.end_node(l2_cache_node)?;
             }
-            if l2_cache_size != 0 && l2_cache_shared {
-                warn!("L2 cache shared with other cpus");
-            }
         }
 
         fdt.end_node(cpu_node)?;
@@ -465,7 +449,8 @@ fn create_cpu_nodes(
     }
 
     if let Some(topology) = vcpu_topology {
-        let (threads_per_core, cores_per_package, packages) = topology;
+        let (threads_per_core, cores_per_die, dies_per_package, packages) = topology;
+        let cores_per_package = cores_per_die * dies_per_package;
         let cpu_map_node = fdt.begin_node("cpu-map")?;
 
         // Create device tree nodes with regard of above mapping.
@@ -672,11 +657,19 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
 
     if gic_device.lock().unwrap().msi_compatible() {
         let msic_node = fdt.begin_node("msic")?;
-        fdt.property_string("compatible", gic_device.lock().unwrap().msi_compatibility())?;
+        let msi_compatibility = gic_device.lock().unwrap().msi_compatibility().to_string();
+
+        fdt.property_string("compatible", msi_compatibility.as_str())?;
         fdt.property_null("msi-controller")?;
         fdt.property_u32("phandle", MSI_PHANDLE)?;
         let msi_reg_prop = gic_device.lock().unwrap().msi_properties();
         fdt.property_array_u64("reg", &msi_reg_prop)?;
+
+        if msi_compatibility == GIC_V2M_COMPATIBLE {
+            fdt.property_u32("arm,msi-base-spi", SPI_BASE)?;
+            fdt.property_u32("arm,msi-num-spis", SPI_NUM)?;
+        }
+
         fdt.end_node(msic_node)?;
     }
 
@@ -703,9 +696,14 @@ fn create_clock_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
 
 fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     // See
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/interrupt-controller/arch_timer.txt
+    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/timer/arm%2Carch_timer.yaml
     // These are fixed interrupt numbers for the timer device.
-    let irqs = [13, 14, 11, 10];
+    let irqs = [
+        AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+        AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+        AARCH64_ARCH_TIMER_VIRT_IRQ,
+        AARCH64_ARCH_TIMER_HYP_IRQ,
+    ];
     let compatible = "arm,armv8-timer";
 
     let mut timer_reg_cells: Vec<u32> = Vec::new();
@@ -840,6 +838,21 @@ fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
     Ok(())
 }
 
+// https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/fw-cfg.txt
+#[cfg(feature = "fw_cfg")]
+fn create_fw_cfg_node<T: DeviceInfoForFdt + Clone + Debug>(
+    fdt: &mut FdtWriter,
+    dev_info: &T,
+) -> FdtWriterResult<()> {
+    // FwCfg node
+    let fw_cfg_node = fdt.begin_node(&format!("fw-cfg@{:x}", dev_info.addr()))?;
+    fdt.property("compatible", b"qemu,fw-cfg-mmio\0")?;
+    fdt.property_array_u64("reg", &[dev_info.addr(), dev_info.length()])?;
+    fdt.end_node(fw_cfg_node)?;
+
+    Ok(())
+}
+
 fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     fdt: &mut FdtWriter,
     dev_info: &HashMap<(DeviceType, String), T, S>,
@@ -855,6 +868,8 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
             DeviceType::Virtio(_) => {
                 ordered_virtio_device.push(info);
             }
+            #[cfg(feature = "fw_cfg")]
+            DeviceType::FwCfg => create_fw_cfg_node(fdt, info)?,
         }
     }
 
@@ -984,39 +999,39 @@ fn create_pci_nodes(
         fdt.property_array_u32("msi-map", &msi_map)?;
         fdt.property_u32("msi-parent", MSI_PHANDLE)?;
 
-        if pci_device_info_elem.pci_segment_id == 0 {
-            if let Some(virtio_iommu_bdf) = virtio_iommu_bdf {
-                // See kernel document Documentation/devicetree/bindings/pci/pci-iommu.txt
-                // for 'iommu-map' attribute setting.
-                let iommu_map = [
-                    0_u32,
-                    VIRTIO_IOMMU_PHANDLE,
-                    0_u32,
-                    virtio_iommu_bdf,
-                    virtio_iommu_bdf + 1,
-                    VIRTIO_IOMMU_PHANDLE,
-                    virtio_iommu_bdf + 1,
-                    0xffff - virtio_iommu_bdf,
-                ];
-                fdt.property_array_u32("iommu-map", &iommu_map)?;
+        if pci_device_info_elem.pci_segment_id == 0
+            && let Some(virtio_iommu_bdf) = virtio_iommu_bdf
+        {
+            // See kernel document Documentation/devicetree/bindings/pci/pci-iommu.txt
+            // for 'iommu-map' attribute setting.
+            let iommu_map = [
+                0_u32,
+                VIRTIO_IOMMU_PHANDLE,
+                0_u32,
+                virtio_iommu_bdf,
+                virtio_iommu_bdf + 1,
+                VIRTIO_IOMMU_PHANDLE,
+                virtio_iommu_bdf + 1,
+                0xffff - virtio_iommu_bdf,
+            ];
+            fdt.property_array_u32("iommu-map", &iommu_map)?;
 
-                // See kernel document Documentation/devicetree/bindings/virtio/iommu.txt
-                // for virtio-iommu node settings.
-                let virtio_iommu_node_name = format!("virtio_iommu@{virtio_iommu_bdf:x}");
-                let virtio_iommu_node = fdt.begin_node(&virtio_iommu_node_name)?;
-                fdt.property_u32("#iommu-cells", 1)?;
-                fdt.property_string("compatible", "virtio,pci-iommu")?;
+            // See kernel document Documentation/devicetree/bindings/virtio/iommu.txt
+            // for virtio-iommu node settings.
+            let virtio_iommu_node_name = format!("virtio_iommu@{virtio_iommu_bdf:x}");
+            let virtio_iommu_node = fdt.begin_node(&virtio_iommu_node_name)?;
+            fdt.property_u32("#iommu-cells", 1)?;
+            fdt.property_string("compatible", "virtio,pci-iommu")?;
 
-                // 'reg' is a five-cell address encoded as
-                // (phys.hi phys.mid phys.lo size.hi size.lo). phys.hi should contain the
-                // device's BDF as 0b00000000 bbbbbbbb dddddfff 00000000. The other cells
-                // should be zero.
-                let reg = [virtio_iommu_bdf << 8, 0_u32, 0_u32, 0_u32, 0_u32];
-                fdt.property_array_u32("reg", &reg)?;
-                fdt.property_u32("phandle", VIRTIO_IOMMU_PHANDLE)?;
+            // 'reg' is a five-cell address encoded as
+            // (phys.hi phys.mid phys.lo size.hi size.lo). phys.hi should contain the
+            // device's BDF as 0b00000000 bbbbbbbb dddddfff 00000000. The other cells
+            // should be zero.
+            let reg = [virtio_iommu_bdf << 8, 0_u32, 0_u32, 0_u32, 0_u32];
+            fdt.property_array_u32("reg", &reg)?;
+            fdt.property_u32("phandle", VIRTIO_IOMMU_PHANDLE)?;
 
-                fdt.end_node(virtio_iommu_node)?;
-            }
+            fdt.end_node(virtio_iommu_node)?;
         }
 
         fdt.end_node(pci_node)?;

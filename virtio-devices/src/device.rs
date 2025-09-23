@@ -6,25 +6,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::collections::HashMap;
+use std::io::Write;
+use std::num::Wrapping;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
+use std::thread;
+
+use libc::EFD_NONBLOCK;
+use virtio_queue::Queue;
+use vm_device::UserspaceMapping;
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
+use vm_migration::{MigratableError, Pausable};
+use vm_virtio::{AccessPlatform, VirtioDeviceType};
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
-use libc::EFD_NONBLOCK;
-use std::collections::HashMap;
-use std::io::Write;
-use std::num::Wrapping;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Barrier,
-};
-use std::thread;
-use virtio_queue::Queue;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
-use vm_migration::{MigratableError, Pausable};
-use vm_virtio::AccessPlatform;
-use vm_virtio::VirtioDeviceType;
-use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
     Config,
@@ -36,15 +36,6 @@ pub trait VirtioInterrupt: Send + Sync {
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
-}
-
-#[derive(Clone)]
-pub struct UserspaceMapping {
-    pub host_addr: u64,
-    pub mem_slot: u32,
-    pub addr: GuestAddress,
-    pub len: GuestUsize,
-    pub mergeable: bool,
 }
 
 #[derive(Clone)]

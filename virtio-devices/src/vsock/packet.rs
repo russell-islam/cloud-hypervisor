@@ -16,16 +16,16 @@
 //! in guest memory. This is done to avoid unnecessarily copying data from guest memory
 //! to temporary buffers, before passing it on to the vsock backend.
 
-use byteorder::{ByteOrder, LittleEndian};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use super::defs;
-use super::{Result, VsockError};
-use crate::get_host_address_range;
+use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
 use vm_memory::{Address, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
+
+use super::{Result, VsockError, defs};
+use crate::get_host_address_range;
 
 // The vsock packet header is defined by the C struct:
 //
@@ -421,14 +421,15 @@ impl VsockPacket {
 #[allow(clippy::undocumented_unsafe_blocks)]
 #[cfg(not(feature = "sev_snp"))]
 mod tests {
-    use super::super::tests::TestContext;
-    use super::*;
-    use crate::vsock::defs::MAX_PKT_BUF_SIZE;
-    use crate::GuestMemoryMmap;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::QueueOwnedT;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
+
+    use super::super::tests::TestContext;
+    use super::*;
+    use crate::GuestMemoryMmap;
+    use crate::vsock::defs::MAX_PKT_BUF_SIZE;
 
     macro_rules! create_context {
         ($test_ctx:ident, $handler_ctx:ident) => {
