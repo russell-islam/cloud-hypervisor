@@ -647,7 +647,10 @@ impl CpusConfig {
                 _ => Err(Error::InvalidCpuFeatures(s)),
             }?;
         }
-
+        let nested = parser
+            .convert::<Toggle>("nested")
+            .map_err(Error::ParseCpus)?
+            .map(|toggle| toggle.0);
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -656,6 +659,7 @@ impl CpusConfig {
             max_phys_bits,
             affinity,
             features,
+            nested,
         })
     }
 }

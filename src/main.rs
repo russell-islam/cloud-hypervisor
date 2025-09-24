@@ -217,7 +217,8 @@ fn get_cli_options_sorted(
                     topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
-                    features=<list_of_features_to_enable>",
+                    features=<list_of_features_to_enable>,\
+                    nested=on|off",
             )
             .default_value(default_vcpus)
             .group("vm-config"),
@@ -964,6 +965,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nested: None,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
@@ -1052,7 +1054,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "cpus": {"boot_vcpus": 1, "max_vcpus": 1}
+                    "cpus": {"boot_vcpus": 1, "max_vcpus": 1, "nesting": true}
                 }"#,
                 true,
             ),
@@ -1066,7 +1068,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "cpus": {"boot_vcpus": 1, "max_vcpus": 3}
+                    "cpus": {"boot_vcpus": 1, "max_vcpus": 3, "nesting": true}
                 }"#,
                 true,
             ),
@@ -1080,7 +1082,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "cpus": {"boot_vcpus": 1, "max_vcpus": 3}
+                    "cpus": {"boot_vcpus": 1, "max_vcpus": 3, "nesting": false}
                 }"#,
                 false,
             ),
@@ -1374,7 +1376,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2, "nesting": true},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4}
                     ]
@@ -1390,7 +1392,7 @@ mod unit_tests {
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2},
+                    "cpus": {"boot_vcpus": 2, "max_vcpus": 2, "nesting": true},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 4, "queue_size": 128}
                     ]
@@ -1557,7 +1559,7 @@ mod unit_tests {
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
-                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4, "nesting": true},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4}
                     ]
@@ -1574,7 +1576,7 @@ mod unit_tests {
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
-                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4},
+                    "cpus": {"boot_vcpus": 4, "max_vcpus": 4, "nesting": true},
                     "fs": [
                         {"tag": "virtiofs1", "socket": "/path/to/sock1", "num_queues": 4, "queue_size": 128}
                     ]
