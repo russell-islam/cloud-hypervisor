@@ -183,8 +183,6 @@ prepare_linux() {
 }
 
 download_ovmf() {
-    OVMF_FW_TAG="ch-a54f262b09"
-    OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
     if [ ! -f $OVMF_FW ]; then
         OVMF_FW_TAG="ch-6624aa331f"
