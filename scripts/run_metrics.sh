@@ -19,7 +19,7 @@ build_fio() {
     if [ ! -f "$FIO_DIR/.built" ]; then
         pushd "$FIO_DIR" || exit
         ./configure
-        make -j "$(nproc)"
+        make LDFLAGS="-static" CONFIG_STATIC=y -j "$(nproc)"
         cp fio "$WORKLOADS_DIR/fio"
         touch .built
         popd || exit
