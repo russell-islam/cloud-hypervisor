@@ -720,6 +720,10 @@ pub enum PayloadConfigError {
     /// No bootitem provided: neither firmware nor kernel.
     #[error("No bootitem provided: neither firmware nor kernel")]
     MissingBootitem,
+    #[cfg(feature = "igvm")]
+    /// Specifying a kernel or firmware is not supported when an igvm is provided.
+    #[error("Specifying a kernel or firmware is not supported when a igvm is provided")]
+    IgvmPlusOtherPayloads,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -819,6 +823,15 @@ impl PayloadConfig {
     /// Succeeds if Cloud Hypervisor will be able to boot the configuration.
     /// Further, warns for some odd configurations.
     pub fn validate(&mut self) -> Result<(), PayloadConfigError> {
+        #[cfg(feature = "igvm")]
+        {
+            if let Some(_igvm) = &self.igvm {
+                if self.firmware.is_some() || self.kernel.is_some() {
+                    return Err(PayloadConfigError::IgvmPlusOtherPayloads);
+                }
+                return Ok(());
+            }
+        }
         match (&self.firmware, &self.kernel) {
             (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
             (Some(_firmware), None) => {
