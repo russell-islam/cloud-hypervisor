@@ -12,6 +12,7 @@
 extern crate log;
 
 pub mod async_io;
+pub mod fcntl;
 pub mod fixed_vhd;
 #[cfg(feature = "io_uring")]
 /// Enabled with the `"io_uring"` feature
@@ -30,17 +31,7 @@ pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::fixed_vhd::FixedVhd;
-use crate::qcow::{QcowFile, RawFile};
-use crate::vhdx::{Vhdx, VhdxError};
-#[cfg(feature = "io_uring")]
-use io_uring::{opcode, IoUring, Probe};
-use libc::{ioctl, S_IFBLK, S_IFMT};
-use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
-use std::alloc::{alloc_zeroed, dealloc, Layout};
-use std::cmp;
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::fs::File;
@@ -48,21 +39,28 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::result;
 use std::sync::Arc;
-use std::sync::MutexGuard;
 use std::time::Instant;
+use std::{cmp, result};
+
+#[cfg(feature = "io_uring")]
+use io_uring::{IoUring, Probe, opcode};
+use libc::{S_IFBLK, S_IFMT, ioctl};
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
+use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
-use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
+use vmm_sys_util::{aio, ioctl_io_nr};
+
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::vhdx::VhdxError;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -70,9 +68,9 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Guest gave us bad memory addresses")]
-    GuestMemory(GuestMemoryError),
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us offsets that would have overflowed a usize")]
-    CheckedOffset(GuestAddress, usize),
+    CheckedOffset(GuestAddress, usize /* sector offset */),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest gave us a read only descriptor that protocol says to write to")]
@@ -81,22 +79,22 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
-    #[error("Failed to detect image type: {0}")]
-    DetectImageType(std::io::Error),
-    #[error("Failure in fixed vhd: {0}")]
-    FixedVhdError(std::io::Error),
+    #[error("Failed to detect image type")]
+    DetectImageType(#[source] std::io::Error),
+    #[error("Failure in fixed vhd")]
+    FixedVhdError(#[source] std::io::Error),
     #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
-    #[error("Failure in qcow: {0}")]
-    QcowError(qcow::Error),
-    #[error("Failure in raw file: {0}")]
-    RawFileError(std::io::Error),
+    #[error("Failure in qcow")]
+    QcowError(#[source] qcow::Error),
+    #[error("Failure in raw file")]
+    RawFileError(#[source] std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
-    #[error("Failure in vhdx: {0}")]
-    VhdxError(VhdxError),
+    #[error("Failure in vhdx")]
+    VhdxError(#[source] VhdxError),
 }
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
@@ -133,34 +131,36 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
 
 #[derive(Error, Debug)]
 pub enum ExecuteError {
-    #[error("Bad request: {0}")]
-    BadRequest(Error),
-    #[error("Failed to flush: {0}")]
-    Flush(io::Error),
-    #[error("Failed to read: {0}")]
-    Read(GuestMemoryError),
-    #[error("Failed to read_exact: {0}")]
-    ReadExact(io::Error),
-    #[error("Failed to seek: {0}")]
-    Seek(io::Error),
-    #[error("Failed to write: {0}")]
-    Write(GuestMemoryError),
-    #[error("Failed to write_all: {0}")]
-    WriteAll(io::Error),
+    #[error("Bad request")]
+    BadRequest(#[source] Error),
+    #[error("Failed to flush")]
+    Flush(#[source] io::Error),
+    #[error("Failed to read")]
+    Read(#[source] GuestMemoryError),
+    #[error("Failed to read_exact")]
+    ReadExact(#[source] io::Error),
+    #[error("Can't execute an operation other than `read` on a read-only device")]
+    ReadOnly,
+    #[error("Failed to seek")]
+    Seek(#[source] io::Error),
+    #[error("Failed to write")]
+    Write(#[source] GuestMemoryError),
+    #[error("Failed to write_all")]
+    WriteAll(#[source] io::Error),
     #[error("Unsupported request: {0}")]
     Unsupported(u32),
-    #[error("Failed to submit io uring: {0}")]
-    SubmitIoUring(io::Error),
-    #[error("Failed to get guest address: {0}")]
-    GetHostAddress(GuestMemoryError),
-    #[error("Failed to async read: {0}")]
-    AsyncRead(AsyncIoError),
-    #[error("Failed to async write: {0}")]
-    AsyncWrite(AsyncIoError),
-    #[error("failed to async flush: {0}")]
-    AsyncFlush(AsyncIoError),
-    #[error("Failed allocating a temporary buffer: {0}")]
-    TemporaryBufferAllocation(io::Error),
+    #[error("Failed to submit io uring")]
+    SubmitIoUring(#[source] io::Error),
+    #[error("Failed to get guest address")]
+    GetHostAddress(#[source] GuestMemoryError),
+    #[error("Failed to async read")]
+    AsyncRead(#[source] AsyncIoError),
+    #[error("Failed to async write")]
+    AsyncWrite(#[source] AsyncIoError),
+    #[error("failed to async flush")]
+    AsyncFlush(#[source] AsyncIoError),
+    #[error("Failed allocating a temporary buffer")]
+    TemporaryBufferAllocation(#[source] io::Error),
 }
 
 impl ExecuteError {
@@ -170,6 +170,7 @@ impl ExecuteError {
             ExecuteError::Flush(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Read(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::ReadExact(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::ReadOnly => VIRTIO_BLK_S_IOERR,
             ExecuteError::Seek(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Write(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::WriteAll(_) => VIRTIO_BLK_S_IOERR,
@@ -221,6 +222,8 @@ fn sector<B: Bitmap + 'static>(
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
+const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
 #[derive(Debug)]
 pub struct AlignedOperation {
     origin_ptr: u64,
@@ -229,14 +232,28 @@ pub struct AlignedOperation {
     layout: Layout,
 }
 
+pub struct BatchRequest {
+    pub offset: libc::off_t,
+    pub iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
+    pub user_data: u64,
+    pub request_type: RequestType,
+}
+
+pub struct ExecuteAsync {
+    // `true` if the execution will complete asynchronously
+    pub async_complete: bool,
+    // request need to be batched for submission if any
+    pub batch_request: Option<BatchRequest>,
+}
+
 #[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
-    pub data_descriptors: SmallVec<[(GuestAddress, u32); 1]>,
+    pub data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
-    pub aligned_operations: SmallVec<[AlignedOperation; 1]>,
+    pub aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub start: Instant,
 }
 
@@ -264,10 +281,10 @@ impl Request {
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(1),
+            data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: SmallVec::with_capacity(1),
+            aligned_operations: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             start: Instant::now(),
         };
 
@@ -394,21 +411,27 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
-    ) -> result::Result<bool, ExecuteError> {
+    ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
-        let mut iovecs: SmallVec<[libc::iovec; 1]> =
+        let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
-        for (data_addr, data_len) in &self.data_descriptors {
-            if *data_len == 0 {
+        for &(data_addr, data_len) in &self.data_descriptors {
+            let _: u32 = data_len; // compiler-checked documentation
+            const _: () = assert!(
+                core::mem::size_of::<u32>() <= core::mem::size_of::<usize>(),
+                "unsupported platform"
+            );
+            if data_len == 0 {
                 continue;
             }
-            let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
-            if u64::from(*data_len) % SECTOR_SIZE != 0 {
+            let mut top: u64 = u64::from(data_len) / SECTOR_SIZE;
+            if u64::from(data_len) % SECTOR_SIZE != 0 {
                 top += 1;
             }
+            let data_len = data_len as usize;
             top = top
                 .checked_add(sector)
                 .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
@@ -417,7 +440,7 @@ impl Request {
             }
 
             let origin_ptr = mem
-                .get_slice(*data_addr, *data_len as usize)
+                .get_slice(data_addr, data_len)
                 .map_err(ExecuteError::GetHostAddress)?
                 .ptr_guard();
 
@@ -425,9 +448,8 @@ impl Request {
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64) % SECTOR_SIZE != 0 {
-                let layout =
-                    Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
+            let iov_base = if !(origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {
@@ -441,7 +463,7 @@ impl Request {
                 if request_type == RequestType::Out {
                     // SAFETY: destination buffer has been allocated with
                     // the proper size.
-                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, *data_len as usize) };
+                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, data_len) };
                 }
 
                 // Store both origin and aligned pointers for complete_async()
@@ -449,7 +471,7 @@ impl Request {
                 self.aligned_operations.push(AlignedOperation {
                     origin_ptr: origin_ptr.as_ptr() as u64,
                     aligned_ptr: aligned_ptr as u64,
-                    size: *data_len as usize,
+                    size: data_len,
                     layout,
                 });
 
@@ -460,11 +482,15 @@ impl Request {
 
             let iovec = libc::iovec {
                 iov_base,
-                iov_len: *data_len as libc::size_t,
+                iov_len: data_len as libc::size_t,
             };
             iovecs.push(iovec);
         }
 
+        let mut ret = ExecuteAsync {
+            async_complete: true,
+            batch_request: None,
+        };
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
@@ -474,14 +500,32 @@ impl Request {
                         .bitmap()
                         .mark_dirty(0, *data_len as usize);
                 }
-                disk_image
-                    .read_vectored(offset, &iovecs, user_data)
-                    .map_err(ExecuteError::AsyncRead)?;
+                if disk_image.batch_requests_enabled() {
+                    ret.batch_request = Some(BatchRequest {
+                        offset,
+                        iovecs,
+                        user_data,
+                        request_type,
+                    });
+                } else {
+                    disk_image
+                        .read_vectored(offset, &iovecs, user_data)
+                        .map_err(ExecuteError::AsyncRead)?;
+                }
             }
             RequestType::Out => {
-                disk_image
-                    .write_vectored(offset, &iovecs, user_data)
-                    .map_err(ExecuteError::AsyncWrite)?;
+                if disk_image.batch_requests_enabled() {
+                    ret.batch_request = Some(BatchRequest {
+                        offset,
+                        iovecs,
+                        user_data,
+                        request_type,
+                    });
+                } else {
+                    disk_image
+                        .write_vectored(offset, &iovecs, user_data)
+                        .map_err(ExecuteError::AsyncWrite)?;
+                }
             }
             RequestType::Flush => {
                 disk_image
@@ -499,12 +543,13 @@ impl Request {
                 }
                 mem.write_slice(serial, data_addr)
                     .map_err(ExecuteError::Write)?;
-                return Ok(false);
+                ret.async_complete = false;
+                return Ok(ret);
             }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
 
-        Ok(true)
+        Ok(ret)
     }
 
     pub fn complete_async(&mut self) -> result::Result<(), Error> {
@@ -641,10 +686,7 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 }
 
-pub trait AsyncAdaptor<F>
-where
-    F: Read + Write + Seek,
-{
+pub trait AsyncAdaptor {
     fn read_vectored_sync(
         &mut self,
         offset: libc::off_t,
@@ -652,9 +694,13 @@ where
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Read + Seek,
+    {
         // Convert libc::iovec into IoSliceMut
-        let mut slices: SmallVec<[IoSliceMut; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe {
@@ -663,15 +709,15 @@ where
         }
 
         let result = {
-            let mut file = self.file();
-
             // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
+            self.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::ReadVectored)?;
 
-            // Read vectored
-            file.read_vectored(slices.as_mut_slice())
-                .map_err(AsyncIoError::ReadVectored)?
+            let mut r = 0;
+            for b in slices.iter_mut() {
+                r += self.read(b).map_err(AsyncIoError::ReadVectored)?;
+            }
+            r
         };
 
         completion_list.push_back((user_data, result as i32));
@@ -687,9 +733,13 @@ where
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Write + Seek,
+    {
         // Convert libc::iovec into IoSlice
-        let mut slices: SmallVec<[IoSlice; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSlice wraps around libc::iovec
             slices.push(IoSlice::new(unsafe {
@@ -698,15 +748,15 @@ where
         }
 
         let result = {
-            let mut file = self.file();
-
             // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
+            self.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::WriteVectored)?;
 
-            // Write vectored
-            file.write_vectored(slices.as_slice())
-                .map_err(AsyncIoError::WriteVectored)?
+            let mut r = 0;
+            for b in slices.iter() {
+                r += self.write(b).map_err(AsyncIoError::WriteVectored)?;
+            }
+            r
         };
 
         completion_list.push_back((user_data, result as i32));
@@ -720,12 +770,13 @@ where
         user_data: Option<u64>,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Write,
+    {
         let result: i32 = {
-            let mut file = self.file();
-
             // Flush
-            file.flush().map_err(AsyncIoError::Fsync)?;
+            self.flush().map_err(AsyncIoError::Fsync)?;
 
             0
         };
@@ -737,8 +788,6 @@ where
 
         Ok(())
     }
-
-    fn file(&mut self) -> MutexGuard<'_, F>;
 }
 
 pub enum ImageType {
@@ -788,25 +837,6 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
     fn size(&self) -> Result<u64, Error>;
-}
-
-/// Inspect the image file type and create an appropriate disk file to match it.
-pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn BlockBackend>, Error> {
-    let image_type = detect_image_type(&mut file).map_err(Error::DetectImageType)?;
-
-    Ok(match image_type {
-        ImageType::Qcow2 => {
-            Box::new(QcowFile::from(RawFile::new(file, direct_io)).map_err(Error::QcowError)?)
-                as Box<dyn BlockBackend>
-        }
-        ImageType::FixedVhd => {
-            Box::new(FixedVhd::new(file).map_err(Error::FixedVhdError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Vhdx => {
-            Box::new(Vhdx::new(file).map_err(Error::VhdxError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
-    })
 }
 
 #[derive(Debug)]

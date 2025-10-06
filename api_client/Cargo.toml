@@ -1,9 +1,9 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-edition = "2021"
+edition.workspace = true
 name = "api_client"
 version = "0.1.0"
 
 [dependencies]
-thiserror = "1.0.62"
-vmm-sys-util = "0.12.1"
+thiserror = { workspace = true }
+vmm-sys-util = { workspace = true }

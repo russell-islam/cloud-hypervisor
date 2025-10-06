@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -8,27 +10,26 @@
 //
 //
 
-#[cfg(target_arch = "aarch64")]
-use crate::aarch64::VcpuInit;
+use std::any::Any;
+use std::sync::Arc;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use std::sync::Mutex;
+
+#[cfg(feature = "sev_snp")]
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+use thiserror::Error;
+use vmm_sys_util::eventfd::EventFd;
+
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "riscv64")]
+use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
-use crate::UserMemoryRegion;
-use crate::{IoEventAddress, IrqRoutingEntry};
-#[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-use std::any::Any;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
-use std::sync::Arc;
-#[cfg(target_arch = "aarch64")]
-use std::sync::Mutex;
-use thiserror::Error;
-use vmm_sys_util::eventfd::EventFd;
+use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
 
 ///
 /// I/O events data matches (32 or 64 bits).
@@ -55,192 +56,207 @@ pub enum HypervisorVmError {
     ///
     /// Create Vcpu error
     ///
-    #[error("Failed to create Vcpu: {0}")]
+    #[error("Failed to create Vcpu")]
     CreateVcpu(#[source] anyhow::Error),
     ///
     /// Identity map address error
     ///
-    #[error("Failed to set identity map address: {0}")]
+    #[error("Failed to set identity map address")]
     SetIdentityMapAddress(#[source] anyhow::Error),
     ///
     /// TSS address error
     ///
-    #[error("Failed to set TSS address: {0}")]
+    #[error("Failed to set TSS address")]
     SetTssAddress(#[source] anyhow::Error),
     ///
     /// Create interrupt controller error
     ///
-    #[error("Failed to create interrupt controller: {0}")]
+    #[error("Failed to create interrupt controller")]
     CreateIrq(#[source] anyhow::Error),
     ///
     /// Register interrupt event error
     ///
-    #[error("Failed to register interrupt event: {0}")]
+    #[error("Failed to register interrupt event")]
     RegisterIrqFd(#[source] anyhow::Error),
     ///
     /// Un register interrupt event error
     ///
-    #[error("Failed to unregister interrupt event: {0}")]
+    #[error("Failed to unregister interrupt event")]
     UnregisterIrqFd(#[source] anyhow::Error),
     ///
     /// Register IO event error
     ///
-    #[error("Failed to register IO event: {0}")]
+    #[error("Failed to register IO event")]
     RegisterIoEvent(#[source] anyhow::Error),
     ///
     /// Unregister IO event error
     ///
-    #[error("Failed to unregister IO event: {0}")]
+    #[error("Failed to unregister IO event")]
     UnregisterIoEvent(#[source] anyhow::Error),
     ///
     /// Set GSI routing error
     ///
-    #[error("Failed to set GSI routing: {0}")]
+    #[error("Failed to set GSI routing")]
     SetGsiRouting(#[source] anyhow::Error),
     ///
     /// Create user memory error
     ///
-    #[error("Failed to create user memory: {0}")]
+    #[error("Failed to create user memory")]
     CreateUserMemory(#[source] anyhow::Error),
     ///
     /// Remove user memory region error
     ///
-    #[error("Failed to remove user memory: {0}")]
+    #[error("Failed to remove user memory")]
     RemoveUserMemory(#[source] anyhow::Error),
     ///
     /// Create device error
     ///
-    #[error("Failed to set GSI routing: {0}")]
+    #[error("Failed to set GSI routing")]
     CreateDevice(#[source] anyhow::Error),
     ///
     /// Get preferred target error
     ///
-    #[error("Failed to get preferred target: {0}")]
+    #[error("Failed to get preferred target")]
     GetPreferredTarget(#[source] anyhow::Error),
     ///
     /// Enable split Irq error
     ///
-    #[error("Failed to enable split Irq: {0}")]
+    #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
     ///
-    /// Enable SGX attribute error
+    /// Enable x2apic API error
     ///
-    #[error("Failed to enable SGX attribute: {0}")]
-    EnableSgxAttribute(#[source] anyhow::Error),
-    ///
+    #[error("Failed to enable x2apic API")]
+    EnableX2ApicApi(#[source] anyhow::Error),
     /// Get clock error
     ///
-    #[error("Failed to get clock: {0}")]
+    #[error("Failed to get clock")]
     GetClock(#[source] anyhow::Error),
     ///
     /// Set clock error
     ///
-    #[error("Failed to set clock: {0}")]
+    #[error("Failed to set clock")]
     SetClock(#[source] anyhow::Error),
     ///
     /// Create passthrough device
     ///
-    #[error("Failed to create passthrough device: {0}")]
+    #[error("Failed to create passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
     /// Write to Guest memory
     ///
-    #[error("Failed to write to guest memory: {0}")]
+    #[error("Failed to write to guest memory")]
     GuestMemWrite(#[source] anyhow::Error),
     ///
     /// Read Guest memory
     ///
-    #[error("Failed to read guest memory: {0}")]
+    #[error("Failed to read guest memory")]
     GuestMemRead(#[source] anyhow::Error),
     ///
     /// Read from MMIO Bus
     ///
-    #[error("Failed to read from MMIO Bus: {0}")]
+    #[error("Failed to read from MMIO Bus")]
     MmioBusRead(#[source] anyhow::Error),
     ///
     /// Write to MMIO Bus
     ///
-    #[error("Failed to write to MMIO Bus: {0}")]
+    #[error("Failed to write to MMIO Bus")]
     MmioBusWrite(#[source] anyhow::Error),
     ///
     /// Read from IO Bus
     ///
-    #[error("Failed to read from IO Bus: {0}")]
+    #[error("Failed to read from IO Bus")]
     IoBusRead(#[source] anyhow::Error),
     ///
     /// Write to IO Bus
     ///
-    #[error("Failed to write to IO Bus: {0}")]
+    #[error("Failed to write to IO Bus")]
     IoBusWrite(#[source] anyhow::Error),
     ///
     /// Start dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
     ///
     /// Stop dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     StopDirtyLog(#[source] anyhow::Error),
     ///
     /// Get dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     GetDirtyLog(#[source] anyhow::Error),
     ///
     /// Assert virtual interrupt error
     ///
-    #[error("Failed to assert virtual Interrupt: {0}")]
+    #[error("Failed to assert virtual Interrupt")]
     AssertVirtualInterrupt(#[source] anyhow::Error),
 
     #[cfg(feature = "sev_snp")]
     ///
     /// Error initializing SEV-SNP on the VM
     ///
-    #[error("Failed to initialize SEV-SNP: {0}")]
+    #[error("Failed to initialize SEV-SNP")]
     InitializeSevSnp(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing TDX on the VM
     ///
-    #[error("Failed to initialize TDX: {0}")]
+    #[error("Failed to initialize TDX")]
     InitializeTdx(#[source] std::io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error finalizing the TDX configuration on the VM
     ///
-    #[error("Failed to finalize TDX: {0}")]
+    #[error("Failed to finalize TDX")]
     FinalizeTdx(#[source] std::io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing the TDX memory region
     ///
-    #[error("Failed to initialize memory region TDX: {0}")]
+    #[error("Failed to initialize memory region TDX")]
     InitMemRegionTdx(#[source] std::io::Error),
     ///
     /// Create Vgic error
     ///
-    #[error("Failed to create Vgic: {0}")]
+    #[error("Failed to create Vgic")]
     CreateVgic(#[source] anyhow::Error),
+    ///
+    /// Create Vaia error
+    ///
+    #[error("Failed to create Vaia")]
+    CreateVaia(#[source] anyhow::Error),
     ///
     /// Import isolated pages error
     ///
-    #[error("Failed to import isolated pages: {0}")]
+    #[error("Failed to import isolated pages")]
     ImportIsolatedPages(#[source] anyhow::Error),
     /// Failed to complete isolated import
     ///
-    #[error("Failed to complete isolated import: {0}")]
+    #[error("Failed to complete isolated import")]
     CompleteIsolatedImport(#[source] anyhow::Error),
     /// Failed to set VM property
     ///
-    #[error("Failed to set VM property: {0}")]
+    #[error("Failed to set VM property")]
     SetVmProperty(#[source] anyhow::Error),
     ///
     /// Modify GPA host access error
     ///
     #[cfg(feature = "sev_snp")]
-    #[error("Failed to modify GPA host access: {0}")]
+    #[error("Failed to modify GPA host access")]
     ModifyGpaHostAccess(#[source] anyhow::Error),
+    ///
+    /// Failed to mmap
+    ///
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to mmap:")]
+    MmapToRoot,
+    ///
+    /// Failed to initialize VM
+    ///
+    #[error("Failed to initialize VM")]
+    InitializeVm(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -292,6 +308,7 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(target_arch = "x86_64")]
     /// Sets the address of the three-page region in the VM's address space.
     fn set_tss_address(&self, offset: usize) -> Result<()>;
+    #[cfg(not(target_arch = "riscv64"))]
     /// Creates an in-kernel interrupt controller.
     fn create_irq_chip(&self) -> Result<()>;
     /// Registers an event that will, when signaled, trigger the `gsi` IRQ.
@@ -299,9 +316,11 @@ pub trait Vm: Send + Sync + Any {
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
-    fn create_vcpu(&self, id: u8, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
+    fn create_vcpu(&self, id: u32, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
+    #[cfg(target_arch = "riscv64")]
+    fn create_vaia(&self, config: VaiaConfig) -> Result<Arc<Mutex<dyn Vaia>>>;
 
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(
@@ -332,12 +351,10 @@ pub trait Vm: Send + Sync + Any {
     fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> Result<()>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> Result<()>;
+    fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> Result<()>;
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> Result<ClockData>;
@@ -400,7 +417,10 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
-
+    /// Initialize the VM
+    fn init(&self) -> Result<()> {
+        Ok(())
+    }
     /// Pause the VM
     fn pause(&self) -> Result<()> {
         Ok(())
@@ -414,6 +434,11 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(feature = "sev_snp")]
     fn gain_page_access(&self, _gpa: u64, _size: u32) -> Result<()> {
         Ok(())
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn enable_x2apic_api(&self) -> Result<()> {
+        unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
 }
 

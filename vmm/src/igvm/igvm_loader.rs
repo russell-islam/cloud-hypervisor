@@ -2,31 +2,29 @@
 //
 // Copyright © 2023, Microsoft Corporation
 //
-use crate::cpu::CpuManager;
-use zerocopy::AsBytes;
-
-use crate::igvm::{
-    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE,
-};
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
-use igvm::{snp_defs::SevVmsa, IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
-use igvm_defs::{
-    IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
-};
-use mshv_bindings::*;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
+use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
+
+use igvm::snp_defs::SevVmsa;
+use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
+use igvm_defs::{
+    IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType, IgvmPlatformType,
+};
+use mshv_bindings::*;
 use thiserror::Error;
+use zerocopy::IntoBytes;
 
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
-#[cfg(feature = "sev_snp")]
-use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
+use crate::cpu::CpuManager;
+use crate::igvm::loader::Loader;
+use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -42,11 +40,11 @@ pub enum Error {
     Loader(#[source] crate::igvm::loader::Error),
     #[error("parameter too large for parameter area")]
     ParameterTooLarge,
-    #[error("Error importing isolated pages: {0}")]
+    #[error("Error importing isolated pages")]
     ImportIsolatedPages(#[source] hypervisor::HypervisorVmError),
-    #[error("Error completing importing isolated pages: {0}")]
+    #[error("Error completing importing isolated pages")]
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
-    #[error("Error decoding host data: {0}")]
+    #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
     #[error("allocate address space")]
     MemoryManager(MemoryManagerError),
@@ -70,8 +68,8 @@ enum ParameterAreaState {
 
 #[cfg(feature = "sev_snp")]
 fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
-    assert!(ram_range.0 % HV_PAGE_SIZE == 0);
-    assert!((ram_range.1 - ram_range.0) % HV_PAGE_SIZE == 0);
+    assert!(ram_range.0.is_multiple_of(HV_PAGE_SIZE));
+    assert!((ram_range.1 - ram_range.0).is_multiple_of(HV_PAGE_SIZE));
 
     IGVM_VHS_MEMORY_MAP_ENTRY {
         starting_gpa_page_number: ram_range.0 / HV_PAGE_SIZE,
@@ -183,7 +181,7 @@ pub fn load_igvm(
                 data_type,
                 data,
             } => {
-                debug_assert!(data.len() as u64 % HV_PAGE_SIZE == 0);
+                debug_assert!((data.len() as u64).is_multiple_of(HV_PAGE_SIZE));
 
                 // TODO: only 4k or empty page data supported right now
                 assert!(data.len() as u64 == HV_PAGE_SIZE || data.is_empty());
@@ -437,11 +435,11 @@ pub fn load_igvm(
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
-                if let Some(last_vec) = acc.last_mut() {
-                    if last_vec[0].page_type == gpa.page_type {
-                        last_vec.push(*gpa);
-                        return acc;
-                    }
+                if let Some(last_vec) = acc.last_mut()
+                    && last_vec[0].page_type == gpa.page_type
+                {
+                    last_vec.push(*gpa);
+                    return acc;
                 }
                 acc.push(vec![*gpa]);
                 acc

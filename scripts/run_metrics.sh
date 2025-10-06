@@ -80,12 +80,8 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
 fi
 
-# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-# We will build kernel only if we are not running perf-metrics test for CVM
-VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
-if [ ! -f "$VMLINUX_IMAGE" ] && [ "$GUEST_VM_TYPE" != "CVM" ]; then
-    build_custom_linux
-fi
+# Prepare linux image (build from source or download pre-built)
+prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then

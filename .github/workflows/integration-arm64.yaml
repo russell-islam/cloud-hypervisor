@@ -6,14 +6,14 @@ concurrency:
 
 jobs:
   build:
-    timeout-minutes: 60
+    timeout-minutes: 120
     name: Tests (ARM64)
-    runs-on: focal-arm64
+    runs-on: bookworm-arm64
     steps:
       - name: Fix workspace permissions
-        run: sudo chown -R github-runner:github-runner ${GITHUB_WORKSPACE}
+        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Run unit tests (musl)
@@ -21,14 +21,14 @@ jobs:
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
-        timeout-minutes: 30
+        timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
       - name: Install Azure CLI
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
           curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ focal main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image

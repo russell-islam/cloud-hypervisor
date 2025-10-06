@@ -6,14 +6,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::VirtioDevice;
-use byteorder::{ByteOrder, LittleEndian};
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 use vm_virtio::AccessPlatform;
+
+use crate::VirtioDevice;
 
 pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
 
@@ -259,36 +261,28 @@ impl VirtioPciCommonConfig {
                 let ready = value == 1;
                 q.set_ready(ready);
                 // Translate address of descriptor table and vrings.
-                if let Some(access_platform) = &self.access_platform {
-                    if ready {
-                        let desc_table = access_platform
-                            .translate_gva(
-                                q.desc_table(),
-                                get_vring_size(VringType::Desc, q.size()),
-                            )
-                            .unwrap();
-                        let avail_ring = access_platform
-                            .translate_gva(
-                                q.avail_ring(),
-                                get_vring_size(VringType::Avail, q.size()),
-                            )
-                            .unwrap();
-                        let used_ring = access_platform
-                            .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
-                            .unwrap();
-                        q.set_desc_table_address(
-                            Some((desc_table & 0xffff_ffff) as u32),
-                            Some((desc_table >> 32) as u32),
-                        );
-                        q.set_avail_ring_address(
-                            Some((avail_ring & 0xffff_ffff) as u32),
-                            Some((avail_ring >> 32) as u32),
-                        );
-                        q.set_used_ring_address(
-                            Some((used_ring & 0xffff_ffff) as u32),
-                            Some((used_ring >> 32) as u32),
-                        );
-                    }
+                if ready && let Some(access_platform) = &self.access_platform {
+                    let desc_table = access_platform
+                        .translate_gva(q.desc_table(), get_vring_size(VringType::Desc, q.size()))
+                        .unwrap();
+                    let avail_ring = access_platform
+                        .translate_gva(q.avail_ring(), get_vring_size(VringType::Avail, q.size()))
+                        .unwrap();
+                    let used_ring = access_platform
+                        .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
+                        .unwrap();
+                    q.set_desc_table_address(
+                        Some((desc_table & 0xffff_ffff) as u32),
+                        Some((desc_table >> 32) as u32),
+                    );
+                    q.set_avail_ring_address(
+                        Some((avail_ring & 0xffff_ffff) as u32),
+                        Some((avail_ring >> 32) as u32),
+                    );
+                    q.set_used_ring_address(
+                        Some((used_ring & 0xffff_ffff) as u32),
+                        Some((used_ring >> 32) as u32),
+                    );
                 }
             }),
             _ => {
@@ -404,11 +398,11 @@ impl Snapshottable for VirtioPciCommonConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::GuestMemoryMmap;
-    use crate::{ActivateResult, VirtioInterrupt};
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::{ActivateResult, GuestMemoryMmap, VirtioInterrupt};
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;

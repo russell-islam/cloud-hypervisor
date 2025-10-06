@@ -1,5 +1,8 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-edition = "2021"
+edition.workspace = true
 name = "option_parser"
 version = "0.1.0"
+
+[dependencies]
+thiserror = { workspace = true }

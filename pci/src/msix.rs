@@ -3,18 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use crate::{PciCapability, PciCapabilityId};
-use byteorder::{ByteOrder, LittleEndian};
-use serde::Deserialize;
-use serde::Serialize;
-use std::io;
-use std::result;
 use std::sync::Arc;
+use std::{io, result};
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+
+use crate::{PciCapability, PciCapabilityId};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -27,12 +28,14 @@ const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 pub const MSIX_CONFIG_ID: &str = "msix_config";
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed enabling the interrupt route.
-    EnableInterruptRoute(io::Error),
+    #[error("Failed enabling the interrupt route")]
+    EnableInterruptRoute(#[source] io::Error),
     /// Failed updating the interrupt route.
-    UpdateInterruptRoute(io::Error),
+    #[error("Failed updating the interrupt route")]
+    UpdateInterruptRoute(#[source] io::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -208,7 +211,7 @@ impl MsixConfig {
     }
 
     pub fn read_table(&self, offset: u64, data: &mut [u8]) {
-        assert!((data.len() == 4 || data.len() == 8));
+        assert!(data.len() == 4 || data.len() == 8);
 
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
         let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
@@ -261,7 +264,7 @@ impl MsixConfig {
     }
 
     pub fn write_table(&mut self, offset: u64, data: &[u8]) {
-        assert!((data.len() == 4 || data.len() == 8));
+        assert!(data.len() == 4 || data.len() == 8);
 
         let index: usize = (offset / MSIX_TABLE_ENTRIES_MODULO) as usize;
         let modulo_offset = offset % MSIX_TABLE_ENTRIES_MODULO;
@@ -357,7 +360,7 @@ impl MsixConfig {
     }
 
     pub fn read_pba(&mut self, offset: u64, data: &mut [u8]) {
-        assert!((data.len() == 4 || data.len() == 8));
+        assert!(data.len() == 4 || data.len() == 8);
 
         let index: usize = (offset / MSIX_PBA_ENTRIES_MODULO) as usize;
         let modulo_offset = offset % MSIX_PBA_ENTRIES_MODULO;

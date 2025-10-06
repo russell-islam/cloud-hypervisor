@@ -3,66 +3,68 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use api_client::simple_api_command;
-use api_client::simple_api_command_with_fds;
-use api_client::simple_api_full_command;
-use api_client::Error as ApiClientError;
-use clap::{Arg, ArgAction, ArgMatches, Command};
-use option_parser::{ByteSized, ByteSizedParseError};
-use std::fmt;
+#[cfg(test)]
+#[path = "../test_util.rs"]
+mod test_util;
+
 use std::io::Read;
 use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
 use std::process;
+
+use api_client::{
+    Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
+    simple_api_full_command,
+};
+use clap::{Arg, ArgAction, ArgMatches, Command};
+use log::error;
+use option_parser::{ByteSized, ByteSizedParseError};
+use thiserror::Error;
+use vmm::config::RestoreConfig;
+use vmm::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
+    VsockConfig,
+};
 #[cfg(feature = "dbus_api")]
 use zbus::{proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
-    HttpApiClient(ApiClientError),
+    #[error("http client error")]
+    HttpApiClient(#[source] ApiClientError),
     #[cfg(feature = "dbus_api")]
-    DBusApiClient(zbus::Error),
-    InvalidCpuCount(std::num::ParseIntError),
-    InvalidMemorySize(ByteSizedParseError),
-    InvalidBalloonSize(ByteSizedParseError),
-    AddDeviceConfig(vmm::config::Error),
-    AddDiskConfig(vmm::config::Error),
-    AddFsConfig(vmm::config::Error),
-    AddPmemConfig(vmm::config::Error),
-    AddNetConfig(vmm::config::Error),
-    AddUserDeviceConfig(vmm::config::Error),
-    AddVdpaConfig(vmm::config::Error),
-    AddVsockConfig(vmm::config::Error),
-    Restore(vmm::config::Error),
-    ReadingStdin(std::io::Error),
-    ReadingFile(std::io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
-        match self {
-            HttpApiClient(e) => e.fmt(f),
-            #[cfg(feature = "dbus_api")]
-            DBusApiClient(e) => write!(f, "Error D-Bus proxy: {e}"),
-            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {e}"),
-            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {e:?}"),
-            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {e:?}"),
-            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {e}"),
-            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {e}"),
-            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {e}"),
-            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {e}"),
-            AddNetConfig(e) => write!(f, "Error parsing network syntax: {e}"),
-            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {e}"),
-            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {e}"),
-            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {e}"),
-            Restore(e) => write!(f, "Error parsing restore syntax: {e}"),
-            ReadingStdin(e) => write!(f, "Error reading from stdin: {e}"),
-            ReadingFile(e) => write!(f, "Error reading from file: {e}"),
-        }
-    }
+    #[error("dbus api client error")]
+    DBusApiClient(#[source] zbus::Error),
+    #[error("Error parsing CPU count")]
+    InvalidCpuCount(#[source] std::num::ParseIntError),
+    #[error("Error parsing memory size")]
+    InvalidMemorySize(#[source] ByteSizedParseError),
+    #[error("Error parsing balloon size")]
+    InvalidBalloonSize(#[source] ByteSizedParseError),
+    #[error("Error parsing device syntax")]
+    AddDeviceConfig(#[source] vmm::config::Error),
+    #[error("Error parsing disk syntax")]
+    AddDiskConfig(#[source] vmm::config::Error),
+    #[error("Error parsing filesystem syntax")]
+    AddFsConfig(#[source] vmm::config::Error),
+    #[error("Error parsing persistent memory syntax")]
+    AddPmemConfig(#[source] vmm::config::Error),
+    #[error("Error parsing network syntax")]
+    AddNetConfig(#[source] vmm::config::Error),
+    #[error("Error parsing user device syntax")]
+    AddUserDeviceConfig(#[source] vmm::config::Error),
+    #[error("Error parsing vDPA device syntax")]
+    AddVdpaConfig(#[source] vmm::config::Error),
+    #[error("Error parsing vsock syntax")]
+    AddVsockConfig(#[source] vmm::config::Error),
+    #[error("Error parsing restore syntax")]
+    Restore(#[source] vmm::config::Error),
+    #[error("Error reading from stdin")]
+    ReadingStdin(#[source] std::io::Error),
+    #[error("Error reading from file")]
+    ReadingFile(#[source] std::io::Error),
 }
 
 enum TargetApi<'a> {
@@ -723,7 +725,7 @@ fn resize_config(
     memory: Option<&str>,
     balloon: Option<&str>,
 ) -> Result<String, Error> {
-    let desired_vcpus: Option<u8> = if let Some(cpus) = cpus {
+    let desired_vcpus: Option<u32> = if let Some(cpus) = cpus {
         Some(cpus.parse().map_err(Error::InvalidCpuCount)?)
     } else {
         None
@@ -773,15 +775,14 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn add_device_config(config: &str) -> Result<String, Error> {
-    let device_config = vmm::config::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+    let device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
-    let device_config =
-        vmm::config::UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
+    let device_config = UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
@@ -794,28 +795,28 @@ fn remove_device_config(id: &str) -> String {
 }
 
 fn add_disk_config(config: &str) -> Result<String, Error> {
-    let disk_config = vmm::config::DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
+    let disk_config = DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
     let disk_config = serde_json::to_string(&disk_config).unwrap();
 
     Ok(disk_config)
 }
 
 fn add_fs_config(config: &str) -> Result<String, Error> {
-    let fs_config = vmm::config::FsConfig::parse(config).map_err(Error::AddFsConfig)?;
+    let fs_config = FsConfig::parse(config).map_err(Error::AddFsConfig)?;
     let fs_config = serde_json::to_string(&fs_config).unwrap();
 
     Ok(fs_config)
 }
 
 fn add_pmem_config(config: &str) -> Result<String, Error> {
-    let pmem_config = vmm::config::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
+    let pmem_config = PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
     let pmem_config = serde_json::to_string(&pmem_config).unwrap();
 
     Ok(pmem_config)
 }
 
 fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut net_config = vmm::config::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
     // descriptors out. Keeping the list and send it to the server side
@@ -828,14 +829,14 @@ fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_vdpa_config(config: &str) -> Result<String, Error> {
-    let vdpa_config = vmm::config::VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
+    let vdpa_config = VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
     let vdpa_config = serde_json::to_string(&vdpa_config).unwrap();
 
     Ok(vdpa_config)
 }
 
 fn add_vsock_config(config: &str) -> Result<String, Error> {
-    let vsock_config = vmm::config::VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+    let vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
     let vsock_config = serde_json::to_string(&vsock_config).unwrap();
 
     Ok(vsock_config)
@@ -850,7 +851,7 @@ fn snapshot_config(url: &str) -> String {
 }
 
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut restore_config = vmm::config::RestoreConfig::parse(config).map_err(Error::Restore)?;
+    let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS
     let fds = match &mut restore_config.net_fds {
@@ -903,204 +904,183 @@ fn create_data(path: &str) -> Result<String, Error> {
     Ok(data)
 }
 
+/// Returns all [`Arg`]s in alphabetical order.
+///
+/// This is the order used in the `--help` output.
+fn get_cli_args() -> Box<[Arg]> {
+    [
+        Arg::new("api-socket")
+            .long("api-socket")
+            .help("HTTP API socket path (UNIX domain socket).")
+            .num_args(1),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-object-path")
+            .long("dbus-object-path")
+            .help("Object path which the interface is being served at")
+            .num_args(1),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-service-name")
+            .long("dbus-service-name")
+            .help("Well known name of the dbus service")
+            .num_args(1),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-system-bus")
+            .long("dbus-system-bus")
+            .action(ArgAction::SetTrue)
+            .num_args(0)
+            .help("Use the system bus instead of a session bus"),
+    ]
+    .to_vec()
+    .into_boxed_slice()
+}
+
+/// Returns all [`Command`]s in alphabetical order.
+///
+/// This is the order used in the `--help` output.
+fn get_cli_commands_sorted() -> Box<[Command]> {
+    [
+        Command::new("add-device").about("Add VFIO device").arg(
+            Arg::new("device_config")
+                .index(1)
+                .help(DeviceConfig::SYNTAX),
+        ),
+        Command::new("add-disk")
+            .about("Add block device")
+            .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
+        Command::new("add-fs")
+            .about("Add virtio-fs backed fs device")
+            .arg(
+                Arg::new("fs_config")
+                    .index(1)
+                    .help(vmm::vm_config::FsConfig::SYNTAX),
+            ),
+        Command::new("add-net")
+            .about("Add network device")
+            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
+        Command::new("add-pmem")
+            .about("Add persistent memory device")
+            .arg(
+                Arg::new("pmem_config")
+                    .index(1)
+                    .help(vmm::vm_config::PmemConfig::SYNTAX),
+            ),
+        Command::new("add-user-device")
+            .about("Add userspace device")
+            .arg(
+                Arg::new("device_config")
+                    .index(1)
+                    .help(UserDeviceConfig::SYNTAX),
+            ),
+        Command::new("add-vdpa")
+            .about("Add vDPA device")
+            .arg(Arg::new("vdpa_config").index(1).help(VdpaConfig::SYNTAX)),
+        Command::new("add-vsock")
+            .about("Add vsock device")
+            .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
+        Command::new("boot").about("Boot a created VM"),
+        Command::new("coredump")
+            .about("Create a coredump from VM")
+            .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
+        Command::new("counters").about("Counters from the VM"),
+        Command::new("create")
+            .about("Create VM from a JSON configuration")
+            .arg(Arg::new("path").index(1).default_value("-")),
+        Command::new("delete").about("Delete a VM"),
+        Command::new("info").about("Info on the VM"),
+        Command::new("nmi").about("Trigger NMI"),
+        Command::new("pause").about("Pause the VM"),
+        Command::new("ping").about("Ping the VMM to check for API server availability"),
+        Command::new("power-button").about("Trigger a power button in the VM"),
+        Command::new("reboot").about("Reboot the VM"),
+        Command::new("receive-migration")
+            .about("Receive a VM migration")
+            .arg(
+                Arg::new("receive_migration_config")
+                    .index(1)
+                    .help("<receiver_url>"),
+            ),
+        Command::new("remove-device")
+            .about("Remove VFIO and PCI device")
+            .arg(Arg::new("id").index(1).help("<device_id>")),
+        Command::new("resize")
+            .about("Resize the VM")
+            .arg(
+                Arg::new("balloon")
+                    .long("balloon")
+                    .help("New balloon size in bytes (supports K/M/G suffix)")
+                    .num_args(1),
+            )
+            .arg(
+                Arg::new("cpus")
+                    .long("cpus")
+                    .help("New vCPUs count")
+                    .num_args(1),
+            )
+            .arg(
+                Arg::new("memory")
+                    .long("memory")
+                    .help("New memory size in bytes (supports K/M/G suffix)")
+                    .num_args(1),
+            ),
+        Command::new("resize-zone")
+            .about("Resize a memory zone")
+            .arg(
+                Arg::new("id")
+                    .long("id")
+                    .help("Memory zone identifier")
+                    .num_args(1),
+            )
+            .arg(
+                Arg::new("size")
+                    .long("size")
+                    .help("New memory zone size in bytes (supports K/M/G suffix)")
+                    .num_args(1),
+            ),
+        Command::new("restore")
+            .about("Restore VM from a snapshot")
+            .arg(
+                Arg::new("restore_config")
+                    .index(1)
+                    .help(RestoreConfig::SYNTAX),
+            ),
+        Command::new("resume").about("Resume the VM"),
+        Command::new("send-migration")
+            .about("Initiate a VM migration")
+            .arg(
+                Arg::new("send_migration_config")
+                    .index(1)
+                    .help("<destination_url>"),
+            )
+            .arg(
+                Arg::new("send_migration_local")
+                    .long("local")
+                    .num_args(0)
+                    .action(ArgAction::SetTrue),
+            ),
+        Command::new("shutdown").about("Shutdown the VM"),
+        Command::new("shutdown-vmm").about("Shutdown the VMM"),
+        Command::new("snapshot")
+            .about("Create a snapshot from VM")
+            .arg(
+                Arg::new("snapshot_config")
+                    .index(1)
+                    .help("<destination_url>"),
+            ),
+    ]
+    .to_vec()
+    .into_boxed_slice()
+}
+
 fn main() {
+    env_logger::init();
     let app = Command::new("ch-remote")
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("BUILD_VERSION"))
         .about("Remotely control a cloud-hypervisor VMM.")
         .arg_required_else_help(true)
         .subcommand_required(true)
-        .args([
-            Arg::new("api-socket")
-                .long("api-socket")
-                .help("HTTP API socket path (UNIX domain socket).")
-                .num_args(1),
-            #[cfg(feature = "dbus_api")]
-            Arg::new("dbus-service-name")
-                .long("dbus-service-name")
-                .help("Well known name of the dbus service")
-                .num_args(1),
-            #[cfg(feature = "dbus_api")]
-            Arg::new("dbus-object-path")
-                .long("dbus-object-path")
-                .help("Object path which the interface is being served at")
-                .num_args(1),
-            #[cfg(feature = "dbus_api")]
-            Arg::new("dbus-system-bus")
-                .long("dbus-system-bus")
-                .action(ArgAction::SetTrue)
-                .num_args(0)
-                .help("Use the system bus instead of a session bus"),
-        ])
-        .subcommand(
-            Command::new("add-device").about("Add VFIO device").arg(
-                Arg::new("device_config")
-                    .index(1)
-                    .help(vmm::config::DeviceConfig::SYNTAX),
-            ),
-        )
-        .subcommand(
-            Command::new("add-disk").about("Add block device").arg(
-                Arg::new("disk_config")
-                    .index(1)
-                    .help(vmm::config::DiskConfig::SYNTAX),
-            ),
-        )
-        .subcommand(
-            Command::new("add-fs")
-                .about("Add virtio-fs backed fs device")
-                .arg(
-                    Arg::new("fs_config")
-                        .index(1)
-                        .help(vmm::config::FsConfig::SYNTAX),
-                ),
-        )
-        .subcommand(
-            Command::new("add-pmem")
-                .about("Add persistent memory device")
-                .arg(
-                    Arg::new("pmem_config")
-                        .index(1)
-                        .help(vmm::config::PmemConfig::SYNTAX),
-                ),
-        )
-        .subcommand(
-            Command::new("add-net").about("Add network device").arg(
-                Arg::new("net_config")
-                    .index(1)
-                    .help(vmm::config::NetConfig::SYNTAX),
-            ),
-        )
-        .subcommand(
-            Command::new("add-user-device")
-                .about("Add userspace device")
-                .arg(
-                    Arg::new("device_config")
-                        .index(1)
-                        .help(vmm::config::UserDeviceConfig::SYNTAX),
-                ),
-        )
-        .subcommand(
-            Command::new("add-vdpa").about("Add vDPA device").arg(
-                Arg::new("vdpa_config")
-                    .index(1)
-                    .help(vmm::config::VdpaConfig::SYNTAX),
-            ),
-        )
-        .subcommand(
-            Command::new("add-vsock").about("Add vsock device").arg(
-                Arg::new("vsock_config")
-                    .index(1)
-                    .help(vmm::config::VsockConfig::SYNTAX),
-            ),
-        )
-        .subcommand(
-            Command::new("remove-device")
-                .about("Remove VFIO and PCI device")
-                .arg(Arg::new("id").index(1).help("<device_id>")),
-        )
-        .subcommand(Command::new("info").about("Info on the VM"))
-        .subcommand(Command::new("counters").about("Counters from the VM"))
-        .subcommand(Command::new("pause").about("Pause the VM"))
-        .subcommand(Command::new("reboot").about("Reboot the VM"))
-        .subcommand(Command::new("power-button").about("Trigger a power button in the VM"))
-        .subcommand(
-            Command::new("resize")
-                .about("Resize the VM")
-                .arg(
-                    Arg::new("cpus")
-                        .long("cpus")
-                        .help("New vCPUs count")
-                        .num_args(1),
-                )
-                .arg(
-                    Arg::new("memory")
-                        .long("memory")
-                        .help("New memory size in bytes (supports K/M/G suffix)")
-                        .num_args(1),
-                )
-                .arg(
-                    Arg::new("balloon")
-                        .long("balloon")
-                        .help("New balloon size in bytes (supports K/M/G suffix)")
-                        .num_args(1),
-                ),
-        )
-        .subcommand(
-            Command::new("resize-zone")
-                .about("Resize a memory zone")
-                .arg(
-                    Arg::new("id")
-                        .long("id")
-                        .help("Memory zone identifier")
-                        .num_args(1),
-                )
-                .arg(
-                    Arg::new("size")
-                        .long("size")
-                        .help("New memory zone size in bytes (supports K/M/G suffix)")
-                        .num_args(1),
-                ),
-        )
-        .subcommand(Command::new("resume").about("Resume the VM"))
-        .subcommand(Command::new("boot").about("Boot a created VM"))
-        .subcommand(Command::new("delete").about("Delete a VM"))
-        .subcommand(Command::new("shutdown").about("Shutdown the VM"))
-        .subcommand(
-            Command::new("snapshot")
-                .about("Create a snapshot from VM")
-                .arg(
-                    Arg::new("snapshot_config")
-                        .index(1)
-                        .help("<destination_url>"),
-                ),
-        )
-        .subcommand(
-            Command::new("restore")
-                .about("Restore VM from a snapshot")
-                .arg(
-                    Arg::new("restore_config")
-                        .index(1)
-                        .help(vmm::config::RestoreConfig::SYNTAX),
-                ),
-        )
-        .subcommand(
-            Command::new("coredump")
-                .about("Create a coredump from VM")
-                .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
-        )
-        .subcommand(
-            Command::new("send-migration")
-                .about("Initiate a VM migration")
-                .arg(
-                    Arg::new("send_migration_config")
-                        .index(1)
-                        .help("<destination_url>"),
-                )
-                .arg(
-                    Arg::new("send_migration_local")
-                        .long("local")
-                        .num_args(0)
-                        .action(ArgAction::SetTrue),
-                ),
-        )
-        .subcommand(
-            Command::new("receive-migration")
-                .about("Receive a VM migration")
-                .arg(
-                    Arg::new("receive_migration_config")
-                        .index(1)
-                        .help("<receiver_url>"),
-                ),
-        )
-        .subcommand(
-            Command::new("create")
-                .about("Create VM from a JSON configuration")
-                .arg(Arg::new("path").index(1).default_value("-")),
-        )
-        .subcommand(Command::new("ping").about("Ping the VMM to check for API server availability"))
-        .subcommand(Command::new("shutdown-vmm").about("Shutdown the VMM"))
-        .subcommand(Command::new("nmi").about("Trigger NMI"));
+        .args(get_cli_args())
+        .subcommands(get_cli_commands_sorted());
 
     let matches = app.get_matches();
 
@@ -1114,7 +1094,7 @@ fn main() {
         #[cfg(not(feature = "dbus_api"))]
         (Some(api_sock),) => TargetApi::HttpApi(
             UnixStream::connect(api_sock).unwrap_or_else(|e| {
-                eprintln!("Error opening HTTP socket: {e}");
+                error!("Error opening HTTP socket: {e}");
                 process::exit(1)
             }),
             PhantomData,
@@ -1122,7 +1102,7 @@ fn main() {
         #[cfg(feature = "dbus_api")]
         (Some(api_sock), None, None) => TargetApi::HttpApi(
             UnixStream::connect(api_sock).unwrap_or_else(|e| {
-                eprintln!("Error opening HTTP socket: {e}");
+                error!("Error opening HTTP socket: {e}");
                 process::exit(1)
             }),
             PhantomData,
@@ -1136,25 +1116,126 @@ fn main() {
             )
             .map_err(Error::DBusApiClient)
             .unwrap_or_else(|e| {
-                eprintln!("Error creating D-Bus proxy: {e}");
+                error!("Error creating D-Bus proxy: {e}");
                 process::exit(1)
             }),
         ),
         #[cfg(feature = "dbus_api")]
         (Some(_), Some(_) | None, Some(_) | None) => {
-            println!(
+            error!(
                 "`api-socket` and (dbus-service-name or dbus-object-path) are mutually exclusive"
             );
             process::exit(1);
         }
         _ => {
-            println!("Please either provide the api-socket option or dbus-service-name and dbus-object-path options");
+            error!(
+                "Please either provide the api-socket option or dbus-service-name and dbus-object-path options"
+            );
             process::exit(1);
         }
     };
 
-    if let Err(e) = target_api.do_command(&matches) {
-        eprintln!("Error running command: {e}");
+    if let Err(top_error) = target_api.do_command(&matches) {
+        // Helper to join strings with a newline.
+        fn join_strs(mut acc: String, next: String) -> String {
+            if !acc.is_empty() {
+                acc.push('\n');
+            }
+            acc.push_str(&next);
+            acc
+        }
+
+        // This function helps to modify the Display representation of remote
+        // API failures so that it aligns with the regular output of error
+        // messages. As we transfer a deep/rich chain of errors as String via
+        // the HTTP API, the nested error chain is lost. We retrieve it from
+        // the error response.
+        //
+        // In case the repose itself is broken, the error is printed directly
+        // by using the `X` level.
+        fn server_api_error_display_modifier(
+            level: usize,
+            indention: usize,
+            error: &(dyn std::error::Error + 'static),
+        ) -> Option<String> {
+            if let Some(api_client::Error::ServerResponse(status_code, body)) =
+                error.downcast_ref::<api_client::Error>()
+            {
+                let body = body.as_ref().map(|body| body.as_str()).unwrap_or("");
+
+                // Retrieve the list of error messages back.
+                let lines: Vec<&str> = match serde_json::from_str(body) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return Some(format!(
+                            "{idention}X: Can't get remote's error messages from JSON response: {e}: body='{body}'",
+                            idention = " ".repeat(indention)
+                        ));
+                    }
+                };
+
+                let error_status = format!("Server responded with {status_code:?}");
+                // Prepend the error status line to the lines iter.
+                let lines = std::iter::once(error_status.as_str()).chain(lines);
+                let error_msg_multiline = lines
+                    .enumerate()
+                    .map(|(index, error_msg)| (index + level, error_msg))
+                    .map(|(level, error_msg)| {
+                        format!(
+                            "{idention}{level}: {error_msg}",
+                            idention = " ".repeat(indention)
+                        )
+                    })
+                    .fold(String::new(), join_strs);
+
+                return Some(error_msg_multiline);
+            }
+
+            None
+        }
+
+        let top_error: &dyn std::error::Error = &top_error;
+        cloud_hypervisor::cli_print_error_chain(
+            top_error,
+            "ch-remote",
+            server_api_error_display_modifier,
+        );
         process::exit(1)
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+
+    use super::*;
+    use crate::test_util::assert_args_sorted;
+
+    #[test]
+    fn test_cli_args_sorted() {
+        let args = get_cli_args();
+        assert_args_sorted(|| args.iter());
+    }
+
+    #[test]
+    fn test_cli_commands_sorted() {
+        let commands = get_cli_commands_sorted();
+
+        // check commands itself are sorted
+        let iter = commands.iter().zip(commands.iter().skip(1));
+        for (command, next) in iter {
+            assert_ne!(
+                command.get_name().cmp(next.get_name()),
+                Ordering::Greater,
+                "commands not alphabetically sorted: command={}, next={}",
+                command.get_name(),
+                next.get_name()
+            );
+        }
+
+        // check args of commands sorted
+        for command in commands {
+            assert_args_sorted(|| command.get_arguments());
+        }
+    }
 }

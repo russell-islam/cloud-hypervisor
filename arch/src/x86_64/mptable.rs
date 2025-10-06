@@ -5,15 +5,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
-use crate::x86_64::{get_x2apic_id, mpspec};
-use crate::GuestMemoryMmap;
+use std::{mem, result, slice};
+
 use libc::c_uchar;
-use std::mem;
-use std::result;
-use std::slice;
 use thiserror::Error;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+
+use super::MAX_SUPPORTED_CPUS_LEGACY;
+use crate::GuestMemoryMmap;
+use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
+use crate::x86_64::{get_x2apic_id, mpspec};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -59,40 +60,32 @@ pub enum Error {
     #[error("The MP table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
-    #[error("Failure while zeroing out the memory for the MP table: {0}")]
-    Clear(GuestMemoryError),
-    /// Number of CPUs exceeds the maximum supported CPUs
-    #[error("Number of CPUs exceeds the maximum supported CPUs")]
-    TooManyCpus,
+    #[error("Failure while zeroing out the memory for the MP table")]
+    Clear(#[source] GuestMemoryError),
     /// Failure to write the MP floating pointer.
-    #[error("Failure to write the MP floating pointer: {0}")]
-    WriteMpfIntel(GuestMemoryError),
+    #[error("Failure to write the MP floating pointer")]
+    WriteMpfIntel(#[source] GuestMemoryError),
     /// Failure to write MP CPU entry.
-    #[error("Failure to write MP CPU entry: {0}")]
-    WriteMpcCpu(GuestMemoryError),
+    #[error("Failure to write MP CPU entry")]
+    WriteMpcCpu(#[source] GuestMemoryError),
     /// Failure to write MP ioapic entry.
-    #[error("Failure to write MP ioapic entry: {0}")]
-    WriteMpcIoapic(GuestMemoryError),
+    #[error("Failure to write MP ioapic entry")]
+    WriteMpcIoapic(#[source] GuestMemoryError),
     /// Failure to write MP bus entry.
-    #[error("Failure to write MP bus entry: {0}")]
-    WriteMpcBus(GuestMemoryError),
+    #[error("Failure to write MP bus entry")]
+    WriteMpcBus(#[source] GuestMemoryError),
     /// Failure to write MP interrupt source entry.
-    #[error("Failure to write MP interrupt source entry: {0}")]
-    WriteMpcIntsrc(GuestMemoryError),
+    #[error("Failure to write MP interrupt source entry")]
+    WriteMpcIntsrc(#[source] GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
-    #[error("Failure to write MP local interrupt source entry: {0}")]
-    WriteMpcLintsrc(GuestMemoryError),
+    #[error("Failure to write MP local interrupt source entry")]
+    WriteMpcLintsrc(#[source] GuestMemoryError),
     /// Failure to write MP table header.
-    #[error("Failure to write MP table header: {0}")]
-    WriteMpcTable(GuestMemoryError),
+    #[error("Failure to write MP table header")]
+    WriteMpcTable(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
-
-// With APIC/xAPIC, there are only 255 APIC IDs available. And IOAPIC occupies
-// one APIC ID, so only 254 CPUs at maximum may be supported. Actually it's
-// a large number for FC usecases.
-pub const MAX_SUPPORTED_CPUS: u32 = 254;
 
 // Most of these variables are sourced from the Intel MP Spec 1.4.
 const SMP_MAGIC_IDENT: &[c_uchar; 4] = b"_MP_";
@@ -121,7 +114,7 @@ fn mpf_intel_compute_checksum(v: &mpspec::mpf_intel) -> u8 {
     (!checksum).wrapping_add(1)
 }
 
-fn compute_mp_size(num_cpus: u8) -> usize {
+fn compute_mp_size(num_cpus: u32) -> usize {
     mem::size_of::<MpfIntelWrapper>()
         + mem::size_of::<MpcTableWrapper>()
         + mem::size_of::<MpcCpuWrapper>() * (num_cpus as usize)
@@ -135,14 +128,15 @@ fn compute_mp_size(num_cpus: u8) -> usize {
 pub fn setup_mptable(
     offset: GuestAddress,
     mem: &GuestMemoryMmap,
-    num_cpus: u8,
-    topology: Option<(u8, u8, u8)>,
+    num_cpus: u32,
+    topology: Option<(u16, u16, u16, u16)>,
 ) -> Result<()> {
     if num_cpus > 0 {
         let cpu_id_max = num_cpus - 1;
-        let x2apic_id_max = get_x2apic_id(cpu_id_max.into(), topology);
-        if x2apic_id_max >= MAX_SUPPORTED_CPUS {
-            return Err(Error::TooManyCpus);
+        let x2apic_id_max = get_x2apic_id(cpu_id_max, topology);
+        if x2apic_id_max >= MAX_SUPPORTED_CPUS_LEGACY {
+            info!("Skipping mptable creation due to too many CPUs");
+            return Ok(());
         }
     }
 
@@ -157,7 +151,7 @@ pub fn setup_mptable(
     }
 
     let mut checksum: u8 = 0;
-    let ioapicid: u8 = MAX_SUPPORTED_CPUS as u8 + 1;
+    let ioapicid: u8 = MAX_SUPPORTED_CPUS_LEGACY as u8 + 1;
 
     // The checked_add here ensures the all of the following base_mp.unchecked_add's will be without
     // overflow.
@@ -195,7 +189,7 @@ pub fn setup_mptable(
         for cpu_id in 0..num_cpus {
             let mut mpc_cpu = MpcCpuWrapper(mpspec::mpc_cpu::default());
             mpc_cpu.0.type_ = mpspec::MP_PROCESSOR as u8;
-            mpc_cpu.0.apicid = get_x2apic_id(cpu_id as u32, topology) as u8;
+            mpc_cpu.0.apicid = get_x2apic_id(cpu_id, topology) as u8;
             mpc_cpu.0.apicver = APIC_VERSION;
             mpc_cpu.0.cpuflag = mpspec::CPU_ENABLED as u8
                 | if cpu_id == 0 {
@@ -304,11 +298,11 @@ pub fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
+
     use super::*;
     use crate::layout::MPTABLE_START;
-    use vm_memory::{
-        bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
-    };
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
@@ -336,7 +330,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus, None).is_err());
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap_err();
     }
 
     #[test]
@@ -394,11 +388,11 @@ mod tests {
     fn cpu_entry_count() {
         let mem = GuestMemoryMmap::from_ranges(&[(
             MPTABLE_START,
-            compute_mp_size(MAX_SUPPORTED_CPUS as u8),
+            compute_mp_size(MAX_SUPPORTED_CPUS_LEGACY),
         )])
         .unwrap();
 
-        for i in 0..MAX_SUPPORTED_CPUS as u8 {
+        for i in 0..MAX_SUPPORTED_CPUS_LEGACY {
             setup_mptable(MPTABLE_START, &mem, i, None).unwrap();
 
             let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
@@ -428,11 +422,9 @@ mod tests {
 
     #[test]
     fn cpu_entry_count_max() {
-        let cpus = MAX_SUPPORTED_CPUS + 1;
-        let mem =
-            GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
+        let cpus = MAX_SUPPORTED_CPUS_LEGACY + 1;
+        let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus))]).unwrap();
 
-        let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
-        assert!(result.is_err());
+        setup_mptable(MPTABLE_START, &mem, cpus, None).unwrap();
     }
 }

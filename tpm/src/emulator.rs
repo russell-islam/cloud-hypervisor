@@ -3,16 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::socket::SocketDev;
-use crate::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize};
-use crate::{TPM_CRB_BUFFER_MAX, TPM_SUCCESS};
-use anyhow::anyhow;
-use libc::c_void;
-use libc::{sockaddr_storage, socklen_t};
 use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::{mem, ptr};
+
+use anyhow::anyhow;
+use libc::{c_void, sockaddr_storage, socklen_t};
 use thiserror::Error;
+
+use crate::socket::SocketDev;
+use crate::{
+    Commands, MemberType, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize,
+    TPM_CRB_BUFFER_MAX, TPM_SUCCESS,
+};
 
 const TPM_REQ_HDR_SIZE: usize = 10;
 
@@ -42,19 +45,19 @@ pub fn is_selftest(input: &[u8]) -> bool {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Could not initialize emulator's backend: {0}")]
+    #[error("Could not initialize emulator's backend")]
     InitializeEmulator(#[source] anyhow::Error),
-    #[error("Failed to create data fd to pass to swtpm: {0}")]
+    #[error("Failed to create data fd to pass to swtpm")]
     PrepareDataFd(#[source] anyhow::Error),
-    #[error("Failed to run Control Cmd: {0}")]
+    #[error("Failed to run Control Cmd")]
     RunControlCmd(#[source] anyhow::Error),
-    #[error("Emulator doesn't implement min required capabilities: {0}")]
+    #[error("Emulator doesn't implement min required capabilities")]
     CheckCaps(#[source] anyhow::Error),
-    #[error("Emulator failed to deliver request: {0}")]
+    #[error("Emulator failed to deliver request")]
     DeliverRequest(#[source] anyhow::Error),
-    #[error("Emulator failed to send/receive msg on data fd: {0}")]
+    #[error("Emulator failed to send/receive msg on data fd")]
     SendReceive(#[source] anyhow::Error),
-    #[error("Incorrect response to Self Test: {0}")]
+    #[error("Incorrect response to Self Test")]
     SelfTest(#[source] anyhow::Error),
 }
 

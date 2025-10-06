@@ -9,6 +9,7 @@
 
 use std::collections::btree_map::BTreeMap;
 use std::result;
+
 use vm_memory::{Address, GuestAddress, GuestUsize};
 
 #[derive(Debug)]
@@ -67,7 +68,7 @@ impl AddressAllocator {
     }
 
     fn align_address(&self, address: GuestAddress, alignment: GuestUsize) -> GuestAddress {
-        let align_adjust = if address.raw_value() % alignment != 0 {
+        let align_adjust = if !address.raw_value().is_multiple_of(alignment) {
             alignment - (address.raw_value() % alignment)
         } else {
             0
@@ -195,10 +196,10 @@ impl AddressAllocator {
     /// Free an already allocated address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free(&mut self, address: GuestAddress, size: GuestUsize) {
-        if let Some(&range_size) = self.ranges.get(&address) {
-            if size == range_size {
-                self.ranges.remove(&address);
-            }
+        if let Some(&range_size) = self.ranges.get(&address)
+            && size == range_size
+        {
+            self.ranges.remove(&address);
         }
     }
 

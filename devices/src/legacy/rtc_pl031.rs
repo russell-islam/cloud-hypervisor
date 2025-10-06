@@ -4,17 +4,21 @@
 
 //! ARM PL031 Real Time Clock
 //!
-//! This module implements a PL031 Real Time Clock (RTC) that provides to provides long time base counter.
-//! This is achieved by generating an interrupt signal after counting for a programmed number of cycles of
-//! a real-time clock input.
+//! This module implements part of a PL031 Real Time Clock (RTC):
+//! * provide a clock value via RTCDR
+//! * no alarm is implemented through the match register
+//! * no interrupt is generated
+//! * RTC cannot be disabled via RTCCR
+//! * no test registers
 //!
-use crate::{read_le_u32, write_le_u32};
+use std::result;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
-use std::{io, result};
+
 use thiserror::Error;
-use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+
+use crate::{read_le_u32, write_le_u32};
 
 // As you can see in https://static.docs.arm.com/ddi0224/c/real_time_clock_pl031_r1p3_technical_reference_manual_DDI0224C.pdf
 // at section 3.2 Summary of RTC registers, the total size occupied by this device is 0x000 -> 0xFFC + 4 = 0x1000.
@@ -27,11 +31,11 @@ const RTCIMSC: u64 = 0x10; // Interrupt Mask Set or Clear Register.
 const RTCRIS: u64 = 0x14; // Raw Interrupt Status.
 const RTCMIS: u64 = 0x18; // Masked Interrupt Status.
 const RTCICR: u64 = 0x1c; // Interrupt Clear Register.
-                          // From 0x020 to 0xFDC => reserved space.
-                          // From 0xFE0 to 0x1000 => Peripheral and PrimeCell Identification Registers which are Read Only registers.
-                          // AMBA standard devices have CIDs (Cell IDs) and PIDs (Peripheral IDs). The linux kernel will look for these in order to assert the identity
-                          // of these devices (i.e look at the `amba_device_try_add` function).
-                          // We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
+// From 0x020 to 0xFDC => reserved space.
+// From 0xFE0 to 0x1000 => Peripheral and PrimeCell Identification Registers which are Read Only registers.
+// AMBA standard devices have CIDs (Cell IDs) and PIDs (Peripheral IDs). The linux kernel will look for these in order to assert the identity
+// of these devices (i.e look at the `amba_device_try_add` function).
+// We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
 const PL031_ID: [u8; 8] = [0x31, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 // We are only interested in the margins.
 const AMBA_ID_LOW: u64 = 0xFE0;
@@ -43,8 +47,6 @@ pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
 pub enum Error {
     #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
-    #[error("Failed to trigger interrupt: {0}")]
-    InterruptFailure(io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -105,29 +107,18 @@ pub struct Rtc {
     match_value: u32,
     // Writes to this register load an update value into the RTC.
     load: u32,
-    imsc: u32,
-    ris: u32,
-    interrupt: Arc<dyn InterruptSourceGroup>,
 }
 
 impl Rtc {
     /// Constructs an AMBA PL031 RTC device.
-    pub fn new(interrupt: Arc<dyn InterruptSourceGroup>) -> Self {
+    pub fn new() -> Self {
         Self {
             // This is used only for duration measuring purposes.
             previous_now: Instant::now(),
             tick_offset: get_time(ClockType::Real) as i64,
             match_value: 0,
             load: 0,
-            imsc: 0,
-            ris: 0,
-            interrupt,
         }
-    }
-
-    fn trigger_interrupt(&mut self) -> Result<()> {
-        self.interrupt.trigger(0).map_err(Error::InterruptFailure)?;
-        Ok(())
     }
 
     fn get_time(&self) -> u32 {
@@ -153,22 +144,20 @@ impl Rtc {
                 // we want to terminate the execution of the process.
                 self.tick_offset = seconds_to_nanoseconds(i64::from(val)).unwrap();
             }
-            RTCIMSC => {
-                self.imsc = val & 1;
-                self.trigger_interrupt()?;
-            }
-            RTCICR => {
-                // As per above mentioned doc, the interrupt is cleared by writing any data value to
-                // the Interrupt Clear Register.
-                self.ris = 0;
-                self.trigger_interrupt()?;
-            }
+            RTCIMSC => (),
+            RTCICR => (),
             RTCCR => (), // ignore attempts to turn off the timer.
             o => {
                 return Err(Error::BadWriteOffset(o));
             }
         }
         Ok(())
+    }
+}
+
+impl Default for Rtc {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -187,10 +176,10 @@ impl BusDevice for Rtc {
                     self.match_value
                 }
                 RTCLR => self.load,
-                RTCCR => 1, // RTC is always enabled.
-                RTCIMSC => self.imsc,
-                RTCRIS => self.ris,
-                RTCMIS => self.ris & self.imsc,
+                RTCCR => 1,   // RTC is always enabled.
+                RTCIMSC => 0, // Interrupt is always disabled.
+                RTCRIS => 0,
+                RTCMIS => 0,
                 _ => {
                     read_ok = false;
                     0
@@ -233,8 +222,6 @@ mod tests {
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,
         write_be_u32, write_le_i32, write_le_u16, write_le_u64,
     };
-    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
-    use vmm_sys_util::eventfd::EventFd;
 
     const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
 
@@ -363,45 +350,9 @@ mod tests {
         assert!(seconds_to_nanoseconds(9_223_372_037).is_none());
     }
 
-    struct TestInterrupt {
-        event_fd: EventFd,
-    }
-
-    impl InterruptSourceGroup for TestInterrupt {
-        fn trigger(&self, _index: InterruptIndex) -> result::Result<(), std::io::Error> {
-            self.event_fd.write(1)
-        }
-
-        fn update(
-            &self,
-            _index: InterruptIndex,
-            _config: InterruptSourceConfig,
-            _masked: bool,
-            _set_gsi: bool,
-        ) -> result::Result<(), std::io::Error> {
-            Ok(())
-        }
-
-        fn set_gsi(&self) -> result::Result<(), std::io::Error> {
-            Ok(())
-        }
-
-        fn notifier(&self, _index: InterruptIndex) -> Option<EventFd> {
-            Some(self.event_fd.try_clone().unwrap())
-        }
-    }
-
-    impl TestInterrupt {
-        fn new(event_fd: EventFd) -> Self {
-            TestInterrupt { event_fd }
-        }
-    }
-
     #[test]
     fn test_rtc_read_write_and_event() {
-        let intr_evt = EventFd::new(libc::EFD_NONBLOCK).unwrap();
-
-        let mut rtc = Rtc::new(Arc::new(TestInterrupt::new(intr_evt.try_clone().unwrap())));
+        let mut rtc = Rtc::new();
         let mut data = [0; 4];
 
         // Read and write to the MR register.
@@ -424,15 +375,13 @@ mod tests {
         assert_eq!((v / NANOS_PER_SECOND) as u32, v_read);
 
         // Read and write to IMSC register.
-        // Test with non zero value.
+        // Test with non zero value. Our device ignores the write.
         let non_zero = 1;
         write_le_u32(&mut data, non_zero);
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &data);
-        // The interrupt line should be on.
-        assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() == 1);
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCIMSC, &mut data);
         let v = read_le_u32(&data);
-        assert_eq!(non_zero & 1, v);
+        assert_eq!(0, v);
 
         // Now test with 0.
         write_le_u32(&mut data, 0);
@@ -444,8 +393,6 @@ mod tests {
         // Read and write to the ICR register.
         write_le_u32(&mut data, 1);
         rtc.write(LEGACY_RTC_MAPPED_IO_START, RTCICR, &data);
-        // The interrupt line should be on.
-        assert!(rtc.interrupt.notifier(0).unwrap().read().unwrap() > 1);
         let v_before = read_le_u32(&data);
 
         rtc.read(LEGACY_RTC_MAPPED_IO_START, RTCICR, &mut data);

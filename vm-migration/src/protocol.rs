@@ -3,10 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::MigratableError;
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+
+use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
+
+use crate::MigratableError;
 
 // Migration protocol
 // 1: Source establishes communication with destination (file socket or TCP connection.)
@@ -262,7 +264,7 @@ impl MemoryRangeTable {
     }
 
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
-        assert!(length as usize % std::mem::size_of::<MemoryRange>() == 0);
+        assert!((length as usize).is_multiple_of(size_of::<MemoryRange>()));
 
         let mut data: Vec<MemoryRange> = Vec::new();
         data.resize_with(

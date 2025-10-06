@@ -8,17 +8,16 @@ extern crate test_infra;
 
 mod performance_tests;
 
+use std::process::Command;
+use std::sync::Arc;
+use std::sync::mpsc::channel;
+use std::time::Duration;
+use std::{env, fmt, thread};
+
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use std::{
-    env, fmt,
-    process::Command,
-    sync::{mpsc::channel, Arc},
-    thread,
-    time::Duration,
-};
-use test_infra::*;
+use test_infra::{FioOps, is_guest_vm_type_cvm};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -126,10 +125,45 @@ impl Default for MetricsReport {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum ImageFormat {
+    #[default]
+    Raw,
+    Qcow2,
+    Vhd,
+    Vhdx,
+}
+
+impl std::str::FromStr for ImageFormat {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "raw" => Ok(ImageFormat::Raw),
+            "qcow2" => Ok(ImageFormat::Qcow2),
+            "vhd" => Ok(ImageFormat::Vhd),
+            "vhdx" => Ok(ImageFormat::Vhdx),
+            _ => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for ImageFormat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ImageFormat::Raw => write!(f, "raw"),
+            ImageFormat::Qcow2 => write!(f, "qcow2"),
+            ImageFormat::Vhd => write!(f, "vhd"),
+            ImageFormat::Vhdx => write!(f, "vhdx"),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PerformanceTestOverrides {
     test_iterations: Option<u32>,
     test_timeout: Option<u32>,
+    test_image_format: Option<ImageFormat>,
 }
 
 impl fmt::Display for PerformanceTestOverrides {
@@ -139,6 +173,10 @@ impl fmt::Display for PerformanceTestOverrides {
         }
         if let Some(test_timeout) = self.test_timeout {
             write!(f, "test_timeout = {test_timeout}")?;
+        }
+
+        if let Some(test_image_format) = self.test_image_format {
+            write!(f, "test_image_format = {test_image_format}")?;
         }
 
         Ok(())
@@ -803,6 +841,15 @@ fn main() {
                 .help("Override test timeout, Ex. --timeout 5")
                 .num_args(1),
         )
+        .arg(
+            Arg::new("image-format")
+                .long("image-format")
+                .help(
+                    "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
+                     Default is 'raw'.",
+                )
+                .num_args(1),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -829,8 +876,6 @@ fn main() {
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report: MetricsReport = Default::default();
 
-    init_tests();
-
     let overrides = Arc::new(PerformanceTestOverrides {
         test_iterations: cmd_arguments
             .get_one::<String>("iterations")
@@ -842,7 +887,14 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
+        test_image_format: cmd_arguments
+            .get_one::<String>("image-format")
+            .map(|s| s.parse())
+            .transpose()
+            .unwrap_or_default(),
     });
+
+    init_tests(&overrides);
 
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {

@@ -1,20 +1,69 @@
+- [v48.0](#v480)
+    - [Experimental `fw_cfg` Device Support](#experimental-fw_cfg-device-support)
+    - [Experimental `ivshmem` Device Support](#experimental-ivshmem-device-support)
+    - [Firmware Boot Support on `riscv64`](#firmware-boot-support-on-riscv64)
+    - [Increased vCPU Limit on x86_64/kvm](#increased-vcpu-limit-on-x86_64kvm)
+    - [Improved Block Performance with Small Block Sizes](#improved-block-performance-with-small-block-sizes)
+    - [Faster VM Pause Operation](#faster-vm-pause-operation)
+    - [Updated Documentation on Windows Guest Support](#updated-documentation-on-windows-guest-support)
+    - [Policy on AI Generated Code](#policy-on-ai-generated-code)
+    - [Removed SGX Support](#removed-sgx-support)
+    - [Notable Bug Fixes](#notable-bug-fixes)
+    - [Contributors](#contributors)
+- [v47.0](#v470)
+    - [Block Device Error Reporting to the Guest](#block-device-error-reporting-to-the-guest)
+    - [Nice Error Messages on Exit](#nice-error-messages-on-exit)
+    - [Alphabetically Sorted CLI Options for ch-remote](#alphabetically-sorted-cli-options-for-ch-remote)
+    - [Notable Bug Fixes](#notable-bug-fixes-1)
+    - [Deprecations](#deprecations)
+    - [Contributors](#contributors-1)
+- [v46.0](#v460)
+    - [File-level Locking Support with `--disk`](#file-level-locking-support-with---disk)
+    - [Improved Error Reporting with VM Resizing](#improved-error-reporting-with-vm-resizing)
+    - [IPv6 Address Support with `--net`](#ipv6-address-support-with---net)
+    - [Experimental AArch64 Support with the MSHV Hypervisor](#experimental-aarch64-support-with-the-mshv-hypervisor)
+    - [Deprecated SGX Support](#deprecated-sgx-support)
+    - [Notable Bug Fixes](#notable-bug-fixes-2)
+    - [Contributors](#contributors-2)
+- [v45.0](#v450)
+    - [Experimental `riscv64` Architecture Support](#experimental-riscv64-architecture-support)
+    - [Alphabetically Sorted CLI Options](#alphabetically-sorted-cli-options)
+    - [Improved Downtime of VM Live Migration](#improved-downtime-of-vm-live-migration)
+    - [Notable Bug Fixes](#notable-bug-fixes-3)
+    - [Contributors](#contributors-3)
+- [v44.0](#v440)
+    - [Configurable `virtio-iommu` Address Width](#configurable-virtio-iommu-address-width)
+    - [Notable Performance Improvements](#notable-performance-improvements)
+    - [New Fuzzers](#new-fuzzers)
+    - [Notable Bug Fixes](#notable-bug-fixes-4)
+    - [Contributors](#contributors-4)
+- [v43.0](#v430)
+    - [Live Migration over TCP Connections](#live-migration-over-tcp-connections)
+    - [Notable Performance Improvements](#notable-performance-improvements-1)
+    - [Notable Bug Fixes](#notable-bug-fixes-5)
+    - [Contributors](#contributors-5)
+- [v42.0](#v420)
+    - [SVE/SVE2 Support on AArch64](#svesve2-support-on-aarch64)
+    - [Notable Bug Fixes](#notable-bug-fixes-6)
+    - [Sponsorships](#sponsorships)
+    - [Contributors](#contributors-6)
 - [v41.0](#v410)
     - [Experimental "Pvmemcontrol" Support](#experimental-pvmemcontrol-support)
     - [Sandboxing With Landlock Support](#sandboxing-with-landlock-support)
-    - [Notable Performance Improvements](#notable-performance-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes)
-    - [Contributors](#contributors)
+    - [Notable Performance Improvements](#notable-performance-improvements-2)
+    - [Notable Bug Fixes](#notable-bug-fixes-7)
+    - [Contributors](#contributors-7)
 - [v40.0](#v400)
     - [Support for Restoring File Descriptor Backed Network Devices](#support-for-restoring-file-descriptor-backed-network-devices)
-    - [Notable Bug Fixes](#notable-bug-fixes-1)
-    - [Contributors](#contributors-1)
+    - [Notable Bug Fixes](#notable-bug-fixes-8)
+    - [Contributors](#contributors-8)
 - [v39.0](#v390)
     - [Variable Sizing of PCI Apertures for Segments](#variable-sizing-of-pci-apertures-for-segments)
     - [Direct Booting with bzImages](#direct-booting-with-bzimages)
     - [Support for NVIDIA GPUDirect P2P Support](#support-for-nvidia-gpudirect-p2p-support)
     - [Guest NMI Injection Support](#guest-nmi-injection-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-2)
-    - [Contributors](#contributors-2)
+    - [Notable Bug Fixes](#notable-bug-fixes-9)
+    - [Contributors](#contributors-9)
 - [v38.0](#v380)
     - [Group Rate Limiter on Block Devices](#group-rate-limiter-on-block-devices)
     - [CPU Pinning Support for Block Device Worker Thread](#cpu-pinning-support-for-block-device-worker-thread)
@@ -22,16 +71,16 @@
     - [New 'debug-console' Device](#new-debug-console-device)
     - [Improved VFIO Device Support](#improved-vfio-device-support)
     - [Extended CPU Affinity Support](#extended-cpu-affinity-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-3)
-    - [Contributors](#contributors-3)
+    - [Notable Bug Fixes](#notable-bug-fixes-10)
+    - [Contributors](#contributors-10)
 - [v37.0](#v370)
     - [Long Term Support (LTS) Release](#long-term-support-lts-release)
     - [Multiple PCI segments Support for 32-bit VFIO devices](#multiple-pci-segments-support-for-32-bit-vfio-devices)
     - [Configurable Named TAP Devices](#configurable-named-tap-devices)
     - [TTY Output from Both Serial Device and Virtio Console](#tty-output-from-both-serial-device-and-virtio-console)
     - [Faster VM Restoration from Snapshots](#faster-vm-restoration-from-snapshots)
-    - [Notable Bug Fixes](#notable-bug-fixes-4)
-    - [Contributors](#contributors-4)
+    - [Notable Bug Fixes](#notable-bug-fixes-11)
+    - [Contributors](#contributors-11)
 - [v36.0](#v360)
     - [Command Line Changes](#command-line-changes)
     - [Enabled Features Reported via API Endpoint and CLI](#enabled-features-reported-via-api-endpoint-and-cli)
@@ -40,31 +89,31 @@
     - [Unix Socket Backend for Serial Port](#unix-socket-backend-for-serial-port)
     - [AIO Backend for Block Devices](#aio-backend-for-block-devices)
     - [Documentation Improvements](#documentation-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-5)
-    - [Contributors](#contributors-5)
+    - [Notable Bug Fixes](#notable-bug-fixes-12)
+    - [Contributors](#contributors-12)
 - [v35.0](#v350)
     - [`virtio-vsock` Support for Linux Guest Kernel v6.3+](#virtio-vsock-support-for-linux-guest-kernel-v63)
     - [User Specified Serial Number for `virtio-block`](#user-specified-serial-number-for-virtio-block)
     - [vCPU TSC Frequency Included in Migration State](#vcpu-tsc-frequency-included-in-migration-state)
-    - [Notable Bug Fixes](#notable-bug-fixes-6)
-    - [Contributors](#contributors-6)
+    - [Notable Bug Fixes](#notable-bug-fixes-13)
+    - [Contributors](#contributors-13)
 - [v34.0](#v340)
     - [Paravirtualised Panic Device Support](#paravirtualised-panic-device-support)
     - [Improvements to VM Core Dump](#improvements-to-vm-core-dump)
     - [QCOW2 Support for Backing Files](#qcow2-support-for-backing-files)
     - [Minimum Host Kernel Bump](#minimum-host-kernel-bump)
-    - [Notable Bug Fixes](#notable-bug-fixes-7)
-    - [Contributors](#contributors-7)
+    - [Notable Bug Fixes](#notable-bug-fixes-14)
+    - [Contributors](#contributors-14)
 - [v33.0](#v330)
     - [D-Bus based API](#d-bus-based-api)
     - [Expose Host CPU Cache Details for AArch64](#expose-host-cpu-cache-details-for-aarch64)
-    - [Notable Bug Fixes](#notable-bug-fixes-8)
-    - [Contributors](#contributors-8)
+    - [Notable Bug Fixes](#notable-bug-fixes-15)
+    - [Contributors](#contributors-15)
 - [v32.0](#v320)
     - [Increased PCI Segment Limit](#increased-pci-segment-limit)
     - [API Changes](#api-changes)
-    - [Notable Bug Fixes](#notable-bug-fixes-9)
-    - [Contributors](#contributors-9)
+    - [Notable Bug Fixes](#notable-bug-fixes-16)
+    - [Contributors](#contributors-16)
 - [v31.1](#v311)
 - [v31.0](#v310)
     - [Update to Latest `acpi_tables`](#update-to-latest-acpi_tables)
@@ -72,15 +121,15 @@
     - [Improvements on Console `SIGWINCH` Handler](#improvements-on-console-sigwinch-handler)
     - [Remove Directory Support from `MemoryZoneConfig::file`](#remove-directory-support-from-memoryzoneconfigfile)
     - [Documentation Improvements](#documentation-improvements-1)
-    - [Notable Bug Fixes](#notable-bug-fixes-10)
-    - [Contributors](#contributors-10)
+    - [Notable Bug Fixes](#notable-bug-fixes-17)
+    - [Contributors](#contributors-17)
 - [v30.0](#v300)
     - [Command Line Changes for Reduced Binary Size](#command-line-changes-for-reduced-binary-size)
     - [Basic vfio-user Server Support](#basic-vfio-user-server-support)
     - [Heap Profiling Support](#heap-profiling-support)
     - [Documentation Improvements](#documentation-improvements-2)
-    - [Notable Bug Fixes](#notable-bug-fixes-11)
-    - [Contributors](#contributors-11)
+    - [Notable Bug Fixes](#notable-bug-fixes-18)
+    - [Contributors](#contributors-18)
 - [v28.2](#v282)
 - [v29.0](#v290)
     - [Release Binary Supports Both MSHV and KVM](#release-binary-supports-both-mshv-and-kvm)
@@ -90,10 +139,10 @@
     - [`AArch64` Documentation Integration](#aarch64-documentation-integration)
     - [`virtio-block` Counters Enhancement](#virtio-block-counters-enhancement)
     - [TCP Offload Control](#tcp-offload-control)
-    - [Notable Bug Fixes](#notable-bug-fixes-12)
+    - [Notable Bug Fixes](#notable-bug-fixes-19)
     - [Removals](#removals)
-    - [Deprecations](#deprecations)
-    - [Contributors](#contributors-12)
+    - [Deprecations](#deprecations-1)
+    - [Contributors](#contributors-19)
 - [v28.1](#v281)
 - [v28.0](#v280)
     - [Community Engagement (Reminder)](#community-engagement-reminder)
@@ -101,9 +150,9 @@
     - [Virtualised TPM Support](#virtualised-tpm-support)
     - [Transparent Huge Page Support](#transparent-huge-page-support)
     - [README Quick Start Improved](#readme-quick-start-improved)
-    - [Notable Bug Fixes](#notable-bug-fixes-13)
+    - [Notable Bug Fixes](#notable-bug-fixes-20)
     - [Removals](#removals-1)
-    - [Contributors](#contributors-13)
+    - [Contributors](#contributors-20)
 - [v27.0](#v270)
     - [Community Engagement](#community-engagement)
     - [Prebuilt Packages](#prebuilt-packages)
@@ -112,41 +161,41 @@
     - [Simplified Build Feature Flags](#simplified-build-feature-flags)
     - [Asynchronous Kernel Loading](#asynchronous-kernel-loading)
     - [GDB Support for AArch64](#gdb-support-for-aarch64)
-    - [Notable Bug Fixes](#notable-bug-fixes-14)
-    - [Deprecations](#deprecations-1)
-    - [Contributors](#contributors-14)
+    - [Notable Bug Fixes](#notable-bug-fixes-21)
+    - [Deprecations](#deprecations-2)
+    - [Contributors](#contributors-21)
 - [v26.0](#v260)
     - [SMBIOS Improvements via `--platform`](#smbios-improvements-via---platform)
     - [Unified Binary MSHV and KVM Support](#unified-binary-mshv-and-kvm-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-15)
-    - [Deprecations](#deprecations-2)
+    - [Notable Bug Fixes](#notable-bug-fixes-22)
+    - [Deprecations](#deprecations-3)
     - [Removals](#removals-2)
-    - [Contributors](#contributors-15)
+    - [Contributors](#contributors-22)
 - [v25.0](#v250)
     - [`ch-remote` Improvements](#ch-remote-improvements-1)
     - [VM "Coredump" Support](#vm-coredump-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-16)
+    - [Notable Bug Fixes](#notable-bug-fixes-23)
     - [Removals](#removals-3)
-    - [Contributors](#contributors-16)
+    - [Contributors](#contributors-23)
 - [v24.0](#v240)
     - [Bypass Mode for `virtio-iommu`](#bypass-mode-for-virtio-iommu)
     - [Ensure Identifiers Uniqueness](#ensure-identifiers-uniqueness)
     - [Sparse Mmap support](#sparse-mmap-support)
     - [Expose Platform Serial Number](#expose-platform-serial-number)
-    - [Notable Bug Fixes](#notable-bug-fixes-17)
+    - [Notable Bug Fixes](#notable-bug-fixes-24)
     - [Notable Improvements](#notable-improvements)
-    - [Deprecations](#deprecations-3)
+    - [Deprecations](#deprecations-4)
     - [New on the Website](#new-on-the-website)
-    - [Contributors](#contributors-17)
+    - [Contributors](#contributors-24)
 - [v23.1](#v231)
 - [v23.0](#v230)
     - [vDPA Support](#vdpa-support)
     - [Updated OS Support list](#updated-os-support-list)
     - [`AArch64` Memory Map Improvements](#aarch64-memory-map-improvements)
     - [`AMX` Support](#amx-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-18)
-    - [Deprecations](#deprecations-4)
-    - [Contributors](#contributors-18)
+    - [Notable Bug Fixes](#notable-bug-fixes-25)
+    - [Deprecations](#deprecations-5)
+    - [Contributors](#contributors-25)
 - [v22.1](#v221)
 - [v22.0](#v220)
     - [GDB Debug Stub Support](#gdb-debug-stub-support)
@@ -157,13 +206,13 @@
     - [PMU Support for AArch64](#pmu-support-for-aarch64)
     - [Documentation Under CC-BY-4.0 License](#documentation-under-cc-by-40-license)
     - [Deprecation of "Classic" `virtiofsd`](#deprecation-of-classic-virtiofsd)
-    - [Notable Bug Fixes](#notable-bug-fixes-19)
-    - [Contributors](#contributors-19)
+    - [Notable Bug Fixes](#notable-bug-fixes-26)
+    - [Contributors](#contributors-26)
 - [v21.0](#v210)
     - [Efficient Local Live Migration (for Live Upgrade)](#efficient-local-live-migration-for-live-upgrade)
     - [Recommended Kernel is Now 5.15](#recommended-kernel-is-now-515)
-    - [Notable Bug fixes](#notable-bug-fixes-20)
-    - [Contributors](#contributors-20)
+    - [Notable Bug fixes](#notable-bug-fixes-27)
+    - [Contributors](#contributors-27)
 - [v20.2](#v202)
 - [v20.1](#v201)
 - [v20.0](#v200)
@@ -172,8 +221,8 @@
     - [Improved VFIO support](#improved-vfio-support)
     - [Safer code](#safer-code)
     - [Extended documentation](#extended-documentation)
-    - [Notable bug fixes](#notable-bug-fixes-21)
-    - [Contributors](#contributors-21)
+    - [Notable bug fixes](#notable-bug-fixes-28)
+    - [Contributors](#contributors-28)
 - [v19.0](#v190)
     - [Improved PTY handling for serial and `virtio-console`](#improved-pty-handling-for-serial-and-virtio-console)
     - [PCI boot time optimisations](#pci-boot-time-optimisations)
@@ -181,8 +230,8 @@
     - [Live migration enhancements](#live-migration-enhancements)
     - [`virtio-mem` support with `vfio-user`](#virtio-mem-support-with-vfio-user)
     - [AArch64 for `virtio-iommu`](#aarch64-for-virtio-iommu)
-    - [Notable bug fixes](#notable-bug-fixes-22)
-    - [Contributors](#contributors-22)
+    - [Notable bug fixes](#notable-bug-fixes-29)
+    - [Contributors](#contributors-29)
 - [v18.0](#v180)
     - [Experimental User Device (`vfio-user`) support](#experimental-user-device-vfio-user-support)
     - [Migration support for `vhost-user` devices](#migration-support-for-vhost-user-devices)
@@ -192,31 +241,31 @@
     - [Live migration on MSHV hypervisor](#live-migration-on-mshv-hypervisor)
     - [AArch64 CPU topology support](#aarch64-cpu-topology-support)
     - [Power button support on AArch64](#power-button-support-on-aarch64)
-    - [Notable bug fixes](#notable-bug-fixes-23)
-    - [Contributors](#contributors-23)
+    - [Notable bug fixes](#notable-bug-fixes-30)
+    - [Contributors](#contributors-30)
 - [v17.0](#v170)
     - [ARM64 NUMA support using ACPI](#arm64-numa-support-using-acpi)
     - [`Seccomp` support for MSHV backend](#seccomp-support-for-mshv-backend)
     - [Hotplug of `macvtap` devices](#hotplug-of-macvtap-devices)
     - [Improved SGX support](#improved-sgx-support)
     - [Inflight tracking for `vhost-user` devices](#inflight-tracking-for-vhost-user-devices)
-    - [Notable bug fixes](#notable-bug-fixes-24)
-    - [Contributors](#contributors-24)
+    - [Notable bug fixes](#notable-bug-fixes-31)
+    - [Contributors](#contributors-31)
 - [v16.0](#v160)
     - [Improved live migration support](#improved-live-migration-support)
     - [Improved `vhost-user` support](#improved-vhost-user-support)
     - [ARM64 ACPI and UEFI support](#arm64-acpi-and-uefi-support)
-    - [Notable bug fixes](#notable-bug-fixes-25)
+    - [Notable bug fixes](#notable-bug-fixes-32)
     - [Removed functionality](#removed-functionality)
-    - [Contributors](#contributors-25)
+    - [Contributors](#contributors-32)
 - [v15.0](#v150)
     - [Version numbering and stability guarantees](#version-numbering-and-stability-guarantees)
     - [Network device rate limiting](#network-device-rate-limiting)
     - [Support for runtime control of `virtio-net` guest offload](#support-for-runtime-control-of-virtio-net-guest-offload)
     - [`--api-socket` supports file descriptor parameter](#--api-socket-supports-file-descriptor-parameter)
     - [Bug fixes](#bug-fixes)
-    - [Deprecations](#deprecations-5)
-    - [Contributors](#contributors-26)
+    - [Deprecations](#deprecations-6)
+    - [Contributors](#contributors-33)
 - [v0.14.1](#v0141)
 - [v0.14.0](#v0140)
     - [Structured event monitoring](#structured-event-monitoring)
@@ -225,8 +274,8 @@
     - [Updated hotplug documentation](#updated-hotplug-documentation)
     - [PTY control for serial and `virtio-console`](#pty-control-for-serial-and-virtio-console)
     - [Block device rate limiting](#block-device-rate-limiting)
-    - [Deprecations](#deprecations-6)
-    - [Contributors](#contributors-27)
+    - [Deprecations](#deprecations-7)
+    - [Contributors](#contributors-34)
 - [v0.13.0](#v0130)
     - [Wider VFIO device support](#wider-vfio-device-support)
     - [Improved huge page support](#improved-huge-page-support)
@@ -234,13 +283,13 @@
     - [VHD disk image support](#vhd-disk-image-support)
     - [Improved Virtio device threading](#improved-virtio-device-threading)
     - [Clean shutdown support via synthetic power button](#clean-shutdown-support-via-synthetic-power-button)
-    - [Contributors](#contributors-28)
+    - [Contributors](#contributors-35)
 - [v0.12.0](#v0120)
     - [ARM64 enhancements](#arm64-enhancements)
     - [Removal of `vhost-user-net` and `vhost-user-block` self spawning](#removal-of-vhost-user-net-and-vhost-user-block-self-spawning)
     - [Migration of `vhost-user-fs` backend](#migration-of-vhost-user-fs-backend)
     - [Enhanced "info" API](#enhanced-info-api)
-    - [Contributors](#contributors-29)
+    - [Contributors](#contributors-36)
 - [v0.11.0](#v0110)
     - [`io_uring` support by default for `virtio-block`](#io_uring-support-by-default-for-virtio-block)
     - [Windows Guest Support](#windows-guest-support)
@@ -252,15 +301,15 @@
     - [Default Log Level Changed](#default-log-level-changed)
     - [New `--balloon` Parameter Added](#new---balloon-parameter-added)
     - [Experimental `virtio-watchdog` Support](#experimental-virtio-watchdog-support)
-    - [Notable Bug Fixes](#notable-bug-fixes-26)
-    - [Contributors](#contributors-30)
+    - [Notable Bug Fixes](#notable-bug-fixes-33)
+    - [Contributors](#contributors-37)
 - [v0.10.0](#v0100)
     - [`virtio-block` Support for Multiple Descriptors](#virtio-block-support-for-multiple-descriptors)
     - [Memory Zones](#memory-zones)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements)
     - [Preliminary KVM HyperV Emulation Control](#preliminary-kvm-hyperv-emulation-control)
-    - [Notable Bug Fixes](#notable-bug-fixes-27)
-    - [Contributors](#contributors-31)
+    - [Notable Bug Fixes](#notable-bug-fixes-34)
+    - [Contributors](#contributors-38)
 - [v0.9.0](#v090)
     - [`io_uring` Based Block Device Support](#io_uring-based-block-device-support)
     - [Block and Network Device Statistics](#block-and-network-device-statistics)
@@ -273,17 +322,17 @@
     - [Enhancements to ARM64 Support](#enhancements-to-arm64-support)
     - [Intel SGX Support](#intel-sgx-support)
     - [`Seccomp` Sandbox Improvements](#seccomp-sandbox-improvements-1)
-    - [Notable Bug Fixes](#notable-bug-fixes-28)
-    - [Contributors](#contributors-32)
+    - [Notable Bug Fixes](#notable-bug-fixes-35)
+    - [Contributors](#contributors-39)
 - [v0.8.0](#v080)
     - [Experimental Snapshot and Restore Support](#experimental-snapshot-and-restore-support)
     - [Experimental ARM64 Support](#experimental-arm64-support)
     - [Support for Using 5-level Paging in Guests](#support-for-using-5-level-paging-in-guests)
     - [Virtio Device Interrupt Suppression for Network Devices](#virtio-device-interrupt-suppression-for-network-devices)
     - [`vhost_user_fs` Improvements](#vhost_user_fs-improvements)
-    - [Notable Bug Fixes](#notable-bug-fixes-29)
+    - [Notable Bug Fixes](#notable-bug-fixes-36)
     - [Command Line and API Changes](#command-line-and-api-changes)
-    - [Contributors](#contributors-33)
+    - [Contributors](#contributors-40)
 - [v0.7.0](#v070)
     - [Block, Network, Persistent Memory (PMEM), VirtioFS and Vsock hotplug](#block-network-persistent-memory-pmem-virtiofs-and-vsock-hotplug)
     - [Alternative `libc` Support](#alternative-libc-support)
@@ -293,14 +342,14 @@
     - [`Seccomp` Sandboxing](#seccomp-sandboxing)
     - [Updated Distribution Support](#updated-distribution-support)
     - [Command Line and API Changes](#command-line-and-api-changes-1)
-    - [Contributors](#contributors-34)
+    - [Contributors](#contributors-41)
 - [v0.6.0](#v060)
     - [Directly Assigned Devices Hotplug](#directly-assigned-devices-hotplug)
     - [Shared Filesystem Improvements](#shared-filesystem-improvements)
     - [Block and Networking IO Self Offloading](#block-and-networking-io-self-offloading)
     - [Command Line Interface](#command-line-interface)
     - [PVH Boot](#pvh-boot)
-    - [Contributors](#contributors-35)
+    - [Contributors](#contributors-42)
 - [v0.5.1](#v051)
 - [v0.5.0](#v050)
     - [Virtual Machine Dynamic Resizing](#virtual-machine-dynamic-resizing)
@@ -308,7 +357,7 @@
     - [New Interrupt Management Framework](#new-interrupt-management-framework)
     - [Development Tools](#development-tools)
     - [Kata Containers Integration](#kata-containers-integration)
-    - [Contributors](#contributors-36)
+    - [Contributors](#contributors-43)
 - [v0.4.0](#v040)
     - [Dynamic virtual CPUs addition](#dynamic-virtual-cpus-addition)
     - [Programmatic firmware tables generation](#programmatic-firmware-tables-generation)
@@ -317,7 +366,7 @@
     - [Userspace IOAPIC by default](#userspace-ioapic-by-default)
     - [PCI BAR reprogramming](#pci-bar-reprogramming)
     - [New `cloud-hypervisor` organization](#new-cloud-hypervisor-organization)
-    - [Contributors](#contributors-37)
+    - [Contributors](#contributors-44)
 - [v0.3.0](#v030)
     - [Block device offloading](#block-device-offloading)
     - [Network device backend](#network-device-backend)
@@ -344,11 +393,389 @@
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
 
+# v48.0
+
+This release has been tracked in [v48.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+48%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Experimental `fw_cfg` Device Support
+
+This feature enables passing configuration data and files, such as VM
+boot configurations (kernel, kernel cmdline, e820 memory map, and ACPI
+tables), from the host to the guest. (#7117)
+
+### Experimental `ivshmem` Device Support
+
+Support for inter-VM shared memory has been added. For more information,
+please refer to the [ivshmem documentation](docs/ivshmem.md). (#6703)
+
+### Firmware Boot Support on `riscv64`
+
+In addition to direct kernel boot, firmware boot support has been added
+on `riscv64` hosts. (#7249)
+
+### Increased vCPU Limit on x86_64/kvm
+
+The maximum number of supported vCPUs on x86_64 hosts using KVM has been
+raised from 254 to 8192. (#7299)
+
+### Improved Block Performance with Small Block Sizes
+
+Performance for `virtio-blk` with small block sizes (16KB and below)
+is enhanced via submitting async IO requests in batches. (#7146)
+
+### Faster VM Pause Operation
+
+The VM pause operation now is significantly faster particularly for VMs
+with a large number of vCPUs. (#7290)
+
+### Updated Documentation on Windows Guest Support
+
+Our Windows documentation now includes instructions to run Windows 11
+guests, in addition to Windows Server guests. (#7218)
+
+### Policy on AI Generated Code
+
+We will decline any contributions known to contain contents generated or
+derived from using Large Language Models (LLMs). Details can be found
+in our [contributing documentation](CONTRIBUTING.md). (#7162)
+
+### Removed SGX Support
+
+The SGX support has been removed, as announced in the deprecation notice two
+release cycles ago. (#7093)
+
+### Notable Bug Fixes
+
+* Seccomp filter fixes with glibc v2.42 (#7327)
+* Various fixes related to  (#7331, #7334, #7335)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+*  Alex Orozco <alexorozco@google.com>
+*  Alyssa Ross <hi@alyssa.is>
+*  Anirudh Rayabharam <anrayabh@microsoft.com>
+*  Bo Chen <bchen@crusoe.ai>
+*  Demi Marie Obenour <demiobenour@gmail.com>
+*  Lucas Grosche <lucas.grosche@cyberus-technology.de>
+*  Muminul Islam <muislam@microsoft.com>
+*  Oliver Anderson <oliver.anderson@cyberus-technology.de>
+*  Peter Oskolkov <posk@google.com>
+*  Philipp Schuster <philipp.schuster@cyberus-technology.de>
+*  Ruoqing He <heruoqing@iscas.ac.cn>
+*  Shubham Chakrawar <schakrawar@crusoe.ai>
+*  Songqian Li <sionli@tencent.com>
+*  Wei Liu <liuwe@microsoft.com>
+
+# v47.0
+
+This release has been tracked in [v47.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+47%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Block Device Error Reporting to the Guest
+
+Instead of exiting on I/O errors, the `virtio-block` device now reports
+errors to the guest using `VIRTIO_BLK_S_IOERR`. It improves the user
+experience particularly when the guest rootfs is not backed by the
+affected block device. (#7107)
+
+### Nice Error Messages on Exit
+
+We now have the chain of errors being reported and printed nicely, when
+Cloud Hypervisor or ch-remote exits on errors. (#7066)
+
+### Alphabetically Sorted CLI Options for ch-remote
+
+To improve readability, ch-remote now prints help information in
+alphabetical order. (#7130)
+
+### Notable Bug Fixes
+
+* Error out early when block device serial is too long (#7124)
+* Fix partial commands being discarded for `virtio-vsock` (#7195)
+* Disable the broken interrupt support for the `rtc_pl031` device to
+  prevent spurious guest interrupts (#7199)
+
+### Deprecations
+
+* A default IP (`192.168.249.1`) and mask (`255.255.255.0`) are
+ currently assigned  to the `virtio-net` device if no value is specified
+ by users. Such behavior is now deprecated.  Users of this behavior will
+ receive a warning message and should make adjustments. The behavior
+ will be removed in two release cycles (v49.0).
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Alyssa Ross <hi@alyssa.is>
+* Bo Chen <bchen@crusoe.ai>
+* Demi Marie Obenour <demiobenour@gmail.com>
+* Gauthier Jolly <contact@gjolly.fr>
+* Hengqi Chen <hengqi.chen@gmail.com>
+* Jinank Jain <jinankjain@microsoft.com>
+* Jinrong Liang <cloudliang@tencent.com>
+* Jean-Philippe Brucker <jean-philippe@linaro.org>
+* Maximilian Güntner <code@mguentner.de>
+* Muminul Islam <muislam@microsoft.com>
+* Nuno Das Neves <nunodasneves@linux.microsoft.com>
+* Philipp Schuster <philipp.schuster@cyberus-technology.de>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Songqian Li <sionli@tencent.com>
+* Wei Liu <liuwe@microsoft.com>
+* Yi Wang <foxywang@tencent.com>
+* ninollei <ninollx@hotmail.com>
+
+# v46.0
+
+This release has been tracked in [v46.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+46%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### File-level Locking Support with `--disk`
+
+Now file-level locking is enforced for disk images, provided by users
+with `--disk`. This ensures that only a single Cloud Hypervisor instance
+can obtain write access to a given disk image at any time, preventing
+misconfiguration and avoiding potential data corruption. (#6974)
+
+### Improved Error Reporting with VM Resizing
+
+Instead of returning a generic error `400` (e.g. `BadRequest`), users
+now get a more specific error `429` (e.g. `TooManyRequests`) when a
+pending VM resizing is not completed. This allows users to better handle
+different errors, say retrying the request when applicable. (#7043)
+
+### IPv6 Address Support with `--net`
+
+It is now possible to specify an IPv6 address and mask when creating a
+network interface with `--net`. (#7048)
+
+### Experimental AArch64 Support with the MSHV Hypervisor
+
+It is now possible to start VMs on AArch64 platforms when using MSHV
+hypervisor. (#7055)
+
+### Deprecated SGX Support
+
+The SGX support now is deprecated with a warning message if it being
+used, with the intention to remove its support from our code base in two
+release cycles (e.g. v48.0). (#7090)
+
+### Notable Bug Fixes
+
+* Remove `path` as required for `DiskConfig` from the OpenAPI spec file
+  (#7017)
+* Properly parse PCI capabilities (#7018)
+* Reprogram PCI device BAR when its MSE bit is set (#7063)
+* Update IOMMU mappings of MMIO regions with BAR reprogram for VFIO
+  devices (#7064)
+* Avoid resizing VMs to zero vCPUs (#7086)
+* Fix extended topology enumeration leaf exposed to the guest (#7087)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Bingxin Li <bl497@cam.ac.uk>
+* Bo Chen <bchen@crusoe.ai>
+* Fabiano Fidêncio <fidencio@northflank.com>
+* Gregory Anders <ganders@cloudflare.com>
+* Jinank Jain <jinankjain@microsoft.com>
+* Julian Stecklina <julian.stecklina@cyberus-technology.de>
+* Muminul Islam <muislam@microsoft.com>
+* Paolo Bonzini <pbonzini@redhat.com>
+* Philipp Schuster <philipp.schuster@cyberus-technology.de>
+* Rob Bradford <rbradford@rivosinc.com>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Thomas Prescher <thomas.prescher@cyberus-technology.de>
+* abm-77 <andrewmiller77@protonmail.com>
+
+# v45.0
+
+This release has been tracked in [v45.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v44.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Experimental `riscv64` Architecture Support
+
+Cloud Hypervisor now has experimental `riscv64` architecture
+support. Details can be found from the [riscv
+documentation](docs/riscv.md).
+
+### Alphabetically Sorted CLI Options
+
+To improve the readability of CLI options, the output of the `--help`
+now is alphabetically sorted. (#6988)
+
+### Improved Downtime of VM Live Migration
+
+The downtime of VM live migration is reduced via delaying some of the
+tearing down process of the source VM after the destination VM is up and
+running. (#6987)
+
+### Notable Bug Fixes
+
+* Fix seccomp filters related to http-api thread (#6967)
+* Handle cross-page access in the emulator for mshv (#6968)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Anatol Belski <anbelski@linux.microsoft.com>
+* Andrew Consroe <aconz2@gmail.com>
+* Bo Chen <bchen@crusoe.ai>
+* Jinank Jain <jinankjain@microsoft.com>
+* Jinrong Liang <cloudliang@tencent.com>
+* Philipp Schuster <philipp.schuster@cyberus-technology.de>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Stefan Kober <stefan.kober@cyberus-technology.de>
+* Wei Liu <liuwe@microsoft.com>
+
+# v44.0
+
+This release has been tracked in [v44.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v44.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Configurable `virtio-iommu` Address Width
+
+The `iommu_address_width` option has been added to `--platform` to allow users
+to limit the `virtio-iommu` address space in the guest. (#6900)
+
+### Notable Performance Improvements
+
+The `VIRTIO_BLK_F_SEG_MAX` feature has been enabled for `virtio-block` devices,
+which brings significant performance improvements on throughput. (#6885)
+
+The `io_uring` entries are no longer forced to use async helper workers,
+delegating the decision to the kernel. This change resolved the issue of having
+excessive amount of worker threads when `io_uring` is being used, which is
+expected to improve performance, such as reducing memory usage and reduce CPU
+contention.
+
+### New Fuzzers
+
+Our continuous fuzzing infrastructure is augmented with two new fuzzers to cover
+x86 instruction emulator and `virtio-vsock`.
+
+### Notable Bug Fixes
+
+* Fix short read and short write that impact QCOW and VHDX support. (#6884)
+* Various bug fixes on VHDX support. (#6890, #6899)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Arvind Vasudev <avasudev@crusoeenergy.com>
+* Bo Chen <bo.arvin.chen@gmail.com>
+* Nikolay Edigaryev <edigaryev@gmail.com>
+* Rob Bradford <rbradford@rivosinc.com>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Wei Liu <liuwe@microsoft.com>
+
+# v43.0
+
+This release has been tracked in [v43.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v43.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### Live Migration over TCP Connections
+
+Support has been added to enable direct live migration from two hosts via TCP
+connections. This supplements the existing support for migrating over a UNIX
+socket which can then be tunnelled as desired. The documentation has been
+updated. (#6850)
+
+### Notable Performance Improvements
+
+The `VIRTIO_RING_F_INDIRECT_DESC` feature has been enabled for `virtio-block`
+devices. This significantly increases the throughput of the devices with a
+small negative impact on latency. (#6826)
+
+### Notable Bug Fixes
+
+* Cloud Hypervisor now accepts VFIO devices that use I/O PCI BARs on non x86-64
+  architectures. Whether they function depends on the host PCI host bridge
+  support - previously they would be rejected even if the driver did not use
+  these BARs. (#6871)
+* Command line groups were adjusted to ensure that at least one payload
+  parameter was provided if any other VM parameters provided. (#6832)
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Alyssa Ross <hi@alyssa.is>
+* Andrew Consroe <aconz2@gmail.com>
+* Bo Chen <bo.arvin.chen@gmail.com>
+* Jinrong Liang <cloudliang@tencent.com>
+* Julian Stecklina <julian.stecklina@cyberus-technology.de>
+* Muminul Islam <muislam@microsoft.com>
+* Rob Bradford <rbradford@rivosinc.com>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Wojtek Czekalski <wczekalski@me.com>
+
+# v42.0
+
+This release has been tracked in [v42.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v42.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
+
+### SVE/SVE2 Support on AArch64
+
+The SVE and SVE2 feature bits are now propagated through to the guest on
+AArch64. (#6678, #6691)
+
+### Notable Bug Fixes
+
+* Reduce latency notification when rate limited (#6672)
+* Fix `virtio-console` resizing (#6704)
+* Fix resizing when console uses TTY (#6754)
+* Avoid deadlock in PCI BAR reprogramming that can occur when adding a new
+  `virtio` device to a VM that has been restored (#6775)
+* Fix console resizing after VM restore (#6748)
+* Fix memory resize error due to incorrect bounds checks (#6736)
+
+### Sponsorships
+
+During this release cycle a new VFIO CI worker has been provided by Crusoe
+Energy and a new ARM64 CI worker has been provided by Ubicloud.
+
+### Contributors
+
+Many thanks to everyone who has contributed to our release:
+
+* Alexandru Matei <alexandru.matei@uipath.com>
+* Alyssa Ross <hi@alyssa.is>
+* Anirudh Rayabharam <anrayabh@microsoft.com>
+* BharatNarasimman <bharatn@microsoft.com>
+* Bo Chen <chen.bo@intel.com>
+* Jinank Jain <jinankjain@microsoft.com>
+* Jonas Scholz <Jonas.Scholz@bbscholz.de>
+* Nuno Das Neves <nudasnev@microsoft.com>
+* Praveen K Paladugu <prapal@linux.microsoft.com>
+* Purna Pavan Chandra <paekkaladevi@microsoft.com>
+* Rob Bradford <rbradford@rivosinc.com>
+* Ruoqing He <heruoqing@iscas.ac.cn>
+* Songqian Li <sionli@tencent.com>
+* Tom Dohrmann <erbse.13@gmx.de>
+* Wei Liu <liuwe@microsoft.com>
+* Wenyu Huang <huangwenyuu@outlook.com>
+* Yuhong Zhong <yz@cs.columbia.edu>
+* wuxinyue <wuxinyue.wxy@antgroup.com>
+
 # v41.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v41.0. The following user visible changes have been made:
+This release has been tracked in [v41.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v41.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Experimental "Pvmemcontrol" Support
 
@@ -405,9 +832,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v40.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v40.0. The following user visible changes have been made:
+This release has been tracked in [v40.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v40.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Support for Restoring File Descriptor Backed Network Devices
 
@@ -456,9 +883,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v39.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v39.0. The following user visible changes have been made:
+This release has been tracked in [v39.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v39.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Variable Sizing of PCI Apertures for Segments
 
@@ -527,9 +954,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v38.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v38.0. The following user visible changes have been made:
+This release has been tracked in [v38.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v38.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Group Rate Limiter on Block Devices
 
@@ -597,9 +1024,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v37.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v37.0. The following user visible changes have been made:
+This release has been tracked in [v37.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v37.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Long Term Support (LTS) Release
 
@@ -659,9 +1086,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v36.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v36.0. The following user visible changes have been made:
+This release has been tracked in [v36.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v36.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Command Line Changes
 
@@ -734,9 +1161,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v35.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v35.0. The following user visible changes have been made:
+This release has been tracked in [v35.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v35.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### `virtio-vsock` Support for Linux Guest Kernel v6.3+
 
@@ -787,9 +1214,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v34.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v34.0. The following user visible changes have been made:
+This release has been tracked in [v34.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v34.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Paravirtualised Panic Device Support
 
@@ -847,9 +1274,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v33.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v33.0. The following user visible changes have been made:
+This release has been tracked in [v33.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v33.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### D-Bus based API
 
@@ -891,9 +1318,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v32.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v32.0. The following user visible changes have been made:
+This release has been tracked in [v32.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v32.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Increased PCI Segment Limit
 
@@ -944,9 +1371,9 @@ This is a bug fix release. The following issues have been addressed:
 
 # v31.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v31.0. The following user visible changes have been made:
+This release has been tracked in [v31.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v31.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Update to Latest `acpi_tables`
 
@@ -1010,9 +1437,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v30.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v30.0. The following user visible changes have been made:
+This release has been tracked in [v30.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v30.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Command Line Changes for Reduced Binary Size
 
@@ -1040,7 +1467,7 @@ heap profiling using `dhat` gated by the `dhat-heap` feature.
 
 The documentation on Intel TDX is expanded with details of the building
 and using [TD-Shim](https://github.com/confidential-containers/td-shim),
-references to [TDX Tools](https://github.com/intel/tdx-tools), and
+references to [TDX Linux](https://github.com/intel/tdx-linux), and
 version information of guest/host kernel/TDVF/TDShim being tested. Also,
 a new 'heap profiling' documentation is added with improvements on the
 existing 'profiling' documentation.
@@ -1083,9 +1510,9 @@ This is a bug fix release. The following issues have been addressed:
 
 # v29.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v29.0. The following user visible changes have been made:
+This release has been tracked in [v29.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v29.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Release Binary Supports Both MSHV and KVM
 
@@ -1180,9 +1607,9 @@ addresses an infinite loop issue ([details](https://github.com/rust-vmm/linux-lo
 
 # v28.0
 
-This release has been tracked in our new [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v28.0.
+This release has been tracked in [v28.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v28.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Community Engagement (Reminder)
 
@@ -1256,9 +1683,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v27.0
 
-This release has been tracked in our new [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v27.0.
+This release has been tracked in [v27.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v27.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Community Engagement
 
@@ -1347,9 +1774,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v26.0
 
-This release has been tracked through the [v26.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/30).
-
 ### SMBIOS Improvements via `--platform`
 
 `--platform` and the appropriate API structure has gained support for supplying
@@ -1413,9 +1837,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v25.0
 
-This release has been tracked through the [v25.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/29).
-
 ### `ch-remote` Improvements
 
 The `ch-remote` command has gained support for creating the VM from a JSON
@@ -1458,9 +1879,6 @@ Many thanks to everyone who has contributed to our release:
 * Yi Wang <wang.yi59@zte.com.cn>
 
 # v24.0
-
-This release has been tracked through the [v24.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/28).
 
 ### Bypass Mode for `virtio-iommu`
 
@@ -1547,9 +1965,6 @@ This is a bug fix release. The following issues have been addressed:
 
 # v23.0
 
-This release has been tracked through the [v23.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/27).
-
 ### vDPA Support
 
 A vDPA device has a datapath that complies with the virtio specification but
@@ -1617,9 +2032,6 @@ This is a bug fix release. The following issues have been addressed:
 * Fix `virtio-net` control queue (#3829)
 
 # v22.0
-
-This release has been tracked through the [v22.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/25).
 
 ### GDB Debug Stub Support
 
@@ -1701,9 +2113,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v21.0
 
-This release has been tracked through the [v21.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/24).
-
 ### Efficient Local Live Migration (for Live Upgrade)
 
 In order to support fast live upgrade of the VMM an optimised path has been
@@ -1766,9 +2175,6 @@ This is a bug fix release. The following issues have been addressed:
 
 # v20.0
 
-This release has been tracked through the [v20.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/23).
-
 ### Multiple PCI segments support
 
 Cloud Hypervisor is no longer limited to 31 PCI devices. For both `x86_64` and
@@ -1823,9 +2229,6 @@ Many thanks to everyone who has contributed to our release:
 * Ziye Yang <ziye.yang@intel.com>
 
 # v19.0
-
-This release has been tracked through the [v19.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/22).
 
 ### Improved PTY handling for serial and `virtio-console`
 
@@ -1886,9 +2289,6 @@ Many thanks to everyone who has contributed to our release:
 * Yu Li <liyu.yukiteru@bytedance.com>
 
 # v18.0
-
-This release has been tracked through the [v18.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/21).
 
 ### Experimental User Device (`vfio-user`) support
 
@@ -1960,9 +2360,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v17.0
 
-This release has been tracked through the [v17.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/20).
-
 ### ARM64 NUMA support using ACPI
 
 The support for ACPI on ARM64 has been enhanced to include support for
@@ -2018,8 +2415,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v16.0
 
-This release has been tracked through the [v16.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/19).
-
 ### Improved live migration support
 
 The live migration support inside Cloud Hypervisor has been improved with the addition of the tracking of dirty pages written by the VMM to complement the tracking of dirty pages made by the guest itself. Further the internal state of the VMM now is versioned which allows the safe migration of VMs from one version of the VMM to a newer one. However further testing is required so this should be done with care. See the [live migration documentation](docs/live_migration.md) for more details.
@@ -2066,8 +2461,6 @@ Many thanks to everyone who has contributed to our release including some new fa
 * Yi Wang <wang.yi59@zte.com.cn>
 
 # v15.0
-
-This release has been tracked through the [v15.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/18).
 
 Highlights for `cloud-hypervisor` version v15.0 include:
 
@@ -2158,8 +2551,6 @@ in this release:
 
 # v0.14.0
 
-This release has been tracked through the [0.14.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/17).
-
 Highlights for `cloud-hypervisor` version 0.14.0 include:
 
 ### Structured event monitoring
@@ -2230,8 +2621,6 @@ some new faces.
 
 # v0.13.0
 
-This release has been tracked through the [0.13.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/16).
-
 Highlights for `cloud-hypervisor` version 0.13.0 include:
 
 ### Wider VFIO device support
@@ -2292,8 +2681,6 @@ some new faces.
 
 # v0.12.0
 
-This release has been tracked through the [0.12.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/15).
-
 Highlights for `cloud-hypervisor` version 0.12.0 include:
 
 ### ARM64 enhancements
@@ -2332,8 +2719,6 @@ Many thanks to everyone who has contributed to our 0.12.0 release:
 * Wei Liu <liuwe@microsoft.com>
 
 # v0.11.0
-
-This release has been tracked through the [0.11.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/14).
 
 Highlights for `cloud-hypervisor` version 0.11.0 include:
 
@@ -2383,7 +2768,7 @@ resources.
 
 The default logging level was changed to include warnings which should make it
 easier to see potential issues. New [logging
-documentation](docs/logging) was also added.
+documentation](docs/logging.md) was also added.
 
 ### New `--balloon` Parameter Added
 
@@ -2435,8 +2820,6 @@ Many thanks to everyone who has contributed to our 0.11.0 release including some
 
 # v0.10.0
 
-This release has been tracked through the [0.10.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/13).
-
 Highlights for `cloud-hypervisor` version 0.10.0 include:
 
 ### `virtio-block` Support for Multiple Descriptors
@@ -2480,8 +2863,6 @@ Many thanks to everyone who has contributed to our 0.10.0 release including some
 * Wei Liu <liuwe@microsoft.com>
 
 # v0.9.0
-
-This release has been tracked through the [0.9.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/12).
 
 Highlights for `cloud-hypervisor` version 0.9.0 include:
 
@@ -2564,8 +2945,6 @@ Many thanks to everyone who has contributed to our 0.9.0 release including some 
 
 # v0.8.0
 
-This release has been tracked through the [0.8.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/10).
-
 Highlights for `cloud-hypervisor` version 0.8.0 include:
 
 ### Experimental Snapshot and Restore Support
@@ -2585,7 +2964,7 @@ a VM using passthrough (VFIO) devices. Issues with SMP have also been observed
 
 Included in this release is experimental support for running on ARM64.
 Currently only `virtio-mmio` devices and a serial port are supported. Full
-details can be found in the [ARM64 documentation](docs/arm64.md).
+details can be found in the [ARM64 documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/8ab15b9a984a448006f97b1211498c1bb583de3b/docs/arm64.md).
 
 ### Support for Using 5-level Paging in Guests
 
@@ -2653,8 +3032,6 @@ Many thanks to everyone who has contributed to our 0.8.0 release including some 
 * Sergio Lopez <slp@redhat.com>
 
 # v0.7.0
-
-This release has been tracked through the [0.7.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/7).
 
 Highlights for `cloud-hypervisor` version 0.7.0 include:
 
@@ -2753,8 +3130,6 @@ Many thanks to everyone who has contributed to our 0.7.0 release including some 
 
 # v0.6.0
 
-This release has been tracked through the [0.6.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/7).
-
 Highlights for `cloud-hypervisor` version 0.6.0 include:
 
 ### Directly Assigned Devices Hotplug
@@ -2831,8 +3206,6 @@ This is a bugfix release branched off v0.5.0. It contains the following fixes:
 
 # v0.5.0
 
-This release has been tracked through the [0.5.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/6).
-
 Highlights for `cloud-hypervisor` version 0.5.0 include:
 
 ### Virtual Machine Dynamic Resizing
@@ -2891,8 +3264,6 @@ Many thanks to everyone that contributed to the 0.5.0 release:
 * Yang Zhong <yang.zhong@intel.com>
 
 # v0.4.0
-
-This release has been tracked through the [0.4.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/4).
 
 Highlights for `cloud-hypervisor` version 0.4.0 include:
 
@@ -2971,8 +3342,6 @@ Many thanks to everyone that contributed to the 0.4.0 release:
 
 # v0.3.0
 
-This release has been tracked through the [0.3.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/3).
-
 Highlights for `cloud-hypervisor` version 0.3.0 include:
 
 ### Block device offloading
@@ -3040,8 +3409,6 @@ support guests with large amount of memory (more than 64GB).
 
 # v0.2.0
 
-This release has been tracked through the [0.2.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/2).
-
 Highlights for `cloud-hypervisor` version 0.2.0 include:
 
 ### Network device offloading
@@ -3050,7 +3417,7 @@ As part of our general effort to offload paravirtualized I/O to external
 processes, we added support for
 [vhost-user-net](https://access.redhat.com/solutions/3394851) backends. This
 enables `cloud-hypervisor` users to plug a `vhost-user` based networking device
-(e.g. [DPDK](https://dpdk.org)) into the VMM as their virtio network backend.
+(e.g. [DPDK](https://www.dpdk.org)) into the VMM as their virtio network backend.
 
 ### Minimal hardware-reduced ACPI
 
@@ -3066,7 +3433,7 @@ enabled by default.
 
 Based on the Firecracker idea of using a dedicated I/O port to measure guest
 boot times, we added support for logging guest events through the
-[0x80](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
+[0x80](https://web.archive.org/web/20211028033025/https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
 PC debug port. This allows, among other things, for granular guest boot time
 measurements. See our [debug port documentation](docs/debug-port.md) for more
 details.
@@ -3093,8 +3460,6 @@ improvements, we are now able to boot Ubuntu bionic images. We added those to
 our CI pipeline.
 
 # v0.1.0
-
-This release has been tracked through the [0.1.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/1).
 
 Highlights for `cloud-hypervisor` version 0.1.0 include:
 

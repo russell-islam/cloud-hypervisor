@@ -14,26 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use crate::{VirtioInterrupt, VirtioInterruptType};
+use std::collections::BTreeMap;
+use std::mem::size_of;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex, mpsc};
+use std::{io, result};
+
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::io;
-use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -44,6 +34,15 @@ use vm_memory::{
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    VirtioDeviceType,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -102,8 +101,8 @@ const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses: {0}")]
-    GuestMemory(GuestMemoryError),
+    #[error("Guest gave us bad memory addresses")]
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest gave us a read only descriptor that protocol says to write to")]
@@ -114,32 +113,32 @@ pub enum Error {
     BufferLengthTooSmall,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Failed to EventFd write: {0}")]
-    EventFdWriteFail(std::io::Error),
-    #[error("Failed to EventFd try_clone: {0}")]
-    EventFdTryCloneFail(std::io::Error),
-    #[error("Failed to MpscRecv: {0}")]
-    MpscRecvFail(mpsc::RecvError),
-    #[error("Resize invalid argument: {0}")]
-    ResizeError(anyhow::Error),
-    #[error("Fail to resize trigger: {0}")]
-    ResizeTriggerFail(DeviceError),
-    #[error("Invalid configuration: {0}")]
-    ValidateError(anyhow::Error),
-    #[error("Failed discarding memory range: {0}")]
-    DiscardMemoryRange(std::io::Error),
-    #[error("Failed DMA mapping: {0}")]
-    DmaMap(std::io::Error),
-    #[error("Failed DMA unmapping: {0}")]
-    DmaUnmap(std::io::Error),
+    #[error("Failed to EventFd write")]
+    EventFdWriteFail(#[source] std::io::Error),
+    #[error("Failed to EventFd try_clone")]
+    EventFdTryCloneFail(#[source] std::io::Error),
+    #[error("Failed to MpscRecv")]
+    MpscRecvFail(#[source] mpsc::RecvError),
+    #[error("Resize invalid argument")]
+    ResizeError(#[source] anyhow::Error),
+    #[error("Fail to resize trigger")]
+    ResizeTriggerFail(#[source] DeviceError),
+    #[error("Invalid configuration")]
+    ValidateError(#[source] anyhow::Error),
+    #[error("Failed discarding memory range")]
+    DiscardMemoryRange(#[source] std::io::Error),
+    #[error("Failed DMA mapping")]
+    DmaMap(#[source] std::io::Error),
+    #[error("Failed DMA unmapping")]
+    DmaUnmap(#[source] std::io::Error),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
     #[error("Not activated by the guest")]
     NotActivatedByGuest,
     #[error("Unknown request type: {0}")]
     UnknownRequestType(u16),
-    #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
 }
 
 #[repr(C)]
@@ -194,35 +193,35 @@ unsafe impl ByteValued for VirtioMemConfig {}
 
 impl VirtioMemConfig {
     fn validate(&self) -> result::Result<(), Error> {
-        if self.addr % self.block_size != 0 {
+        if !self.addr.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "addr 0x{:x} is not aligned on block_size 0x{:x}",
                 self.addr,
                 self.block_size
             )));
         }
-        if self.region_size % self.block_size != 0 {
+        if !self.region_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "region_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.region_size,
                 self.block_size
             )));
         }
-        if self.usable_region_size % self.block_size != 0 {
+        if !self.usable_region_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "usable_region_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.usable_region_size,
                 self.block_size
             )));
         }
-        if self.plugged_size % self.block_size != 0 {
+        if !self.plugged_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "plugged_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.plugged_size,
                 self.block_size
             )));
         }
-        if self.requested_size % self.block_size != 0 {
+        if !self.requested_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "requested_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.requested_size,
@@ -245,7 +244,7 @@ impl VirtioMemConfig {
                 size,
                 self.region_size
             )));
-        } else if size % self.block_size != 0 {
+        } else if !size.is_multiple_of(self.block_size) {
             return Err(Error::ResizeError(anyhow!(
                 "new size 0x{:x} is not aligned on block_size 0x{:x}",
                 size,
@@ -268,9 +267,9 @@ impl VirtioMemConfig {
         // Start address must be aligned on block_size, the size must be
         // greater than 0, and all blocks covered by the request must be
         // in the usable region.
-        if addr % self.block_size != 0
+        if !addr.is_multiple_of(self.block_size)
             || size == 0
-            || (addr < self.addr || addr + size >= self.addr + self.usable_region_size)
+            || (addr < self.addr || addr + size > self.addr + self.usable_region_size)
         {
             return false;
         }
@@ -476,11 +475,9 @@ impl MemEpollHandler {
             return VIRTIO_MEM_RESP_ERROR;
         }
 
-        if !plug {
-            if let Err(e) = self.discard_memory_range(offset, size) {
-                error!("failed discarding memory range: {:?}", e);
-                return VIRTIO_MEM_RESP_ERROR;
-            }
+        if !plug && let Err(e) = self.discard_memory_range(offset, size) {
+            error!("failed discarding memory range: {:?}", e);
+            return VIRTIO_MEM_RESP_ERROR;
         }
 
         self.blocks_state

@@ -2,29 +2,33 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::vhdx::{Result as VhdxResult, Vhdx};
-use crate::AsyncAdaptor;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::os::fd::AsRawFd;
+
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::AsyncAdaptor;
+use crate::async_io::{
+    AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+};
+use crate::vhdx::{Result as VhdxResult, Vhdx};
+
 pub struct VhdxDiskSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
+    vhdx_file: Vhdx,
 }
 
 impl VhdxDiskSync {
     pub fn new(f: File) -> VhdxResult<Self> {
         Ok(VhdxDiskSync {
-            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f)?)),
+            vhdx_file: Vhdx::new(f)?,
         })
     }
 }
 
 impl DiskFile for VhdxDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
+        Ok(self.vhdx_file.virtual_disk_size())
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
@@ -33,16 +37,20 @@ impl DiskFile for VhdxDiskSync {
                 as Box<dyn AsyncIo>,
         )
     }
+
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.vhdx_file.as_raw_fd())
+    }
 }
 
 pub struct VhdxSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
+    vhdx_file: Vhdx,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
 
 impl VhdxSync {
-    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>) -> std::io::Result<Self> {
+    pub fn new(vhdx_file: Vhdx) -> std::io::Result<Self> {
         Ok(VhdxSync {
             vhdx_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
@@ -51,11 +59,7 @@ impl VhdxSync {
     }
 }
 
-impl AsyncAdaptor<Vhdx> for Arc<Mutex<Vhdx>> {
-    fn file(&mut self) -> MutexGuard<'_, Vhdx> {
-        self.lock().unwrap()
-    }
-}
+impl AsyncAdaptor for Vhdx {}
 
 impl AsyncIo for VhdxSync {
     fn notifier(&self) -> &EventFd {

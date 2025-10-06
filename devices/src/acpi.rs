@@ -3,16 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use super::AcpiNotificationFlags;
-use acpi_tables::{aml, Aml, AmlSink};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
-use vm_device::interrupt::InterruptSourceGroup;
+
+use acpi_tables::{Aml, AmlSink, aml};
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::AcpiNotificationFlags;
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 

@@ -1,33 +1,31 @@
 [package]
 authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
-edition = "2021"
+edition.workspace = true
 name = "pci"
 version = "0.1.0"
 
 [features]
 default = []
-kvm = ["vfio-ioctls/kvm"]
-mshv = ["vfio-ioctls/mshv"]
+kvm = ["hypervisor/kvm", "vfio-ioctls/kvm"]
+mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = "1.0.86"
-byteorder = "1.5.0"
+anyhow = { workspace = true }
+byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.155"
-log = "0.4.22"
-serde = { version = "1.0.197", features = ["derive"] }
-thiserror = "1.0.62"
-vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", features = [
-  "fam-wrappers",
-] }
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
+libc = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+vfio-bindings = { workspace = true, features = ["fam-wrappers"] }
+vfio-ioctls = { workspace = true, default-features = false }
+vfio_user = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }

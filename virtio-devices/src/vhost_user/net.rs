@@ -1,22 +1,13 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use crate::vhost_user::{Error, Result, VhostUserCommon};
-use crate::{
-    ActivateResult, NetCtrlEpollHandler, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
-};
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
+use std::{result, thread};
+
+use net_util::{CtrlQueue, MacAddr, VirtioNetConfig, build_net_config_space};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_net::{
@@ -28,11 +19,19 @@ use virtio_bindings::virtio_net::{
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
+use crate::vhost_user::{Error, Result, VhostUserCommon};
+use crate::{
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt,
+};
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
 
@@ -169,8 +168,10 @@ impl Net {
                 };
 
             if num_queues > backend_num_queues {
-                error!("vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
-                num_queues, backend_num_queues);
+                error!(
+                    "vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
+                    num_queues, backend_num_queues
+                );
                 return Err(Error::BadQueueNum);
             }
 
@@ -242,23 +243,24 @@ impl Net {
 
 impl Drop for Net {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            if let Err(e) = kill_evt.write(1) {
-                error!("failed to kill vhost-user-net: {:?}", e);
-            }
+        if let Some(kill_evt) = self.common.kill_evt.take()
+            && let Err(e) = kill_evt.write(1)
+        {
+            error!("failed to kill vhost-user-net: {:?}", e);
         }
 
         self.common.wait_for_epoll_threads();
 
-        if let Some(thread) = self.epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(thread) = self.epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
-        if let Some(thread) = self.ctrl_queue_epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+
+        if let Some(thread) = self.ctrl_queue_epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }
@@ -299,7 +301,7 @@ impl VirtioDevice for Net {
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
-        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
+        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2) {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
 
@@ -381,11 +383,11 @@ impl VirtioDevice for Net {
             self.common.resume().ok()?;
         }
 
-        if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu.lock().unwrap().reset_vhost_user() {
-                error!("Failed to reset vhost-user daemon: {:?}", e);
-                return None;
-            }
+        if let Some(vu) = &self.vu_common.vu
+            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
+        {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
         }
 
         if let Some(kill_evt) = self.common.kill_evt.take() {

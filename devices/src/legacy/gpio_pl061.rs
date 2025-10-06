@@ -7,15 +7,16 @@
 //! This module implements an ARM PrimeCell General Purpose Input/Output(PL061) to support gracefully poweroff microvm from external.
 //!
 
-use crate::{read_le_u32, write_le_u32};
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::result;
 use std::sync::{Arc, Barrier};
+use std::{io, result};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+
+use crate::{read_le_u32, write_le_u32};
 
 const OFS_DATA: u64 = 0x400; // Data Register
 const GPIODIR: u64 = 0x400; // Direction Register
@@ -27,10 +28,10 @@ const GPIORIE: u64 = 0x414; // Raw Interrupt Status Register
 const GPIOMIS: u64 = 0x418; // Masked Interrupt Status Register
 const GPIOIC: u64 = 0x41c; // Interrupt Clear Register
 const GPIOAFSEL: u64 = 0x420; // Mode Control Select Register
-                              // From 0x424 to 0xFDC => reserved space.
-                              // From 0xFE0 to 0xFFC => Peripheral and PrimeCell Identification Registers which are Read Only registers.
-                              // These registers can conceptually be treated as a 32-bit register, and PartNumber[11:0] is used to identify the peripheral.
-                              // We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
+// From 0x424 to 0xFDC => reserved space.
+// From 0xFE0 to 0xFFC => Peripheral and PrimeCell Identification Registers which are Read Only registers.
+// These registers can conceptually be treated as a 32-bit register, and PartNumber[11:0] is used to identify the peripheral.
+// We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
 const GPIO_ID: [u8; 8] = [0x61, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 // ID Margins
 const GPIO_ID_LOW: u64 = 0xfe0;
@@ -42,11 +43,11 @@ const N_GPIOS: u32 = 8;
 pub enum Error {
     #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
-    #[error("GPIO interrupt disabled by guest driver.")]
+    #[error("GPIO interrupt disabled by guest driver")]
     GpioInterruptDisabled,
-    #[error("Could not trigger GPIO interrupt: {0}.")]
-    GpioInterruptFailure(io::Error),
-    #[error("Invalid GPIO Input key triggered: {0}.")]
+    #[error("Could not trigger GPIO interrupt")]
+    GpioInterruptFailure(#[source] io::Error),
+    #[error("Invalid GPIO Input key triggered: {0}")]
     GpioTriggerKeyFailure(u32),
 }
 
@@ -323,9 +324,10 @@ impl Migratable for Gpio {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const GPIO_NAME: &str = "gpio";
     const LEGACY_GPIO_MAPPED_IO_START: u64 = 0x0902_0000;

@@ -3,18 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
-use libfuzzer_sys::fuzz_target;
-use micro_http::Request;
-use once_cell::sync::Lazy;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::LazyLock;
 use std::thread;
+
+use libfuzzer_sys::{fuzz_target, Corpus};
+use micro_http::Request;
 use vm_migration::MigratableError;
+use vmm::api::http::*;
 use vmm::api::{
-    http::*, ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
+    ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
+    VmmPingResponse,
 };
 use vmm::config::RestoreConfig;
 use vmm::vm::{Error as VmError, VmState};
@@ -23,12 +24,12 @@ use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
 
 // Need to be ordered for test case reproducibility
-static ROUTES: Lazy<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
-    Lazy::new(|| HTTP_ROUTES.routes.values().collect());
+static ROUTES: LazyLock<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
+    LazyLock::new(|| HTTP_ROUTES.routes.values().collect());
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < 2 {
-        return;
+        return Corpus::Reject;
     }
 
     let route = ROUTES[bytes[0] as usize % ROUTES.len()];
@@ -52,6 +53,8 @@ fuzz_target!(|bytes| {
         exit_evt.write(1).ok();
         http_receiver_thread.join().unwrap();
     };
+
+    Corpus::Keep
 });
 
 fn generate_request(bytes: &[u8]) -> Option<Request> {
@@ -81,7 +84,7 @@ fn generate_request(bytes: &[u8]) -> Option<Request> {
 struct StubApiRequestHandler;
 
 impl RequestHandler for StubApiRequestHandler {
-    fn vm_create(&mut self, _: Arc<Mutex<VmConfig>>) -> Result<(), VmError> {
+    fn vm_create(&mut self, _: Box<VmConfig>) -> Result<(), VmError> {
         Ok(())
     }
 
@@ -120,7 +123,7 @@ impl RequestHandler for StubApiRequestHandler {
 
     fn vm_info(&self) -> Result<VmInfoResponse, VmError> {
         Ok(VmInfoResponse {
-            config: Arc::new(Mutex::new(VmConfig {
+            config: Box::new(VmConfig {
                 cpus: CpusConfig {
                     boot_vcpus: 1,
                     max_vcpus: 1,
@@ -183,8 +186,6 @@ impl RequestHandler for StubApiRequestHandler {
                 #[cfg(feature = "pvmemcontrol")]
                 pvmemcontrol: None,
                 iommu: false,
-                #[cfg(target_arch = "x86_64")]
-                sgx_epc: None,
                 numa: None,
                 watchdog: false,
                 gdb: false,
@@ -194,7 +195,9 @@ impl RequestHandler for StubApiRequestHandler {
                 preserved_fds: None,
                 landlock_enable: false,
                 landlock_rules: None,
-            })),
+                #[cfg(feature = "ivshmem")]
+                ivshmem: None,
+            }),
             state: VmState::Running,
             memory_actual_size: 0,
             device_tree: None,
@@ -218,7 +221,7 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
-    fn vm_resize(&mut self, _: Option<u8>, _: Option<u64>, _: Option<u64>) -> Result<(), VmError> {
+    fn vm_resize(&mut self, _: Option<u32>, _: Option<u64>, _: Option<u64>) -> Result<(), VmError> {
         Ok(())
     }
 

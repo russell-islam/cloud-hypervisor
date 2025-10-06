@@ -3,17 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::{
-    epoll_helper::EpollHelperError,
-    seccomp_filters::{get_seccomp_filter, Thread},
-    ActivateError,
-};
-use seccompiler::{apply_filter, SeccompAction};
-use std::{
-    panic::AssertUnwindSafe,
-    thread::{self, JoinHandle},
-};
+use std::panic::AssertUnwindSafe;
+use std::thread::{self, JoinHandle};
+
+use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::ActivateError;
+use crate::epoll_helper::EpollHelperError;
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 
 pub(crate) fn spawn_virtio_thread<F>(
     name: &str,
@@ -38,12 +36,12 @@ where
     thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {
-            if !seccomp_filter.is_empty() {
-                if let Err(e) = apply_filter(&seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                    thread_exit_evt.write(1).ok();
-                    return;
-                }
+            if !seccomp_filter.is_empty()
+                && let Err(e) = apply_filter(&seccomp_filter)
+            {
+                error!("Error applying seccomp filter: {:?}", e);
+                thread_exit_evt.write(1).ok();
+                return;
             }
             match std::panic::catch_unwind(AssertUnwindSafe(f)) {
                 Err(_) => {

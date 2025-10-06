@@ -4,9 +4,27 @@
 //
 
 use std::collections::HashMap;
-use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
+
+use thiserror::Error;
+
+mod private_trait {
+    // Voldemort trait that dispatches to `FromStr::from_str` on externally-defined types
+    // and to custom parsing code for types in this module.
+    pub trait Parseable
+    where
+        Self: Sized,
+    {
+        type Err;
+        // Actually does the parsing, but panics if the input doesn't have
+        // balanced quotes.  This is fine because split_commas checks that the
+        // input has balanced quotes, and option names cannot contain anything
+        // that split_commas treats as special.
+        fn from_str(input: &str) -> Result<Self, <Self as Parseable>::Err>;
+    }
+}
+use private_trait::Parseable;
 
 #[derive(Default)]
 pub struct OptionParser {
@@ -18,62 +36,49 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum OptionParserError {
+    #[error("unknown option: {0}")]
     UnknownOption(String),
+    #[error("unknown option: {0}")]
     InvalidSyntax(String),
-    Conversion(String, String),
+    #[error("unable to convert {1} for {0}")]
+    Conversion(String /* field */, String /* value */),
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-}
-
-impl fmt::Display for OptionParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {s}"),
-            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{s}"),
-            OptionParserError::Conversion(field, value) => {
-                write!(f, "unable to convert {value} for {field}")
-            }
-            OptionParserError::InvalidValue(s) => write!(f, "invalid value: {s}"),
-        }
-    }
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
 fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
     let mut list: Vec<String> = Vec::new();
-    let mut opened_brackets = 0;
+    let mut opened_brackets = 0u64;
     let mut in_quotes = false;
     let mut current = String::new();
 
     for c in s.trim().chars() {
         match c {
-            '[' => {
-                opened_brackets += 1;
-                current.push('[');
-            }
+            // In quotes, only '"' is special
+            '"' => in_quotes = !in_quotes,
+            _ if in_quotes => {}
+            '[' => opened_brackets += 1,
             ']' => {
-                opened_brackets -= 1;
-                if opened_brackets < 0 {
+                if opened_brackets < 1 {
                     return Err(OptionParserError::InvalidSyntax(s.to_owned()));
                 }
-                current.push(']');
+                opened_brackets -= 1;
             }
-            '"' => in_quotes = !in_quotes,
-            ',' => {
-                if opened_brackets > 0 || in_quotes {
-                    current.push(',')
-                } else {
-                    list.push(current);
-                    current = String::new();
-                }
+            ',' if opened_brackets == 0 => {
+                list.push(current);
+                current = String::new();
+                continue;
             }
-            c => current.push(c),
-        }
+            _ => {}
+        };
+        current.push(c);
     }
     list.push(current);
 
-    if opened_brackets != 0 || in_quotes {
+    if in_quotes || opened_brackets != 0 {
         return Err(OptionParserError::InvalidSyntax(s.to_owned()));
     }
 
@@ -94,7 +99,6 @@ impl OptionParser {
 
         for option in split_commas(input)?.iter() {
             let parts: Vec<&str> = option.splitn(2, '=').collect();
-
             match self.options.get_mut(parts[0]) {
                 None => return Err(OptionParserError::UnknownOption(parts[0].to_owned())),
                 Some(value) => {
@@ -114,6 +118,12 @@ impl OptionParser {
     }
 
     pub fn add(&mut self, option: &str) -> &mut Self {
+        // Check that option=value has balanced
+        // quotes and brackets iff value does.
+        assert!(
+            !option.contains(['"', '[', ']', '=', ',']),
+            "forbidden character in option name"
+        );
         self.options.insert(
             option.to_owned(),
             OptionParserValue {
@@ -141,7 +151,13 @@ impl OptionParser {
         self.options
             .get(option)
             .and_then(|v| v.value.clone())
-            .and_then(|s| if s.is_empty() { None } else { Some(s) })
+            .and_then(|s| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(dequote(&s))
+                }
+            })
     }
 
     pub fn is_set(&self, option: &str) -> bool {
@@ -151,23 +167,31 @@ impl OptionParser {
             .is_some()
     }
 
-    pub fn convert<T: FromStr>(&self, option: &str) -> OptionParserResult<Option<T>> {
-        match self.get(option) {
+    pub fn convert<T: Parseable>(&self, option: &str) -> OptionParserResult<Option<T>> {
+        match self.options.get(option).and_then(|v| v.value.as_ref()) {
             None => Ok(None),
-            Some(v) => Ok(Some(v.parse().map_err(|_| {
-                OptionParserError::Conversion(option.to_owned(), v.to_owned())
-            })?)),
+            Some(v) => {
+                Ok(if v.is_empty() {
+                    None
+                } else {
+                    Some(Parseable::from_str(v).map_err(|_| {
+                        OptionParserError::Conversion(option.to_owned(), v.to_owned())
+                    })?)
+                })
+            }
         }
     }
 }
 
 pub struct Toggle(pub bool);
 
+#[derive(Error, Debug)]
 pub enum ToggleParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
-impl FromStr for Toggle {
+impl Parseable for Toggle {
     type Err = ToggleParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -184,8 +208,9 @@ impl FromStr for Toggle {
 
 pub struct ByteSized(pub u64);
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ByteSizedParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -215,11 +240,13 @@ impl FromStr for ByteSized {
 
 pub struct IntegerList(pub Vec<u64>);
 
+#[derive(Error, Debug)]
 pub enum IntegerListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
-impl FromStr for IntegerList {
+impl Parseable for IntegerList {
     type Err = IntegerListParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
@@ -303,40 +330,54 @@ impl TupleValue for Vec<usize> {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub struct Tuple<S, T>(pub Vec<(S, T)>);
 
+#[derive(Error, Debug)]
 pub enum TupleError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-    SplitOutsideBrackets(OptionParserError),
-    InvalidIntegerList(IntegerListParseError),
-    InvalidInteger(ParseIntError),
+    #[error("split outside brackets")]
+    SplitOutsideBrackets(#[source] OptionParserError),
+    #[error("invalid integer list")]
+    InvalidIntegerList(#[source] IntegerListParseError),
+    #[error("invalid integer")]
+    InvalidInteger(#[source] ParseIntError),
 }
 
-impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
+impl<S: Parseable, T: TupleValue> Parseable for Tuple<S, T> {
     type Err = TupleError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut list: Vec<(S, T)> = Vec::new();
-
         let body = s
             .trim()
             .strip_prefix('[')
             .and_then(|s| s.strip_suffix(']'))
             .ok_or_else(|| TupleError::InvalidValue(s.to_string()))?;
-
         let tuples_list = split_commas(body).map_err(TupleError::SplitOutsideBrackets)?;
         for tuple in tuples_list.iter() {
-            let items: Vec<&str> = tuple.split('@').collect();
-
-            if items.len() != 2 {
-                return Err(TupleError::InvalidValue((*tuple).to_string()));
+            let mut in_quotes = false;
+            let mut last_idx = 0;
+            let mut first_val = None;
+            for (idx, c) in tuple.as_bytes().iter().enumerate() {
+                match c {
+                    b'"' => in_quotes = !in_quotes,
+                    b'@' if !in_quotes => {
+                        if last_idx != 0 {
+                            return Err(TupleError::InvalidValue((*tuple).to_string()));
+                        }
+                        first_val = Some(&tuple[last_idx..idx]);
+                        last_idx = idx + 1;
+                    }
+                    _ => {}
+                }
             }
-
-            let item1 = items[0]
-                .parse::<S>()
-                .map_err(|_| TupleError::InvalidValue(items[0].to_owned()))?;
-            let item2 = TupleValue::parse_value(items[1])?;
-
+            let item1 = <S as Parseable>::from_str(
+                first_val.ok_or(TupleError::InvalidValue((*tuple).to_string()))?,
+            )
+            .map_err(|_| TupleError::InvalidValue(first_val.unwrap().to_owned()))?;
+            let item2 = TupleValue::parse_value(&tuple[last_idx..])?;
             list.push((item1, item2));
         }
 
@@ -347,20 +388,54 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
 #[derive(Default)]
 pub struct StringList(pub Vec<String>);
 
+#[derive(Error, Debug)]
 pub enum StringListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
-impl FromStr for StringList {
+fn dequote(s: &str) -> String {
+    let mut prev_byte = b'\0';
+    let mut in_quotes = false;
+    let mut out: Vec<u8> = vec![];
+    for i in s.bytes() {
+        if i == b'"' {
+            if prev_byte == b'"' && !in_quotes {
+                out.push(b'"');
+            }
+            in_quotes = !in_quotes;
+        } else {
+            out.push(i);
+        }
+        prev_byte = i
+    }
+    assert!(!in_quotes, "split_commas didn't reject unbalanced quotes");
+    // SAFETY: the non-ASCII bytes in the output are the same
+    // and in the same order as those in the input, so if the
+    // input is valid UTF-8 the output will be as well.
+    unsafe { String::from_utf8_unchecked(out) }
+}
+
+impl<T> Parseable for T
+where
+    T: FromStr + Sized,
+{
+    type Err = <T as FromStr>::Err;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        dequote(s).parse()
+    }
+}
+
+impl Parseable for StringList {
     type Err = StringListParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let string_list: Vec<String> = s
-            .trim()
-            .trim_matches(|c| c == '[' || c == ']')
-            .split(',')
-            .map(|e| e.to_owned())
-            .collect();
+        let string_list: Vec<String> =
+            split_commas(s.trim().trim_matches(|c| c == '[' || c == ']'))
+                .map_err(|_| StringListParseError::InvalidValue(s.to_owned()))?
+                .iter()
+                .map(|e| e.to_owned())
+                .collect();
 
         Ok(StringList(string_list))
     }
@@ -381,42 +456,65 @@ mod tests {
             .add("topology")
             .add("cmdline");
 
-        assert!(parser.parse("size=128M,hanging_param").is_err());
-        assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
-        assert!(parser.parse("size=128M,file=/dev/shm").is_err());
+        assert_eq!(split_commas("\"\"").unwrap(), vec!["\"\""]);
+        parser.parse("size=128M,hanging_param").unwrap_err();
+        parser
+            .parse("size=128M,too_many_equals=foo=bar")
+            .unwrap_err();
+        parser.parse("size=128M,file=/dev/shm").unwrap_err();
 
-        assert!(parser.parse("size=128M").is_ok());
+        parser.parse("size=128M").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
+        parser.parse("size=").unwrap();
+        assert!(parser.get("size").is_none());
 
-        assert!(parser.parse("size=128M,mergeable=on").is_ok());
+        parser.parse("size=128M,mergeable=on").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[1,2]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[1,2]".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[[1,2],[3,4]]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[[1,2],[3,4]]".to_owned()));
 
-        assert!(parser.parse("topology=[").is_err());
-        assert!(parser.parse("topology=[[[]]]]").is_err());
+        parser.parse("topology=[").unwrap_err();
+        parser.parse("topology=[[[]]]]").unwrap_err();
+        parser.parse("topology=[\"@\"\"b\"@[1,2]]").unwrap();
+        assert_eq!(
+            parser
+                .convert::<Tuple<String, Vec<u8>>>("topology")
+                .unwrap()
+                .unwrap(),
+            Tuple(vec![("@\"b".to_owned(), vec![1, 2])])
+        );
 
-        assert!(parser.parse("cmdline=\"console=ttyS0,9600n8\"").is_ok());
+        parser.parse("cmdline=\"console=ttyS0,9600n8\"").unwrap();
         assert_eq!(
             parser.get("cmdline"),
             Some("console=ttyS0,9600n8".to_owned())
         );
-        assert!(parser.parse("cmdline=\"").is_err());
-        assert!(parser.parse("cmdline=\"\"\"").is_err());
+        parser.parse("cmdline=\"").unwrap_err();
+        parser.parse("cmdline=\"\"\"").unwrap_err();
+    }
+
+    #[test]
+    fn parse_bytes() {
+        assert_eq!(<String as Parseable>::from_str("a=\"b\"").unwrap(), "a=b");
+    }
+
+    #[test]
+    fn check_dequote() {
+        assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"")
     }
 }

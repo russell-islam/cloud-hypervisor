@@ -3,23 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::cmp;
+use std::sync::{Arc, Barrier};
+
 use anyhow::anyhow;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{TPM_SIZE, TPM_START};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::layout::{TPM_SIZE, TPM_START};
-use std::cmp;
-use std::sync::{Arc, Barrier};
 use thiserror::Error;
-use tpm::emulator::{BackendCmd, Emulator};
 use tpm::TPM_CRB_BUFFER_MAX;
+use tpm::emulator::{BackendCmd, Emulator};
 use vm_device::BusDevice;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Emulator doesn't implement min required capabilities: {0}")]
+    #[error("Emulator doesn't implement min required capabilities")]
     CheckCaps(#[source] anyhow::Error),
-    #[error("Failed to initialize tpm: {0}")]
+    #[error("Failed to initialize tpm")]
     Init(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;
@@ -457,10 +458,9 @@ impl BusDevice for Tpm {
                 CRB_CTRL_CANCEL => {
                     if v == CRB_CANCEL_INVOKE
                         && (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE != 0)
+                        && let Err(e) = self.emulator.cancel_cmd()
                     {
-                        if let Err(e) = self.emulator.cancel_cmd() {
-                            error!("Failed to run cancel command. Error: {:?}", e);
-                        }
+                        error!("Failed to run cancel command. Error: {:?}", e);
                     }
                 }
                 CRB_CTRL_START => {

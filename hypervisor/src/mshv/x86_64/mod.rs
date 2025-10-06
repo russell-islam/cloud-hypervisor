@@ -7,12 +7,13 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    StandardRegisters,
 };
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 pub mod emulator;
 
@@ -20,16 +21,16 @@ pub mod emulator;
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
 ///
 pub use {
-    mshv_bindings::hv_cpuid_entry, mshv_bindings::mshv_user_mem_region as MemoryRegion,
-    mshv_bindings::msr_entry, mshv_bindings::AllVpStateComponents, mshv_bindings::CpuId,
-    mshv_bindings::DebugRegisters, mshv_bindings::FloatingPointUnit,
-    mshv_bindings::LapicState as MshvLapicState, mshv_bindings::MiscRegs as MiscRegisters,
-    mshv_bindings::MsrList, mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
+    mshv_bindings::AllVpStateComponents, mshv_bindings::CpuId, mshv_bindings::DebugRegisters,
+    mshv_bindings::FloatingPointUnit, mshv_bindings::LapicState as MshvLapicState,
+    mshv_bindings::MiscRegs as MiscRegisters, mshv_bindings::MsrList,
+    mshv_bindings::Msrs as MsrEntries, mshv_bindings::Msrs,
     mshv_bindings::SegmentRegister as MshvSegmentRegister,
     mshv_bindings::SpecialRegisters as MshvSpecialRegisters,
     mshv_bindings::StandardRegisters as MshvStandardRegisters, mshv_bindings::SuspendRegisters,
     mshv_bindings::TableRegister, mshv_bindings::VcpuEvents, mshv_bindings::XSave as Xsave,
-    mshv_bindings::Xcrs as ExtendedControlRegisters,
+    mshv_bindings::Xcrs as ExtendedControlRegisters, mshv_bindings::hv_cpuid_entry,
+    mshv_bindings::mshv_user_mem_region as MemoryRegion, mshv_bindings::msr_entry,
 };
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -59,67 +60,19 @@ impl fmt::Display for VcpuMshvState {
             msr_entries[i][1] = entry.data;
             msr_entries[i][0] = entry.index as u64;
         }
-        write!(f, "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- DBG: {:?} --- VP States: {:?}",
-                msr_entries.len(),
-                msr_entries,
-                self.vcpu_events,
-                self.regs,
-                self.sregs,
-                self.fpu,
-                self.xcrs,
-                self.dbg,
-                self.vp_states,
+        write!(
+            f,
+            "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- DBG: {:?} --- VP States: {:?}",
+            msr_entries.len(),
+            msr_entries,
+            self.vcpu_events,
+            self.regs,
+            self.sregs,
+            self.fpu,
+            self.xcrs,
+            self.dbg,
+            self.vp_states,
         )
-    }
-}
-
-impl From<StandardRegisters> for MshvStandardRegisters {
-    fn from(regs: StandardRegisters) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
-    }
-}
-
-impl From<MshvStandardRegisters> for StandardRegisters {
-    fn from(regs: MshvStandardRegisters) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
     }
 }
 

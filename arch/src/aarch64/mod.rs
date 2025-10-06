@@ -6,20 +6,21 @@
 pub mod fdt;
 /// Layout for this aarch64 system.
 pub mod layout;
-/// Module for system registers definition
-pub mod regs;
 /// Module for loading UEFI binary.
 pub mod uefi;
 
-pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
-use hypervisor::arch::aarch64::gic::Vgic;
-use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+
+use hypervisor::arch::aarch64::gic::Vgic;
+use hypervisor::arch::aarch64::regs::MPIDR_EL1;
+use log::{Level, log_enabled};
 use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
+
+pub use self::fdt::DeviceInfoForFdt;
+use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
 
 pub const _NSIG: i32 = 65;
 
@@ -31,8 +32,8 @@ pub enum Error {
     SetupFdt,
 
     /// Failed to write FDT to memory.
-    #[error("Failed to write FDT to memory: {0}")]
-    WriteFdtToMemory(fdt::Error),
+    #[error("Failed to write FDT to memory")]
+    WriteFdtToMemory(#[source] fdt::Error),
 
     /// Failed to create a GIC.
     #[error("Failed to create a GIC")]
@@ -43,22 +44,16 @@ pub enum Error {
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
-    #[error("Error configuring the general purpose registers: {0}")]
-    RegsConfiguration(hypervisor::HypervisorCpuError),
+    #[error("Error configuring the general purpose registers")]
+    RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
 
     /// Error configuring the MPIDR register
-    #[error("Error configuring the MPIDR register: {0}")]
-    VcpuRegMpidr(hypervisor::HypervisorCpuError),
+    #[error("Error configuring the MPIDR register")]
+    VcpuRegMpidr(#[source] hypervisor::HypervisorCpuError),
 
     /// Error initializing PMU for vcpu
     #[error("Error initializing PMU for vcpu")]
     VcpuInitPmu,
-}
-
-impl From<Error> for super::Error {
-    fn from(e: Error) -> super::Error {
-        super::Error::PlatformSpecific(e)
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -72,7 +67,7 @@ pub struct EntryPoint {
 /// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
 ) -> super::Result<u64> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
@@ -84,9 +79,7 @@ pub fn configure_vcpu(
         .map_err(Error::RegsConfiguration)?;
     }
 
-    let mpidr = vcpu
-        .get_sys_reg(regs::MPIDR_EL1)
-        .map_err(Error::VcpuRegMpidr)?;
+    let mpidr = vcpu.get_sys_reg(MPIDR_EL1).map_err(Error::VcpuRegMpidr)?;
     Ok(mpidr)
 }
 
@@ -133,7 +126,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: Vec<u64>,
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u16, u16, u16, u16)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
     pci_space_info: &[PciSpaceInfo],

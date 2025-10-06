@@ -5,53 +5,57 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
-use once_cell::sync::Lazy;
-use rand::{thread_rng, Rng};
-use serde_json::Value;
-use ssh2::Session;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io;
 use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
-use std::sync::Mutex;
-use std::thread;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
-use std::{fmt, fs};
+use std::{env, fmt, fs, io, thread};
+
+use rand::{Rng, rng};
+pub use regex::Regex;
+use serde_json::Value;
+use ssh2::Session;
+use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WaitTimeoutError {
+    #[error("timeout")]
     Timedout,
+    #[error("exit status indicates failure")]
     ExitStatus,
-    General(std::io::Error),
+    #[error("general failure")]
+    General(#[source] std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Parsing(std::num::ParseIntError),
-    SshCommand(SshCommandError),
-    WaitForBoot(WaitForBootError),
-    EthrLogFile(std::io::Error),
+    #[error("Failed to parse")]
+    Parsing(#[source] std::num::ParseIntError),
+    #[error("ssh command failed")]
+    SshCommand(#[from] SshCommandError),
+    #[error("waiting for boot failed")]
+    WaitForBoot(#[source] WaitForBootError),
+    #[error("reading log file failed")]
+    EthrLogFile(#[source] std::io::Error),
+    #[error("parsing log file failed")]
     EthrLogParse,
+    #[error("parsing fio output failed")]
     FioOutputParse,
+    #[error("parsing iperf3 output failed")]
     Iperf3Parse,
-    Spawn(std::io::Error),
-    WaitTimeout(WaitTimeoutError),
-}
-
-impl From<SshCommandError> for Error {
-    fn from(e: SshCommandError) -> Self {
-        Self::SshCommand(e)
-    }
+    #[error("spawning process failed")]
+    Spawn(#[source] std::io::Error),
+    #[error("waiting for timeout failed")]
+    WaitTimeout(#[source] WaitTimeoutError),
 }
 
 pub struct GuestNetworkConfig {
@@ -71,13 +75,18 @@ pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
 pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WaitForBootError {
-    EpollWait(std::io::Error),
-    Listen(std::io::Error),
+    #[error("Failed to wait for epoll")]
+    EpollWait(#[source] std::io::Error),
+    #[error("Failed to listen for boot")]
+    Listen(#[source] std::io::Error),
+    #[error("Epoll wait timeout")]
     EpollWaitTimeout,
+    #[error("wrong guest address")]
     WrongGuestAddr,
-    Accept(std::io::Error),
+    #[error("Failed to accept a TCP request")]
+    Accept(#[source] std::io::Error),
 }
 
 impl GuestNetworkConfig {
@@ -474,13 +483,14 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
 
         match fs::copy(&from, &to) {
             Err(e) => {
-                if let Some(errno) = e.raw_os_error() {
-                    if errno == libc::ENOSPC {
-                        eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
-                        thread::sleep(std::time::Duration::new(60, 0));
-                        continue;
-                    }
+                if let Some(errno) = e.raw_os_error()
+                    && errno == libc::ENOSPC
+                {
+                    eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
+                    thread::sleep(std::time::Duration::new(60, 0));
+                    continue;
                 }
+
                 return Err(e);
             }
             Ok(i) => return Ok(i),
@@ -536,21 +546,34 @@ pub struct PasswordAuth {
 pub const DEFAULT_SSH_RETRIES: u8 = 6;
 pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum SshCommandError {
-    Connection(std::io::Error),
-    Handshake(ssh2::Error),
-    Authentication(ssh2::Error),
-    ChannelSession(ssh2::Error),
-    Command(ssh2::Error),
-    ExitStatus(ssh2::Error),
+    #[error("ssh connection failed")]
+    Connection(#[source] std::io::Error),
+    #[error("ssh handshake failed")]
+    Handshake(#[source] ssh2::Error),
+    #[error("ssh authentication failed")]
+    Authentication(#[source] ssh2::Error),
+    #[error("ssh channel session failed")]
+    ChannelSession(#[source] ssh2::Error),
+    #[error("ssh command failed")]
+    Command(#[source] ssh2::Error),
+    #[error("retrieving exit status from ssh command failed")]
+    ExitStatus(#[source] ssh2::Error),
+    #[error("the exit code indicates failure: {0}")]
     NonZeroExitStatus(i32),
-    FileRead(std::io::Error),
-    FileMetadata(std::io::Error),
-    ScpSend(ssh2::Error),
-    WriteAll(std::io::Error),
-    SendEof(ssh2::Error),
-    WaitEof(ssh2::Error),
+    #[error("failed to read file")]
+    FileRead(#[source] std::io::Error),
+    #[error("failed to read metadata")]
+    FileMetadata(#[source] std::io::Error),
+    #[error("scp send failed")]
+    ScpSend(#[source] ssh2::Error),
+    #[error("scp write failed")]
+    WriteAll(#[source] std::io::Error),
+    #[error("scp send EOF failed")]
+    SendEof(#[source] ssh2::Error),
+    #[error("scp wait EOF failed")]
+    WaitEof(#[source] ssh2::Error),
 }
 
 fn scp_to_guest_with_auth(
@@ -810,14 +833,18 @@ pub fn kill_child(child: &mut Child) {
     }
 
     // The timeout period elapsed without the child exiting
-    if child.wait_timeout(Duration::new(5, 0)).unwrap().is_none() {
+    if child.wait_timeout(Duration::new(10, 0)).unwrap().is_none() {
         let _ = child.kill();
+        let rust_flags = env::var("RUSTFLAGS").unwrap_or_default();
+        if rust_flags.contains("-Cinstrument-coverage") {
+            panic!("Wait child timeout, please check the reason.")
+        }
     }
 }
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
-static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
+static NEXT_VM_ID: LazyLock<Mutex<u8>> = LazyLock::new(|| Mutex::new(1));
 
 pub struct Guest {
     pub tmp_dir: TempDir,
@@ -1079,24 +1106,6 @@ impl Guest {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub fn check_sgx_support(&self) -> Result<(), Error> {
-        self.ssh_command(
-            "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
-                    Software Guard Extensions supported = true'",
-        )?;
-        self.ssh_command(
-            "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
-                    SGX launch config supported = true'",
-        )?;
-        self.ssh_command(
-            "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
-                    supported = true'",
-        )?;
-
-        Ok(())
-    }
-
     pub fn get_pci_bridge_class(&self) -> Result<String, Error> {
         Ok(self
             .ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")?
@@ -1130,12 +1139,11 @@ impl Guest {
         let vendors: Vec<&str> = vendors.split('\n').collect();
 
         for (index, d_id) in devices.iter().enumerate() {
-            if *d_id == device_id {
-                if let Some(v_id) = vendors.get(index) {
-                    if *v_id == vendor_id {
-                        return Ok(true);
-                    }
-                }
+            if *d_id == device_id
+                && let Some(v_id) = vendors.get(index)
+                && *v_id == vendor_id
+            {
+                return Ok(true);
             }
         }
 
@@ -1154,10 +1162,12 @@ impl Guest {
         thread::sleep(std::time::Duration::new(10, 0));
 
         // Write something to vsock from the host
-        assert!(exec_host_command_status(&format!(
-            "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
+            ))
+            .success()
+        );
 
         // Wait for the thread to terminate.
         listen_socat.join().unwrap();
@@ -1170,7 +1180,11 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        assert!(self.ssh_command("nvidia-smi").unwrap().contains("Tesla T4"));
+        assert!(
+            self.ssh_command("nvidia-smi")
+                .unwrap()
+                .contains("NVIDIA L40S")
+        );
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
@@ -1367,11 +1381,9 @@ impl<'a> GuestCommand<'a> {
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
-                Err(std::io::Error::other(
-                    format!(
-                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
-                    ),
-                ))
+                Err(std::io::Error::other(format!(
+                    "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
+                )))
             }
         } else {
             // The caller should call .wait() on the returned child
@@ -1827,10 +1839,10 @@ pub fn run_block_io_without_cache() -> bool {
 }
 
 pub fn generate_host_data() -> String {
-    let mut rng = thread_rng();
+    let mut rng = rng();
     #[allow(clippy::format_collect)]
     let hex_string: String = (0..64)
-        .map(|_| rng.gen_range(0..=15))
+        .map(|_| rng.random_range(0..=15))
         .map(|num| format!("{num:x}"))
         .collect();
 
@@ -1866,4 +1878,27 @@ pub fn extend_guest_cmd<'a>(
     }
 
     cmd
+}
+// parse the bar address from the output of `lspci -vv`
+
+pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) -> Option<String> {
+    let devices: Vec<&str> = output.split("\n\n").collect();
+
+    for device in devices {
+        if device.contains(device_desc) {
+            for line in device.lines() {
+                let line = line.trim();
+                let line_start_str = format!("Region {bar_index}: Memory at");
+                // for example: Region 2: Memory at 200000000 (64-bit, non-prefetchable) [size=1M]
+                if line.starts_with(line_start_str.as_str()) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 4 {
+                        let addr_str = parts[4];
+                        return Some(String::from(addr_str));
+                    }
+                }
+            }
+        }
+    }
+    None
 }

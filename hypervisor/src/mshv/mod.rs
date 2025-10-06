@@ -3,63 +3,82 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-use crate::arch::emulator::PlatformEmulator;
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86::emulator::Emulator;
-use crate::cpu;
-use crate::hypervisor;
-use crate::mshv::emulator::MshvEmulatorContext;
-use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::HypervisorType;
-use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
 use std::collections::HashMap;
+#[cfg(feature = "sev_snp")]
+use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
+
+#[cfg(feature = "sev_snp")]
+use arc_swap::ArcSwap;
+use mshv_bindings::*;
+#[cfg(target_arch = "x86_64")]
+use mshv_ioctls::InterruptRequest;
+use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
-mod bitmap;
-#[cfg(feature = "sev_snp")]
-use bitmap::SimpleAtomicBitmap;
+use vm_memory::bitmap::AtomicBitmap;
+
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ, AARCH64_PMU_IRQ,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::arch::emulator::PlatformEmulator;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::emulator::Emulator;
+#[cfg(target_arch = "aarch64")]
+use crate::mshv::aarch64::emulator;
+use crate::mshv::emulator::MshvEmulatorContext;
+use crate::vm::{self, InterruptSourceConfig, VmOps};
+use crate::{HypervisorType, cpu, hypervisor, vec_with_array_field};
 
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
-    USER_MEMORY_REGION_WRITE,
-};
+// aarch64 dependencies
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64;
+use std::os::unix::io::AsRawFd;
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::VcpuMshvState;
+#[cfg(target_arch = "aarch64")]
+use aarch64::gic::{BASE_SPI_IRQ, MshvGicV2M};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]
 use snp_constants::*;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{emulator, VcpuMshvState};
-
-#[cfg(feature = "sev_snp")]
-const ONE_GB: usize = 1024 * 1024 * 1024;
-
+pub use x86_64::{VcpuMshvState, emulator};
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
+};
+
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
+use crate::{
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, USER_MEMORY_REGION_ADJUSTABLE,
+    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    UserMemoryRegion,
 };
 
 pub const PAGE_SHIFT: usize = 12;
@@ -159,6 +178,23 @@ impl From<CpuState> for VcpuMshvState {
     }
 }
 
+impl From<mshv_bindings::StandardRegisters> for crate::StandardRegisters {
+    fn from(s: mshv_bindings::StandardRegisters) -> Self {
+        crate::StandardRegisters::Mshv(s)
+    }
+}
+
+impl From<crate::StandardRegisters> for mshv_bindings::StandardRegisters {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
 impl From<mshv_user_irq_entry> for IrqRoutingEntry {
     fn from(s: mshv_user_irq_entry) -> Self {
         IrqRoutingEntry::Mshv(s)
@@ -172,6 +208,44 @@ impl From<IrqRoutingEntry> for mshv_user_irq_entry {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("IrqRoutingEntry is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvRegList> for crate::RegList {
+    fn from(s: mshv_bindings::MshvRegList) -> Self {
+        crate::RegList::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::RegList> for mshv_bindings::MshvRegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvVcpuInit> for crate::VcpuInit {
+    fn from(s: mshv_bindings::MshvVcpuInit) -> Self {
+        crate::VcpuInit::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for mshv_bindings::MshvVcpuInit {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
         }
     }
 }
@@ -191,10 +265,78 @@ impl MshvHypervisor {
     ///
     /// Retrieve the list of MSRs supported by MSHV.
     ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+    fn get_msr_list(&self) -> hypervisor::Result<Vec<u32>> {
         self.mshv
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+    }
+
+    fn create_vm_with_type_and_memory_int(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: Option<u64>,
+    ) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+        let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
+            Ok(vm_type) => vm_type,
+            Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
+        };
+        let fd: VmFd;
+        loop {
+            match self.mshv.create_vm_with_type(mshv_vm_type) {
+                Ok(res) => fd = res,
+                Err(e) => {
+                    if e.errno() == libc::EINTR {
+                        // If the error returned is EINTR, which means the
+                        // ioctl has been interrupted, we have to retry as
+                        // this can't be considered as a regular error.
+                        continue;
+                    } else {
+                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
+                    }
+                }
+            }
+            break;
+        }
+
+        let vm_fd = Arc::new(fd);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let msr_list = self.get_msr_list()?;
+            let mut msrs: Vec<MsrEntry> = vec![
+                MsrEntry {
+                    ..Default::default()
+                };
+                msr_list.len()
+            ];
+            for (pos, index) in msr_list.iter().enumerate() {
+                msrs[pos].index = *index;
+            }
+
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                msrs,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                #[cfg(feature = "sev_snp")]
+                host_access_pages: ArcSwap::new(
+                    AtomicBitmap::new(
+                        _mem_size.unwrap_or_default() as usize,
+                        NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
+                    )
+                    .into(),
+                ),
+            }))
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+            }))
+        }
     }
 }
 
@@ -223,8 +365,8 @@ impl MshvHypervisor {
 /// # Examples
 ///
 /// ```
-/// # use hypervisor::mshv::MshvHypervisor;
-/// # use std::sync::Arc;
+/// use hypervisor::mshv::MshvHypervisor;
+/// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
@@ -236,126 +378,36 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     fn hypervisor_type(&self) -> HypervisorType {
         HypervisorType::Mshv
     }
-
-    fn create_vm_with_type(
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hypervisor::kvm::KvmHypervisor;
+    /// use hypervisor::kvm::KvmVm;
+    /// let hypervisor = KvmHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm_with_type(0, 512*1024*1024).unwrap();
+    /// ```
+    fn create_vm_with_type_and_memory(
         &self,
         vm_type: u64,
         #[cfg(feature = "sev_snp")] _mem_size: u64,
-    ) -> hypervisor::Result<Arc<dyn crate::Vm>> {
-        let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
-            Ok(vm_type) => vm_type,
-            Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
-        };
-        let fd: VmFd;
-        loop {
-            match self.mshv.create_vm_with_type(mshv_vm_type) {
-                Ok(res) => fd = res,
-                Err(e) => {
-                    if e.errno() == libc::EINTR {
-                        // If the error returned is EINTR, which means the
-                        // ioctl has been interrupted, we have to retry as
-                        // this can't be considered as a regular error.
-                        continue;
-                    } else {
-                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
-                    }
-                }
-            }
-            break;
-        }
-
-        // Set additional partition property for SEV-SNP partition.
-        #[cfg(target_arch = "x86_64")]
-        if mshv_vm_type == VmType::Snp {
-            let snp_policy = snp::get_default_snp_guest_policy();
-            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
-            // SAFETY: access union fields
-            unsafe {
-                debug!(
-                    "Setting the partition isolation policy as: 0x{:x}",
-                    snp_policy.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
-                    snp_policy.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                debug!(
-                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
-                    vmgexit_offloads.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
-                    vmgexit_offloads.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-            }
-        }
-
-        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
-        // send a fault to the guest if it tries to access it. It is possible
-        // to override this behavior with a more suitable option i.e., ignore
-        // writes from the guest and return zero in attempt to read unimplemented
-        // MSR.
-        #[cfg(target_arch = "x86_64")]
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
-            hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
-        // Always create a frozen partition
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
-            1u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
-        let vm_fd = Arc::new(fd);
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            let msr_list = self.get_msr_list()?;
-            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                num_msrs
-            ];
-            let indices = msr_list.as_slice();
-            for (pos, index) in indices.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        self.create_vm_with_type_and_memory_int(
+            vm_type,
             #[cfg(feature = "sev_snp")]
-            let mem_size_for_bitmap = if _mem_size as usize > 3 * ONE_GB {
-                _mem_size as usize + ONE_GB
-            } else {
-                _mem_size as usize
-            };
+            Some(_mem_size),
+        )
+    }
 
-            Ok(Arc::new(MshvVm {
-                fd: vm_fd,
-                msrs,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                #[cfg(feature = "sev_snp")]
-                sev_snp_enabled: mshv_vm_type == VmType::Snp,
-                #[cfg(feature = "sev_snp")]
-                host_access_pages: Arc::new(SimpleAtomicBitmap::new_with_bytes(
-                    mem_size_for_bitmap,
-                    HV_PAGE_SIZE,
-                )),
-            }))
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            Ok(Arc::new(MshvVm {
-                fd: vm_fd,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-            }))
-        }
+    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+        self.create_vm_with_type_and_memory_int(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            None,
+        )
     }
 
     /// Create a mshv vm object and return the object as Vm trait object
@@ -364,21 +416,14 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     /// ```
     /// # extern crate hypervisor;
-    /// # use hypervisor::mshv::MshvHypervisor;
+    /// use hypervisor::mshv::MshvHypervisor;
     /// use hypervisor::mshv::MshvVm;
     /// let hypervisor = MshvHypervisor::new().unwrap();
     /// let vm = hypervisor.create_vm().unwrap();
     /// ```
-    fn create_vm(
-        &self,
-        #[cfg(feature = "sev_snp")] mem_size: u64,
-    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let vm_type = 0;
-        self.create_vm_with_type(
-            vm_type,
-            #[cfg(feature = "sev_snp")]
-            mem_size,
-        )
+        self.create_vm_with_type(vm_type)
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -407,9 +452,41 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     fn get_guest_debug_hw_bps(&self) -> usize {
         0
     }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Retrieve AArch64 host maximum IPA size supported by MSHV.
+    ///
+    fn get_host_ipa_limit(&self) -> i32 {
+        let host_ipa = self.mshv.get_host_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH,
+        );
+
+        match host_ipa {
+            Ok(ipa) => ipa.try_into().unwrap(),
+            Err(e) => {
+                panic!("Failed to get host IPA limit: {e:?}");
+            }
+        }
+    }
 }
 
+#[cfg(feature = "sev_snp")]
+struct Ghcb(*mut svm_ghcb_base);
+
+#[cfg(feature = "sev_snp")]
+// SAFETY: struct is based on GHCB page in the hypervisor,
+// safe to Send across threads
+unsafe impl Send for Ghcb {}
+
+#[cfg(feature = "sev_snp")]
+// SAFETY: struct is based on GHCB page in the hypervisor,
+// safe to Sync across threads as this is only required for Vcpu trait
+// functionally not used anyway
+unsafe impl Sync for Ghcb {}
+
 /// Vcpu struct for Microsoft Hypervisor
+#[allow(dead_code)]
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
@@ -420,7 +497,9 @@ pub struct MshvVcpu {
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
-    host_access_pages: Arc<SimpleAtomicBitmap>,
+    ghcb: Option<Ghcb>,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: ArcSwap<AtomicBitmap>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -428,19 +507,24 @@ pub struct MshvVcpu {
 /// # Examples
 ///
 /// ```
-/// # use hypervisor::mshv::MshvHypervisor;
-/// # use std::sync::Arc;
+/// use hypervisor::mshv::MshvHypervisor;
+/// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
-    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    fn create_standard_regs(&self) -> crate::StandardRegisters {
+        mshv_bindings::StandardRegisters::default().into()
+    }
     ///
     /// Returns the vCPU general purpose registers.
     ///
-    fn get_regs(&self) -> cpu::Result<crate::arch::x86::StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         Ok(self
             .fd
             .get_regs()
@@ -448,11 +532,10 @@ impl cpu::Vcpu for MshvVcpu {
             .into())
     }
 
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
-    fn set_regs(&self, regs: &crate::arch::x86::StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, regs: &crate::StandardRegisters) -> cpu::Result<()> {
         let regs = (*regs).into();
         self.fd
             .set_regs(&regs)
@@ -589,18 +672,7 @@ impl cpu::Vcpu for MshvVcpu {
                      */
                     match port {
                         0x402 | 0x510 | 0x511 | 0x514 => {
-                            let insn_len = info.header.instruction_length() as u64;
-
-                            /* Advance RIP and update RAX */
-                            let arr_reg_name_value = [
-                                (
-                                    hv_register_name_HV_X64_REGISTER_RIP,
-                                    info.header.rip + insn_len,
-                                ),
-                                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                            ];
-                            set_registers_64!(self.fd, arr_reg_name_value)
-                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                            self.advance_rip_update_rax(&info, ret_rax)?;
                             return Ok(cpu::VmExit::Ignore);
                         }
                         _ => {}
@@ -638,18 +710,39 @@ impl cpu::Vcpu for MshvVcpu {
                         ret_rax = eax as u64;
                     }
 
-                    let insn_len = info.header.instruction_length() as u64;
+                    self.advance_rip_update_rax(&info, ret_rax)?;
+                    Ok(cpu::VmExit::Ignore)
+                }
+                #[cfg(target_arch = "aarch64")]
+                hv_message_type_HVMSG_UNMAPPED_GPA => {
+                    let info = x.to_memory_info().unwrap();
+                    let gva = info.guest_virtual_address;
+                    let gpa = info.guest_physical_address;
 
-                    /* Advance RIP and update RAX */
-                    let arr_reg_name_value = [
-                        (
-                            hv_register_name_HV_X64_REGISTER_RIP,
-                            info.header.rip + insn_len,
-                        ),
-                        (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                    ];
-                    set_registers_64!(self.fd, arr_reg_name_value)
-                        .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                    debug!("Unmapped GPA exit: GVA {:x} GPA {:x}", gva, gpa);
+
+                    let context = MshvEmulatorContext {
+                        vcpu: self,
+                        map: (gva, gpa),
+                        syndrome: info.syndrome,
+                        instruction_bytes: info.instruction_bytes,
+                        instruction_byte_count: info.instruction_byte_count,
+                        // SAFETY: Accessing a union element from bindgen generated bindings.
+                        interruption_pending: unsafe {
+                            info.header
+                                .execution_state
+                                .__bindgen_anon_1
+                                .interruption_pending()
+                                != 0
+                        },
+                        pc: info.header.pc,
+                    };
+
+                    let mut emulator = emulator::Emulator::new(context);
+                    emulator
+                        .emulate()
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -707,8 +800,11 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
-                    self.host_access_pages
-                        .reset_bits_range(gfn_start as usize, gfn_count as usize);
+                    self.host_access_pages.rcu(|bitmap| {
+                        let bm = bitmap.clone();
+                        bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
+                        bm
+                    });
 
                     debug!(
                         "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
@@ -744,6 +840,12 @@ impl cpu::Vcpu for MshvVcpu {
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
                             "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
                         )))?;
+                    // Guest is revoking the shared access, so we need to update the bitmap
+                    self.host_access_pages.rcu(|_bitmap| {
+                        let bm = self.host_access_pages.load().as_ref().clone();
+                        bm.reset_addr_range(gpa_start as usize, gfn_count as usize);
+                        bm
+                    });
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -801,6 +903,10 @@ impl cpu::Vcpu for MshvVcpu {
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
+                    // Safe to use unwrap, for sev_snp guest we already have the
+                    // GHCB pointer wrapped in the option, otherwise this place is not reached.
+                    let ghcb = self.ghcb.as_ref().unwrap().0;
+
                     // SAFETY: Accessing a union element from bindgen generated bindings.
                     let ghcb_op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u32 };
                     // Sanity check on the header fields before handling other operations.
@@ -900,9 +1006,7 @@ impl cpu::Vcpu for MshvVcpu {
                         GHCB_INFO_NORMAL => {
                             let exit_code =
                                 info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
-                            // SAFETY: Accessing a union element from bindgen generated bindings.
-                            let pfn = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
-                            let ghcb_gpa = pfn << GHCB_INFO_BIT_WIDTH;
+
                             match exit_code {
                                 SVM_EXITCODE_HV_DOORBELL_PAGE => {
                                     let exit_info1 =
@@ -911,10 +1015,11 @@ impl cpu::Vcpu for MshvVcpu {
                                         SVM_NAE_HV_DOORBELL_PAGE_GET_PREFERRED => {
                                             // Hypervisor does not have any preference for doorbell GPA.
                                             let preferred_doorbell_gpa: u64 = 0xFFFFFFFFFFFFFFFF;
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &preferred_doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(
+                                                ghcb,
+                                                exit_info2,
+                                                preferred_doorbell_gpa
+                                            );
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_SET => {
                                             let exit_info2 = info
@@ -941,13 +1046,10 @@ impl cpu::Vcpu for MshvVcpu {
                                                 cpu::HypervisorCpuError::SetRegister(e.into())
                                             })?;
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &exit_info2.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, exit_info2);
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_QUERY => {
                                             let mut reg_assocs = [ hv_register_assoc {
@@ -958,19 +1060,13 @@ impl cpu::Vcpu for MshvVcpu {
                                             // SAFETY: Accessing a union element from bindgen generated bindings.
                                             let doorbell_gpa = unsafe { reg_assocs[0].value.reg64 };
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, doorbell_gpa);
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &[0; 8],
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
                                         }
                                         _ => {
                                             panic!(
@@ -1003,9 +1099,8 @@ impl cpu::Vcpu for MshvVcpu {
                                     let is_write =
                                         // SAFETY: Accessing a union element from bindgen generated bindings.
                                         unsafe { port_info.__bindgen_anon_1.access_type() == 0 };
-
-                                    let mut data = [0; 8];
-                                    self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
+                                    // SAFETY: Accessing the field from a mapped address
+                                    let mut data = unsafe { (*ghcb).rax.to_le_bytes() };
 
                                     if is_write {
                                         if let Some(vm_ops) = &self.vm_ops {
@@ -1021,17 +1116,15 @@ impl cpu::Vcpu for MshvVcpu {
                                                     cpu::HypervisorCpuError::RunVcpu(e.into())
                                                 })?;
                                         }
-
-                                        self.gpa_write(ghcb_gpa + GHCB_RAX_OFFSET, &data)?;
+                                        set_svm_field_u64_ptr!(ghcb, rax, u64::from_le_bytes(data));
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_READ => {
                                     let src_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let dst_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1044,16 +1137,18 @@ impl cpu::Vcpu for MshvVcpu {
                                             cpu::HypervisorCpuError::RunVcpu(e.into())
                                         })?;
                                     }
-
-                                    self.gpa_write(dst_gpa, &data)?;
+                                    // Copy the data to the shared buffer of the GHCB page
+                                    let mut buffer_data = [0; 8];
+                                    buffer_data[..data_len].copy_from_slice(&data[..data_len]);
+                                    // SAFETY: Updating the value of mapped area
+                                    unsafe { (*ghcb).shared[0] = u64::from_le_bytes(buffer_data) };
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_WRITE => {
                                     let dst_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let src_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1061,7 +1156,10 @@ impl cpu::Vcpu for MshvVcpu {
                                     assert!(data_len <= 0x8);
 
                                     let mut data = vec![0; data_len];
-                                    self.gpa_read(src_gpa, &mut data)?;
+                                    // SAFETY: Accessing data from a mapped address
+                                    let bytes_shared_ghcb =
+                                        unsafe { (*ghcb).shared[0].to_le_bytes() };
+                                    data.copy_from_slice(&bytes_shared_ghcb[..data_len]);
 
                                     if let Some(vm_ops) = &self.vm_ops {
                                         vm_ops.mmio_write(dst_gpa, &data).map_err(|e| {
@@ -1070,7 +1168,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_SNP_GUEST_REQUEST
                                 | SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
@@ -1079,15 +1177,16 @@ impl cpu::Vcpu for MshvVcpu {
                                         // We don't support extended guest request, so we just write empty data.
                                         // This matches the behavior of KVM in Linux 6.11.
 
-                                        // Read RAX & RBX from the GHCB.
-                                        let mut data = [0; 8];
-                                        self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
-                                        let data_gpa = u64::from_le_bytes(data);
-                                        self.gpa_read(ghcb_gpa + GHCB_RBX_OFFSET, &mut data)?;
-                                        let data_npages = u64::from_le_bytes(data);
+                                        // Read RBX from the GHCB.
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_gpa = unsafe { (*ghcb).rax };
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_npages = unsafe { (*ghcb).rbx };
 
                                         if data_npages > 0 {
                                             // The certificates are terminated by 24 zero bytes.
+                                            // TODO: Need to check if data_gpa is the address of the shared buffer in the GHCB page
+                                            // in that case we should clear the shared buffer(24 bytes)
                                             self.gpa_write(data_gpa, &[0; 24])?;
                                         }
                                     }
@@ -1108,7 +1207,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         req_gpa, rsp_gpa
                                     );
 
-                                    self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET, &[0; 8])?;
+                                    set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
                                 }
                                 SVM_EXITCODE_SNP_AP_CREATION => {
                                     let vmsa_gpa =
@@ -1129,7 +1228,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 _ => {
                                     panic!("GHCB_INFO_NORMAL: Unhandled exit code: {exit_code:0x}")
@@ -1158,43 +1257,86 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
-        unimplemented!()
+    fn init_pmu(&self, _irq: u32) -> cpu::Result<()> {
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn has_pmu_support(&self) -> bool {
-        unimplemented!()
+        true
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
-        unimplemented!()
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_PSTATE,
+            regs::PSTATE_FAULT_BITS_64,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        if cpu_id == 0 {
+            let arr_reg_name_value = [
+                (hv_register_name_HV_ARM64_REGISTER_PC, boot_ip),
+                (hv_register_name_HV_ARM64_REGISTER_X0, fdt_start),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+        let mshv_reg = self.sys_reg_to_mshv_reg(sys_reg)?;
+
+        let mut reg_assocs = [hv_register_assoc {
+            name: mshv_reg,
+            ..Default::default()
+        }];
+        self.fd
+            .get_reg(&mut reg_assocs)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+
+        // SAFETY: Accessing a union element from bindgen generated definition.
+        let res = unsafe { reg_assocs[0].value.reg64 };
+        Ok(res)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn get_reg_list(&self, _reg_list: &mut crate::RegList) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
-        unimplemented!()
+    fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
-        unimplemented!()
+    fn vcpu_finalize(&self, _feature: i32) -> cpu::Result<()> {
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
-        unimplemented!()
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        0
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
-        unimplemented!()
+    fn vcpu_set_processor_features(
+        &self,
+        _vm: &Arc<dyn crate::Vm>,
+        _kvi: &mut crate::VcpuInit,
+        _id: u32,
+    ) -> cpu::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        MshvVcpuInit {}.into()
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1304,7 +1446,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state for aarch64 guest.
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, _state: &CpuState) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -1377,7 +1519,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry> {
-        use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+        use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
         [
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
@@ -1420,6 +1562,24 @@ impl cpu::Vcpu for MshvVcpu {
         self.vm_fd
             .request_virtual_interrupt(&cfg)
             .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
+    }
+    ///
+    /// Set the GICR base address for the vcpu.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, gicr_base_addr: u64) -> cpu::Result<()> {
+        debug!(
+            "Setting GICR base address to: {:#x}, for vp_index: {:?}",
+            gicr_base_addr, self.vp_index
+        );
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_GICR_BASE_GPA,
+            gicr_base_addr,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 
@@ -1506,35 +1666,14 @@ impl MshvVcpu {
     /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
     ///
     #[cfg(feature = "sev_snp")]
-    fn clear_swexit_info1(
-        &self,
-        ghcb_gpa: u64,
-    ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn clear_swexit_info1(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Clear the SW_EXIT_INFO1 register to indicate no error
-        self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET, &[0; 4])?;
+        // Safe to use unwrap, for sev_snp guest we already have the
+        // GHCB pointer wrapped in the option, otherwise this place is not reached.
+        let ghcb = self.ghcb.as_ref().unwrap().0;
+        set_svm_field_u64_ptr!(ghcb, exit_info1, 0);
 
         Ok(cpu::VmExit::Ignore)
-    }
-
-    #[cfg(feature = "sev_snp")]
-    fn gpa_read(&self, gpa: u64, data: &mut [u8]) -> cpu::Result<()> {
-        for (gpa, chunk) in (gpa..)
-            .step_by(HV_READ_WRITE_GPA_MAX_SIZE as usize)
-            .zip(data.chunks_mut(HV_READ_WRITE_GPA_MAX_SIZE as usize))
-        {
-            let mut rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
-                base_gpa: gpa,
-                byte_count: chunk.len() as u32,
-                ..Default::default()
-            };
-            self.fd
-                .gpa_read(&mut rw_gpa_arg)
-                .map_err(|e| cpu::HypervisorCpuError::GpaRead(e.into()))?;
-
-            chunk.copy_from_slice(&rw_gpa_arg.data[..chunk.len()]);
-        }
-
-        Ok(())
     }
 
     #[cfg(feature = "sev_snp")]
@@ -1559,6 +1698,51 @@ impl MshvVcpu {
 
         Ok(())
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn advance_rip_update_rax(
+        &self,
+        info: &hv_x64_io_port_intercept_message,
+        ret_rax: u64,
+    ) -> cpu::Result<()> {
+        let insn_len = info.header.instruction_length() as u64;
+        /*
+         * Advance RIP and update RAX
+         * First, try to update the registers using VP register page
+         * which is mapped into user space for faster access.
+         * If the register page is not available, fall back to regular
+         * IOCTL to update the registers.
+         */
+        if let Some(reg_page) = self.fd.get_vp_reg_page() {
+            let vp_reg_page = reg_page.0;
+            set_gp_regs_field_ptr!(vp_reg_page, rax, ret_rax);
+            // SAFETY: access raw pointer to reg page, access union fields
+            unsafe {
+                (*vp_reg_page).__bindgen_anon_1.__bindgen_anon_1.rip = info.header.rip + insn_len;
+                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
+                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_GENERAL;
+            }
+        } else {
+            let arr_reg_name_value = [
+                (
+                    hv_register_name_HV_X64_REGISTER_RIP,
+                    info.header.rip + insn_len,
+                ),
+                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn sys_reg_to_mshv_reg(&self, sys_regs: u32) -> cpu::Result<u32> {
+        match sys_regs {
+            regs::MPIDR_EL1 => Ok(hv_register_name_HV_ARM64_REGISTER_MPIDR_EL1),
+            _ => Err(cpu::HypervisorCpuError::UnsupportedSysReg(sys_regs)),
+        }
+    }
 }
 
 /// Wrapper over Mshv VM ioctls.
@@ -1570,7 +1754,7 @@ pub struct MshvVm {
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
-    host_access_pages: Arc<SimpleAtomicBitmap>,
+    host_access_pages: ArcSwap<AtomicBitmap>,
 }
 
 impl MshvVm {
@@ -1593,9 +1777,9 @@ impl MshvVm {
 /// # Examples
 ///
 /// ```
-/// # extern crate hypervisor;
-/// # use hypervisor::mshv::MshvHypervisor;
-/// # use std::sync::Arc;
+/// extern crate hypervisor;
+/// use hypervisor::mshv::MshvHypervisor;
+/// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
@@ -1655,13 +1839,42 @@ impl vm::Vm for MshvVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+        let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
             .fd
             .create_vcpu(id)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+
+        /* Map the GHCB page to the VMM(root) address space
+         * The map is available after the vcpu creation. This address is mapped
+         * to the overlay ghcb page of the Microsoft Hypervisor, don't have
+         * to worry about the scenario when a guest changes the GHCB mapping.
+         */
+        #[cfg(feature = "sev_snp")]
+        let ghcb = if self.sev_snp_enabled {
+            // SAFETY: Safe to call as VCPU has this map already available upon creation
+            let addr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    HV_PAGE_SIZE,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED,
+                    vcpu_fd.as_raw_fd(),
+                    MSHV_VP_MMAP_OFFSET_GHCB as i64 * libc::sysconf(libc::_SC_PAGE_SIZE),
+                )
+            };
+            if std::ptr::eq(addr, libc::MAP_FAILED) {
+                // No point of continuing, without this mmap VMGEXIT will fail anyway
+                // Return error
+                return Err(vm::HypervisorVmError::MmapToRoot);
+            }
+            Some(Ghcb(addr as *mut svm_ghcb_base))
+        } else {
+            None
+        };
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
@@ -1672,18 +1885,15 @@ impl vm::Vm for MshvVm {
             vm_ops,
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
-            host_access_pages: self.host_access_pages.clone(),
+            ghcb,
+            #[cfg(feature = "sev_snp")]
+            host_access_pages: ArcSwap::new(self.host_access_pages.load().clone()),
         };
         Ok(Arc::new(vcpu))
     }
 
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> vm::Result<()> {
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, _file: File) -> vm::Result<()> {
         Ok(())
     }
 
@@ -1799,7 +2009,7 @@ impl vm::Vm for MshvVm {
 
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
         let mut vfio_dev = mshv_create_device {
-            type_: mshv_device_type_MSHV_DEV_TYPE_VFIO,
+            type_: MSHV_DEV_TYPE_VFIO,
             fd: 0,
             flags: 0,
         };
@@ -1820,9 +2030,20 @@ impl vm::Vm for MshvVm {
                 data: cfg.data,
             }
             .into(),
+            #[cfg(target_arch = "x86_64")]
             _ => {
                 unreachable!()
             }
+            #[cfg(target_arch = "aarch64")]
+            InterruptSourceConfig::LegacyIrq(cfg) => mshv_user_irq_entry {
+                gsi,
+                // In order to get IRQ line we need to add `BASE_SPI_IRQ` to the pin number
+                // as `BASE_SPI_IRQ` is the base SPI interrupt number exposed via FDT to the
+                // guest.
+                data: cfg.pin + BASE_SPI_IRQ,
+                ..Default::default()
+            }
+            .into(),
         }
     }
 
@@ -2022,12 +2243,36 @@ impl vm::Vm for MshvVm {
 
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
-        unimplemented!()
+        let gic_device = MshvGicV2M::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+
+        // Register GICD address with the hypervisor
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GICD_BASE_ADDRESS,
+                gic_device.dist_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+            })?;
+
+        // Register GITS address with the hypervisor
+        self.fd
+            .set_partition_property(
+                // spellchecker:disable-line
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GITS_TRANSLATER_BASE_ADDRESS,
+                gic_device.gits_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+            })?;
+
+        Ok(Arc::new(Mutex::new(gic_device)))
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
-        unimplemented!()
+    fn get_preferred_target(&self, _kvi: &mut crate::VcpuInit) -> vm::Result<()> {
+        Ok(())
     }
 
     /// Pause the VM
@@ -2065,6 +2310,7 @@ impl vm::Vm for MshvVm {
     #[cfg(feature = "sev_snp")]
     fn gain_page_access(&self, gpa: u64, size: u32) -> vm::Result<()> {
         use mshv_ioctls::set_bits;
+        const ONE_GB: usize = 1024 * 1024 * 1024;
 
         if !self.sev_snp_enabled {
             return Ok(());
@@ -2073,8 +2319,23 @@ impl vm::Vm for MshvVm {
         let start_gpfn: u64 = gpa >> PAGE_SHIFT;
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
+        // Enlarge the bitmap if the PFN is greater than the bitmap length
+        if end_gpfn >= self.host_access_pages.load().as_ref().len() as u64 {
+            self.host_access_pages.rcu(|bitmap| {
+                let mut bm = bitmap.as_ref().clone();
+                bm.enlarge(ONE_GB);
+                bm
+            });
+        }
+
         let gpas: Vec<u64> = (start_gpfn..=end_gpfn)
-            .filter(|x| !self.host_access_pages.is_bit_set(*x as usize))
+            .filter(|x| {
+                !self
+                    .host_access_pages
+                    .load()
+                    .as_ref()
+                    .is_bit_set(*x as usize)
+            })
             .map(|x| x << PAGE_SHIFT)
             .collect();
 
@@ -2101,10 +2362,111 @@ impl vm::Vm for MshvVm {
                 .map_err(|e| vm::HypervisorVmError::ModifyGpaHostAccess(e.into()))?;
 
             for acquired_gpa in gpas {
-                self.host_access_pages
-                    .set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
+                self.host_access_pages.rcu(|bitmap| {
+                    let bm = bitmap.clone();
+                    bm.set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
+                    bm
+                });
             }
         }
+
+        Ok(())
+    }
+
+    fn init(&self) -> vm::Result<()> {
+        #[cfg(target_arch = "aarch64")]
+        {
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_LPI_INT_ID_BITS,
+                    0,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set GIC LPI support: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
+                    (AARCH64_ARCH_TIMER_VIRT_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set arch timer interrupt ID: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
+                    (AARCH64_PMU_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set PMU interrupt ID: {}",
+                        e
+                    ))
+                })?;
+        }
+
+        self.fd
+            .initialize()
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Set additional partition property for SEV-SNP partition.
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
+            // SAFETY: access union fields
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                        snp_policy.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    vmgexit_offloads.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                        vmgexit_offloads.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+            }
+        }
+        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
+        // send a fault to the guest if it tries to access it. It is possible
+        // to override this behavior with a more suitable option i.e., ignore
+        // writes from the guest and return zero in attempt to read unimplemented
+        // MSR.
+        #[cfg(target_arch = "x86_64")]
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
+                hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO
+                    as u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Always create a frozen partition
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+                1u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
 
         Ok(())
     }

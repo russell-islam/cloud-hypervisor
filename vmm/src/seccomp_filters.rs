@@ -5,9 +5,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hypervisor::HypervisorType;
+use libc::{
+    BLKIOMIN, BLKIOOPT, BLKPBSZGET, BLKSSZGET, FIOCLEX, FIONBIO, SIOCGIFFLAGS, SIOCGIFHWADDR,
+    SIOCGIFINDEX, SIOCGIFMTU, SIOCSIFADDR, SIOCSIFFLAGS, SIOCSIFHWADDR, SIOCSIFMTU, SIOCSIFNETMASK,
+    TCGETS, TCGETS2, TCSETS, TCSETS2, TIOCGPGRP, TIOCGPTPEER, TIOCGWINSZ, TIOCSCTTY, TIOCSPGRP,
+    TIOCSPTLCK, TUNGETFEATURES, TUNGETIFF, TUNSETIFF, TUNSETOFFLOAD, TUNSETVNETHDRSZ,
+};
+use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
-    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
+    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
+};
+use vhost::vhost_kern::vhost_binding::{
+    VHOST_GET_BACKEND_FEATURES, VHOST_GET_FEATURES, VHOST_SET_BACKEND_FEATURES, VHOST_SET_FEATURES,
+    VHOST_SET_OWNER, VHOST_SET_VRING_ADDR, VHOST_SET_VRING_BASE, VHOST_SET_VRING_CALL,
+    VHOST_SET_VRING_KICK, VHOST_SET_VRING_NUM, VHOST_VDPA_GET_CONFIG, VHOST_VDPA_GET_CONFIG_SIZE,
+    VHOST_VDPA_GET_DEVICE_ID, VHOST_VDPA_GET_IOVA_RANGE, VHOST_VDPA_GET_STATUS,
+    VHOST_VDPA_GET_VRING_NUM, VHOST_VDPA_SET_CONFIG, VHOST_VDPA_SET_CONFIG_CALL,
+    VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
 
 pub enum Thread {
@@ -39,41 +54,6 @@ macro_rules! or {
     ($($x:expr),*) => (vec![$($x),*])
 }
 
-// See include/uapi/asm-generic/ioctls.h in the kernel code.
-const TCGETS: u64 = 0x5401;
-const TCSETS: u64 = 0x5402;
-const TIOCSCTTY: u64 = 0x540E;
-const TIOCGPGRP: u64 = 0x540F;
-const TIOCSPGRP: u64 = 0x5410;
-const TIOCGWINSZ: u64 = 0x5413;
-const TIOCSPTLCK: u64 = 0x4004_5431;
-const TIOCGPTPEER: u64 = 0x5441;
-const FIOCLEX: u64 = 0x5451;
-const FIONBIO: u64 = 0x5421;
-
-// See include/uapi/linux/fs.h in the kernel code.
-const BLKSSZGET: u64 = 0x1268;
-const BLKPBSZGET: u64 = 0x127b;
-const BLKIOMIN: u64 = 0x1278;
-const BLKIOOPT: u64 = 0x1279;
-
-// See include/uapi/linux/if_tun.h in the kernel code.
-const TUNGETIFF: u64 = 0x8004_54d2;
-const TUNSETIFF: u64 = 0x4004_54ca;
-const TUNSETOFFLOAD: u64 = 0x4004_54d0;
-const TUNSETVNETHDRSZ: u64 = 0x4004_54d8;
-const TUNGETFEATURES: u64 = 0x8004_54cf;
-
-// See include/uapi/linux/sockios.h in the kernel code.
-const SIOCGIFFLAGS: u64 = 0x8913;
-const SIOCGIFHWADDR: u64 = 0x8927;
-const SIOCSIFFLAGS: u64 = 0x8914;
-const SIOCSIFADDR: u64 = 0x8916;
-const SIOCGIFMTU: u64 = 0x8921;
-const SIOCSIFMTU: u64 = 0x8922;
-const SIOCSIFHWADDR: u64 = 0x8924;
-const SIOCSIFNETMASK: u64 = 0x891c;
-
 // See include/uapi/linux/vfio.h in the kernel code.
 const VFIO_GET_API_VERSION: u64 = 0x3b64;
 const VFIO_CHECK_EXTENSION: u64 = 0x3b65;
@@ -90,29 +70,6 @@ const VFIO_DEVICE_RESET: u64 = 0x3b6f;
 const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
-
-// See include/uapi/linux/vhost.h in the kernel code
-const VHOST_GET_FEATURES: u64 = 0x8008af00;
-const VHOST_SET_FEATURES: u64 = 0x4008af00;
-const VHOST_SET_OWNER: u64 = 0xaf01;
-const VHOST_SET_VRING_NUM: u64 = 0x4008af10;
-const VHOST_SET_VRING_ADDR: u64 = 0x4028af11;
-const VHOST_SET_VRING_BASE: u64 = 0x4008af12;
-const VHOST_SET_VRING_KICK: u64 = 0x4008af20;
-const VHOST_SET_VRING_CALL: u64 = 0x4008af21;
-const VHOST_SET_BACKEND_FEATURES: u64 = 0x4008af25;
-const VHOST_GET_BACKEND_FEATURES: u64 = 0x8008af26;
-const VHOST_VDPA_GET_DEVICE_ID: u64 = 0x8004af70;
-const VHOST_VDPA_GET_STATUS: u64 = 0x8001af71;
-const VHOST_VDPA_SET_STATUS: u64 = 0x4001af72;
-const VHOST_VDPA_GET_CONFIG: u64 = 0x8008af73;
-const VHOST_VDPA_SET_CONFIG: u64 = 0x4008af74;
-const VHOST_VDPA_SET_VRING_ENABLE: u64 = 0x4008af75;
-const VHOST_VDPA_GET_VRING_NUM: u64 = 0x8002af76;
-const VHOST_VDPA_SET_CONFIG_CALL: u64 = 0x4004af77;
-const VHOST_VDPA_GET_IOVA_RANGE: u64 = 0x8010af78;
-const VHOST_VDPA_GET_CONFIG_SIZE: u64 = 0x8004af79;
-const VHOST_VDPA_SUSPEND: u64 = 0xaf7d;
 
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
@@ -148,12 +105,11 @@ mod kvm {
     pub const KVM_NMI: u64 = 0xae9a;
 }
 
-#[cfg(feature = "kvm")]
-use kvm::*;
-
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
 use hypervisor::mshv::mshv_ioctls::*;
+#[cfg(feature = "kvm")]
+use kvm::*;
 
 #[cfg(feature = "mshv")]
 fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, BackendError> {
@@ -166,6 +122,12 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             MSHV_INITIALIZE_PARTITION()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_GUEST_MEMORY())?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_GET_HOST_PARTITION_PROPERTY()
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_CREATE_VP())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IRQFD())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IOEVENTFD())?],
@@ -173,7 +135,9 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_REGISTERS())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_REGISTERS())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_RUN_VP())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_GET_VP_STATE())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_SET_VP_STATE())?],
         and![Cond::new(
             1,
@@ -194,6 +158,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             MSHV_GET_GPAP_ACCESS_BITMAP()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_VP_TRANSLATE_GVA())?],
+        #[cfg(target_arch = "x86_64")]
         and![Cond::new(
             1,
             ArgLen::Dword,
@@ -285,33 +250,36 @@ fn create_vmm_ioctl_seccomp_rule_common(
     hypervisor_type: HypervisorType,
 ) -> Result<Vec<SeccompRule>, BackendError> {
     let mut common_rules = or![
-        and![Cond::new(1, ArgLen::Dword, Eq, BLKSSZGET)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOMIN)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOOPT)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKSSZGET as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOMIN as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKIOOPT as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFMTU)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFINDEX)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFHWADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFMTU)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPTPEER)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPTLCK)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNGETFEATURES)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETIFF)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETVNETHDRSZ)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS2 as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS2 as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPTPEER as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPTLCK as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNGETFEATURES as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNGETIFF as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETIFF as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETVNETHDRSZ as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GET_API_VERSION)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_CHECK_EXTENSION)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_SET_IOMMU)?],
@@ -332,32 +300,57 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_IOEVENTFD)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_FEATURES)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_FEATURES)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_OWNER)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_NUM)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_ADDR)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_BASE)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_KICK)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_CALL)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_BACKEND_FEATURES)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_BACKEND_FEATURES)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_DEVICE_ID)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_STATUS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_FEATURES())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_FEATURES())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_OWNER())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_NUM())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_ADDR())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_BASE())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_KICK())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_VRING_CALL())?],
         and![Cond::new(
             1,
             ArgLen::Dword,
             Eq,
-            VHOST_VDPA_SET_VRING_ENABLE
+            VHOST_SET_BACKEND_FEATURES()
         )?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_VRING_NUM)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG_CALL)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_IOVA_RANGE)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG_SIZE)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SUSPEND)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_GET_BACKEND_FEATURES()
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_DEVICE_ID())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_STATUS())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG())?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_SET_VRING_ENABLE(),
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_VRING_NUM())?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_SET_CONFIG_CALL()
+        )?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_GET_IOVA_RANGE()
+        )?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            VHOST_VDPA_GET_CONFIG_SIZE()
+        )?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SUSPEND())?],
     ];
 
     let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
@@ -433,19 +426,27 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_ARM_PREFERRED_TARGET: u64 = 0x8020_aeaf;
     const KVM_ARM_VCPU_INIT: u64 = 0x4020_aeae;
     const KVM_SET_GUEST_DEBUG: u64 = 0x4208_ae9b;
+    const KVM_ARM_VCPU_FINALIZE: u64 = 0x4004_aec2;
 
     let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
     let mut arch_rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_PREFERRED_TARGET,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_VCPU_INIT,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GUEST_DEBUG,)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_ARM_VCPU_FINALIZE,)?],
     ];
     arch_rules.extend(common_rules);
 
     Ok(arch_rules)
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+#[cfg(all(target_arch = "riscv64", feature = "kvm"))]
+fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError> {
+    let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
+    Ok(common_rules)
+}
+
+#[cfg(feature = "mshv")]
 fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendError> {
     create_vmm_ioctl_seccomp_rule_common(HypervisorType::Mshv)
 }
@@ -462,14 +463,16 @@ fn create_vmm_ioctl_seccomp_rule(
 }
 
 fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
-    Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO)?]])
+    Ok(or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?]])
 }
 
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
-        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS2 as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS2 as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ as _)?],
     ])
 }
 
@@ -501,9 +504,9 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
 
 fn create_pty_foreground_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSCTTY as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCSPGRP as _)?],
     ])
 }
 
@@ -530,6 +533,7 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_write, vec![]),
         #[cfg(debug_assertions)]
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -655,6 +659,7 @@ fn vmm_thread_rules(
             or![
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
+                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
             ],
         ),
         (libc::SYS_socketpair, vec![]),
@@ -677,6 +682,7 @@ fn vmm_thread_rules(
         (libc::SYS_wait4, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -743,15 +749,16 @@ fn create_vcpu_ioctl_seccomp_rule(
     let mut rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_CONFIG())?],
         and![Cond::new(
             1,
             ArgLen::Dword,
             Eq,
-            VHOST_VDPA_SET_VRING_ENABLE
+            VHOST_VDPA_SET_VRING_ENABLE(),
         )?],
     ];
 
@@ -812,8 +819,8 @@ fn vcpu_thread_rules(
         (libc::SYS_unlinkat, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
-        #[cfg(debug_assertions)]
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -823,6 +830,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_create1, vec![]),
@@ -848,6 +856,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -885,6 +894,7 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -900,6 +910,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_write, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 

@@ -2,47 +2,55 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
-use crate::AsyncAdaptor;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::os::fd::AsRawFd;
+
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::AsyncAdaptor;
+use crate::async_io::{
+    AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+};
+use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
+
 pub struct QcowDiskSync {
-    qcow_file: Arc<Mutex<QcowFile>>,
+    qcow_file: QcowFile,
 }
 
 impl QcowDiskSync {
     pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
         Ok(QcowDiskSync {
-            qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
+            qcow_file: QcowFile::from(RawFile::new(file, direct_io))?,
         })
     }
 }
 
 impl DiskFile for QcowDiskSync {
     fn size(&mut self) -> DiskFileResult<u64> {
-        let mut file = self.qcow_file.lock().unwrap();
-
-        file.seek(SeekFrom::End(0)).map_err(DiskFileError::Size)
+        self.qcow_file
+            .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }
+
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.qcow_file.as_raw_fd())
+    }
 }
 
 pub struct QcowSync {
-    qcow_file: Arc<Mutex<QcowFile>>,
+    qcow_file: QcowFile,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
 
 impl QcowSync {
-    pub fn new(qcow_file: Arc<Mutex<QcowFile>>) -> Self {
+    pub fn new(qcow_file: QcowFile) -> Self {
         QcowSync {
             qcow_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
@@ -52,11 +60,7 @@ impl QcowSync {
     }
 }
 
-impl AsyncAdaptor<QcowFile> for Arc<Mutex<QcowFile>> {
-    fn file(&mut self) -> MutexGuard<'_, QcowFile> {
-        self.lock().unwrap()
-    }
-}
+impl AsyncAdaptor for QcowFile {}
 
 impl AsyncIo for QcowSync {
     fn notifier(&self) -> &EventFd {

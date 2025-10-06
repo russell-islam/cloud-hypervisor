@@ -2,25 +2,26 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::convert::TryFrom;
+use std::io::Error as IoError;
+use std::path::Path;
+
 #[cfg(test)]
 use landlock::make_bitflags;
 use landlock::{
-    path_beneath_rules, Access, AccessFs, BitFlags, Ruleset, RulesetAttr, RulesetCreated,
-    RulesetCreatedAttr, RulesetError, ABI,
+    ABI, Access, AccessFs, BitFlags, Compatible, Ruleset, RulesetAttr, RulesetCreated,
+    RulesetCreatedAttr, RulesetError, path_beneath_rules,
 };
-use std::convert::TryFrom;
-use std::io::Error as IoError;
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum LandlockError {
     /// All RulesetErrors from Landlock library are wrapped in this error
-    #[error("Error creating/adding/restricting ruleset: {0}")]
+    #[error("Error creating/adding/restricting ruleset")]
     ManageRuleset(#[source] RulesetError),
 
     /// Error opening path
-    #[error("Error opening path: {0}")]
+    #[error("Error opening path")]
     OpenPath(#[source] IoError),
 
     /// Invalid Landlock access
@@ -35,6 +36,7 @@ pub enum LandlockError {
 // https://docs.rs/landlock/latest/landlock/enum.ABI.html for more info on ABI
 static ABI: ABI = ABI::V3;
 
+#[derive(Debug)]
 pub(crate) struct LandlockAccess {
     access: BitFlags<AccessFs>,
 }
@@ -57,7 +59,7 @@ impl TryFrom<&str> for LandlockAccess {
                 _ => {
                     return Err(LandlockError::InvalidLandlockAccess(
                         format!("Invalid access: {c}").to_string(),
-                    ))
+                    ));
                 }
             };
         }
@@ -73,8 +75,10 @@ impl Landlock {
         let file_access = AccessFs::from_all(ABI);
 
         let def_ruleset = Ruleset::default()
+            .set_compatibility(landlock::CompatLevel::HardRequirement)
             .handle_access(file_access)
-            .map_err(LandlockError::ManageRuleset)?;
+            .map_err(LandlockError::ManageRuleset)?
+            .set_compatibility(landlock::CompatLevel::HardRequirement);
 
         // By default, rulesets are created in `BestEffort` mode. This lets Landlock
         // to enable all the supported rules and silently ignore the unsupported ones.
@@ -85,13 +89,13 @@ impl Landlock {
 
     pub(crate) fn add_rule(
         &mut self,
-        path: PathBuf,
+        path: &Path,
         access: BitFlags<AccessFs>,
     ) -> Result<(), LandlockError> {
         // path_beneath_rules in landlock crate handles file and directory access rules.
         // Incoming path/s are passed to path_beneath_rules, so that we don't
         // have to worry about the type of the path.
-        let paths = vec![path.clone()];
+        let paths = vec![&path];
         let path_beneath_rules = path_beneath_rules(paths, access);
         self.ruleset
             .as_mut()
@@ -102,7 +106,7 @@ impl Landlock {
 
     pub(crate) fn add_rule_with_access(
         &mut self,
-        path: PathBuf,
+        path: &Path,
         access: &str,
     ) -> Result<(), LandlockError> {
         self.add_rule(path, LandlockAccess::try_from(access)?.access)?;
@@ -149,5 +153,5 @@ fn test_try_from_access() {
     let landlock_access = LandlockAccess::try_from("w").unwrap();
     assert!(landlock_access.access == write_access);
 
-    assert!(LandlockAccess::try_from("").is_err());
+    LandlockAccess::try_from("").unwrap_err();
 }

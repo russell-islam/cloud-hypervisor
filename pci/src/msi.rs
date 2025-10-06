@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use byteorder::{ByteOrder, LittleEndian};
-use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::Arc;
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
@@ -38,10 +39,10 @@ pub fn msi_num_enabled_vectors(msg_ctl: u16) -> usize {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed enabling the interrupt route: {0}")]
-    EnableInterruptRoute(io::Error),
-    #[error("Failed updating the interrupt route: {0}")]
-    UpdateInterruptRoute(io::Error),
+    #[error("Failed enabling the interrupt route")]
+    EnableInterruptRoute(#[source] io::Error),
+    #[error("Failed updating the interrupt route")]
+    UpdateInterruptRoute(#[source] io::Error),
 }
 
 pub const MSI_CONFIG_ID: &str = "msi_config";
@@ -270,15 +271,11 @@ impl MsiConfig {
                 }
             }
 
-            if !old_enabled {
-                if let Err(e) = self.interrupt_source_group.enable() {
-                    error!("Failed enabling irq_fd: {:?}", e);
-                }
+            if !old_enabled && let Err(e) = self.interrupt_source_group.enable() {
+                error!("Failed enabling irq_fd: {:?}", e);
             }
-        } else if old_enabled {
-            if let Err(e) = self.interrupt_source_group.disable() {
-                error!("Failed disabling irq_fd: {:?}", e);
-            }
+        } else if old_enabled && let Err(e) = self.interrupt_source_group.disable() {
+            error!("Failed disabling irq_fd: {:?}", e);
         }
     }
 }

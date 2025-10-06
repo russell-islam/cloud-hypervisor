@@ -11,8 +11,11 @@
 pub mod testing {
     use std::marker::PhantomData;
     use std::mem;
-    use virtio_queue::{Queue, QueueT, VirtqUsedElem};
-    use vm_memory::{bitmap::AtomicBitmap, Address, Bytes, GuestAddress, GuestUsize};
+
+    use virtio_queue::desc::split::VirtqUsedElem;
+    use virtio_queue::{Queue, QueueT};
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{Address, Bytes, GuestAddress, GuestUsize};
 
     type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
@@ -176,7 +179,7 @@ pub mod testing {
         // We try to make sure things are aligned properly :-s
         pub fn new(start: GuestAddress, mem: &'a GuestMemoryMmap, qsize: u16) -> Self {
             // power of 2?
-            assert!(qsize > 0 && qsize & (qsize - 1) == 0);
+            assert!(qsize.is_power_of_two());
 
             let mut dtable = Vec::with_capacity(qsize as usize);
 

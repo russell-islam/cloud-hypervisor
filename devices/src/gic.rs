@@ -4,14 +4,13 @@
 
 use super::interrupt_controller::{Error, InterruptController};
 extern crate arch;
-use anyhow::anyhow;
-use arch::layout;
-use hypervisor::{
-    arch::aarch64::gic::{Vgic, VgicConfig},
-    CpuState, GicState,
-};
 use std::result;
 use std::sync::{Arc, Mutex};
+
+use anyhow::anyhow;
+use arch::layout;
+use hypervisor::CpuState;
+use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
@@ -40,7 +39,7 @@ pub struct Gic {
 
 impl Gic {
     pub fn new(
-        vcpu_count: u8,
+        vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Gic> {

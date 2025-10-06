@@ -1,6 +1,6 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-edition = "2021"
+edition.workspace = true
 name = "vmm"
 version = "0.1.0"
 
@@ -8,80 +8,88 @@ version = "0.1.0"
 dbus_api = ["blocking", "futures", "zbus"]
 default = []
 dhat-heap = ["dhat"] # For heap profiling
+fw_cfg = ["devices/fw_cfg"]
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
+ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",
   "pci/kvm",
   "vfio-ioctls/kvm",
+  "virtio-devices/kvm",
   "vm-device/kvm",
 ]
-mshv = ["hypervisor/mshv", "pci/mshv", "vfio-ioctls/mshv", "vm-device/mshv"]
+mshv = [
+  "hypervisor/mshv",
+  "pci/mshv",
+  "vfio-ioctls/mshv",
+  "virtio-devices/mshv",
+  "vm-device/mshv",
+]
 pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 
 [dependencies]
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-anyhow = "1.0.86"
-arc-swap = "1.7.1"
+acpi_tables = { workspace = true }
+anyhow = { workspace = true }
 arch = { path = "../arch" }
-bitflags = "2.6.0"
+bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.1", optional = true }
-cfg-if = "1.0.0"
-clap = "4.5.4"
+cfg-if = { workspace = true }
+clap = { workspace = true }
 devices = { path = "../devices" }
-dhat = { version = "0.3.3", optional = true }
-epoll = "4.3.3"
+dhat = { workspace = true, optional = true }
+epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
-flume = "0.11.0"
-futures = { version = "0.3.30", optional = true }
-gdbstub = { version = "0.7.1", optional = true }
-gdbstub_arch = { version = "0.3.0", optional = true }
+flume = { workspace = true }
+futures = { version = "0.3.31", optional = true }
+gdbstub = { version = "0.7.6", optional = true }
+gdbstub_arch = { version = "0.3.2", optional = true }
 hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
-igvm = { version = "0.3.3", optional = true }
-igvm_defs = { version = "0.3.1", optional = true }
-landlock = "0.4.0"
-libc = "0.2.155"
-linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
-log = "0.4.22"
+igvm = { workspace = true, optional = true }
+igvm_defs = { workspace = true, optional = true }
+landlock = "0.4.2"
+libc = { workspace = true }
+linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
+log = { workspace = true }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", features = [
+mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
   "with-serde",
 ], optional = true }
 net_util = { path = "../net_util" }
-once_cell = "1.19.0"
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
-seccompiler = "0.4.0"
-serde = { version = "1.0.197", features = ["derive", "rc"] }
-serde_json = "1.0.120"
+seccompiler = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
 serial_buffer = { path = "../serial_buffer" }
-signal-hook = "0.3.17"
-thiserror = "1.0.62"
+signal-hook = { workspace = true }
+thiserror = { workspace = true }
 tracer = { path = "../tracer" }
-uuid = "1.8.0"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
+uuid = { workspace = true }
+vfio-ioctls = { workspace = true, default-features = false }
+vfio_user = { workspace = true }
+vhost = { workspace = true }
+virtio-bindings = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.12.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
-zbus = { version = "4.1.2", optional = true }
-zerocopy = { version = "0.7.35", features = ["alloc", "derive"] }
+vmm-sys-util = { workspace = true, features = ["with-serde"] }
+zbus = { version = "5.7.1", optional = true }
+zerocopy = { workspace = true, features = ["alloc", "derive"] }
