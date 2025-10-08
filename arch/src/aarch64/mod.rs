@@ -106,7 +106,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
         // 1GiB ~ 4032 MiB: RAM before the gap
         (
             layout::RAM_START,
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize,
+            layout::HV_LEGACY_GIC_REGION_START.unchecked_offset_from(layout::RAM_START) as usize,
             RegionType::Ram,
         ),
         // 4GiB ~ inf: RAM after the gap
@@ -115,6 +115,12 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
         (
             layout::MEM_32BIT_RESERVED_START,
             layout::MEM_32BIT_RESERVED_SIZE as usize,
+            RegionType::Reserved,
+        ),
+        // Hyper-V legacy GIC region
+        (
+            layout::HV_LEGACY_GIC_REGION_START,
+            layout::HV_LEGACY_GIC_REGION_SIZE as usize,
             RegionType::Reserved,
         ),
     ]

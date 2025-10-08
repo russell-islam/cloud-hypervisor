@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::anyhow;
 use arch::layout;
 use hypervisor::CpuState;
-use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig};
+use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig, VgicLocations};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
@@ -51,7 +51,10 @@ impl Gic {
             .map_err(Error::CreateInterruptSourceGroup)?;
 
         let vgic = vm
-            .create_vgic(Gic::create_default_config(vcpu_count as u64))
+            .create_vgic(Gic::create_vgic_config(
+                vcpu_count as u64,
+                vm.static_vgic_locations(),
+            ))
             .map_err(Error::CreateGic)?;
 
         let gic = Gic {
@@ -122,6 +125,27 @@ impl Gic {
             msi_size: layout::GIC_V3_ITS_SIZE,
             nr_irqs: layout::IRQ_NUM,
         }
+    }
+
+    pub fn create_vgic_config(
+        vcpu_count: u64,
+        static_vgic_locations: Option<VgicLocations>,
+    ) -> VgicConfig {
+        if let Some(vgic_locations) = static_vgic_locations {
+            let redists_size = layout::GIC_V3_REDIST_SIZE * vcpu_count;
+            return VgicConfig {
+                vcpu_count,
+                dist_addr: vgic_locations.gicd_start,
+                dist_size: layout::GIC_V3_DIST_SIZE,
+                redists_addr: vgic_locations.gicr_start,
+                redists_size,
+                msi_addr: vgic_locations.msi_addr,
+                msi_size: layout::GIC_V3_ITS_SIZE,
+                nr_irqs: layout::IRQ_NUM,
+            };
+        }
+
+        Gic::create_default_config(vcpu_count)
     }
 
     pub fn get_vgic(&mut self) -> Result<Arc<Mutex<dyn Vgic>>> {
