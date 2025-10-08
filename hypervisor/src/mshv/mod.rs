@@ -475,9 +475,10 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         match host_ipa {
             Ok(ipa) => ipa.try_into().unwrap(),
-            Err(e) => {
-                panic!("Failed to get host IPA limit: {e:?}");
-            }
+            // The ioctl could have failed because we're running on a version of MSHV
+            // that doesn't support this property. In that case, return 0 so that the
+            // caller falls back to a default value.
+            Err(_e) => 0,
         }
     }
 
