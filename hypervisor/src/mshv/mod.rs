@@ -1824,6 +1824,24 @@ impl MshvVm {
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         Ok(VfioDeviceFd::new_from_mshv(device_fd))
     }
+
+    #[cfg(target_arch = "aarch64")]
+    fn can_set_timer_irq(&self) -> bool {
+        // "get" the property to check if the current version of MSHV supports
+        // the timer irq property. If the property is supported, it can be set.
+        self.fd.get_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
+        ).is_ok()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn can_set_pmu_irq(&self) -> bool {
+        // "get" the property to check if the current version of MSHV supports
+        // the timer irq property. If the property is supported, it can be set.
+        self.fd.get_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
+        ).is_ok()
+    }
 }
 
 ///
@@ -2448,7 +2466,10 @@ impl vm::Vm for MshvVm {
                         e
                     ))
                 })?;
+        }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.can_set_timer_irq() {
             self.fd
                 .set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
@@ -2460,7 +2481,10 @@ impl vm::Vm for MshvVm {
                         e
                     ))
                 })?;
+        }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.can_set_pmu_irq() {
             self.fd
                 .set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
@@ -2542,6 +2566,20 @@ impl vm::Vm for MshvVm {
             })
         } else {
             None
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn timer_irq_overrides(&self) -> Option<(u32, u32, u32, u32)> {
+        if self.can_set_timer_irq() {
+            None
+        } else {
+            Some((
+                AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+                AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+                AARCH64_MSHV_LEGACY_ARCH_TIMER_VIRT_IRQ,
+                AARCH64_ARCH_TIMER_HYP_IRQ,
+            ))
         }
     }
 }

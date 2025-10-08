@@ -445,6 +445,15 @@ pub trait Vm: Send + Sync + Any {
     fn static_vgic_locations(&self) -> Option<VgicLocations> {
         None
     }
+
+    ///
+    /// Returns timer IRQ overrides in case the hypervisor uses non-standard IRQs
+    /// and doesn't allow the VMM to configure them.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn timer_irq_overrides(&self) -> Option<(u32, u32, u32, u32)> {
+        None
+    }
 }
 
 pub trait VmOps: Send + Sync {
