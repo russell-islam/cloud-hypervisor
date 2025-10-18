@@ -21,8 +21,12 @@ use vm::DataMatch;
 use vm_memory::bitmap::AtomicBitmap;
 
 #[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::VgicLocations;
+#[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs::{
-    AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ, AARCH64_PMU_IRQ,
+    AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ,
+    AARCH64_MSHV_LEGACY_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
 };
 #[cfg(target_arch = "x86_64")]
 use crate::arch::emulator::PlatformEmulator;
@@ -30,6 +34,10 @@ use crate::arch::emulator::PlatformEmulator;
 use crate::arch::x86::emulator::Emulator;
 #[cfg(target_arch = "aarch64")]
 use crate::mshv::aarch64::emulator;
+#[cfg(target_arch = "aarch64")]
+use crate::mshv::aarch64::gic::{
+    HV_LEGACY_GIC_MSI_ADDR, HV_LEGACY_GICD_START, HV_LEGACY_GICR_START,
+};
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{HypervisorType, cpu, hypervisor, vec_with_array_field};
@@ -332,9 +340,12 @@ impl MshvHypervisor {
 
         #[cfg(target_arch = "aarch64")]
         {
+            use crate::Hypervisor;
+
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                use_hyp_fixed_gic: !self.vmm_can_set_vgic_locations(),
             }))
         }
     }
@@ -464,9 +475,23 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         match host_ipa {
             Ok(ipa) => ipa.try_into().unwrap(),
-            Err(e) => {
-                panic!("Failed to get host IPA limit: {e:?}");
-            }
+            // The ioctl could have failed because we're running on a version of MSHV
+            // that doesn't support this property. In that case, return 0 so that the
+            // caller falls back to a default value.
+            Err(_e) => 0,
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vmm_can_set_vgic_locations(&self) -> bool {
+        let vmm_caps = self.mshv.get_vmm_caps().unwrap();
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        unsafe {
+            vmm_caps
+                .__bindgen_anon_1
+                .__bindgen_anon_1
+                .vmm_can_provide_gic_overlay_locations()
+                != 0
         }
     }
 }
@@ -500,6 +525,12 @@ pub struct MshvVcpu {
     ghcb: Option<Ghcb>,
     #[cfg(feature = "sev_snp")]
     host_access_pages: ArcSwap<AtomicBitmap>,
+
+    /// Flag indicating whether the GIC layout fixed by MSHV is used.
+    /// This is needed to support older versions of MSHV in which the
+    /// GIC layout is not configurable by the VMM.
+    #[cfg(target_arch = "aarch64")]
+    use_hyp_fixed_gic: bool,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -1583,6 +1614,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn set_gic_redistributor_addr(&self, gicr_base_addr: u64) -> cpu::Result<()> {
+        if self.use_hyp_fixed_gic {
+            return Ok(());
+        }
+
         debug!(
             "Setting GICR base address to: {:#x}, for vp_index: {:?}",
             gicr_base_addr, self.vp_index
@@ -1770,6 +1805,12 @@ pub struct MshvVm {
     sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
     host_access_pages: ArcSwap<AtomicBitmap>,
+
+    /// Flag indicating whether the GIC layout fixed by MSHV is used.
+    /// This is needed to support older versions of MSHV in which the
+    /// GIC layout is not configurable by the VMM.
+    #[cfg(target_arch = "aarch64")]
+    use_hyp_fixed_gic: bool,
 }
 
 impl MshvVm {
@@ -1783,6 +1824,24 @@ impl MshvVm {
             .create_device(device)
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         Ok(VfioDeviceFd::new_from_mshv(device_fd))
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn can_set_timer_irq(&self) -> bool {
+        // "get" the property to check if the current version of MSHV supports
+        // the timer irq property. If the property is supported, it can be set.
+        self.fd.get_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
+        ).is_ok()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn can_set_pmu_irq(&self) -> bool {
+        // "get" the property to check if the current version of MSHV supports
+        // the timer irq property. If the property is supported, it can be set.
+        self.fd.get_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
+        ).is_ok()
     }
 }
 
@@ -1903,6 +1962,8 @@ impl vm::Vm for MshvVm {
             ghcb,
             #[cfg(feature = "sev_snp")]
             host_access_pages: ArcSwap::new(self.host_access_pages.load().clone()),
+            #[cfg(target_arch = "aarch64")]
+            use_hyp_fixed_gic: self.use_hyp_fixed_gic,
         };
         Ok(Arc::new(vcpu))
     }
@@ -2261,6 +2322,10 @@ impl vm::Vm for MshvVm {
         let gic_device = MshvGicV2M::new(self, config)
             .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
 
+        if self.use_hyp_fixed_gic {
+            return Ok(Arc::new(Mutex::new(gic_device)));
+        }
+
         // Register GICD address with the hypervisor
         self.fd
             .set_partition_property(
@@ -2390,7 +2455,7 @@ impl vm::Vm for MshvVm {
 
     fn init(&self) -> vm::Result<()> {
         #[cfg(target_arch = "aarch64")]
-        {
+        if !self.use_hyp_fixed_gic {
             self.fd
                 .set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_LPI_INT_ID_BITS,
@@ -2402,7 +2467,10 @@ impl vm::Vm for MshvVm {
                         e
                     ))
                 })?;
+        }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.can_set_timer_irq() {
             self.fd
                 .set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
@@ -2414,7 +2482,10 @@ impl vm::Vm for MshvVm {
                         e
                     ))
                 })?;
+        }
 
+        #[cfg(target_arch = "aarch64")]
+        if self.can_set_pmu_irq() {
             self.fd
                 .set_partition_property(
                     hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
@@ -2484,5 +2555,32 @@ impl vm::Vm for MshvVm {
             .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn static_vgic_locations(&self) -> Option<VgicLocations> {
+        if self.use_hyp_fixed_gic {
+            Some(VgicLocations {
+                gicd_start: HV_LEGACY_GICD_START,
+                gicr_start: HV_LEGACY_GICR_START,
+                msi_addr: HV_LEGACY_GIC_MSI_ADDR,
+            })
+        } else {
+            None
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn timer_irq_overrides(&self) -> Option<(u32, u32, u32, u32)> {
+        if self.can_set_timer_irq() {
+            None
+        } else {
+            Some((
+                AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+                AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+                AARCH64_MSHV_LEGACY_ARCH_TIMER_VIRT_IRQ,
+                AARCH64_ARCH_TIMER_HYP_IRQ,
+            ))
+        }
     }
 }

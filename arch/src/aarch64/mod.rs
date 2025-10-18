@@ -106,7 +106,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
         // 1GiB ~ 4032 MiB: RAM before the gap
         (
             layout::RAM_START,
-            layout::MEM_32BIT_RESERVED_START.unchecked_offset_from(layout::RAM_START) as usize,
+            layout::HV_LEGACY_GIC_REGION_START.unchecked_offset_from(layout::RAM_START) as usize,
             RegionType::Ram,
         ),
         // 4GiB ~ inf: RAM after the gap
@@ -115,6 +115,12 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
         (
             layout::MEM_32BIT_RESERVED_START,
             layout::MEM_32BIT_RESERVED_SIZE as usize,
+            RegionType::Reserved,
+        ),
+        // Hyper-V legacy GIC region
+        (
+            layout::HV_LEGACY_GIC_REGION_START,
+            layout::HV_LEGACY_GIC_REGION_SIZE as usize,
             RegionType::Reserved,
         ),
     ]
@@ -134,6 +140,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     gic_device: &Arc<Mutex<dyn Vgic>>,
     numa_nodes: &NumaNodes,
     pmu_supported: bool,
+    timer_irqs: Option<(u32, u32, u32, u32)>,
 ) -> super::Result<()> {
     let fdt_final = fdt::create_fdt(
         guest_mem,
@@ -147,6 +154,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         numa_nodes,
         virtio_iommu_bdf,
         pmu_supported,
+        timer_irqs,
     )
     .map_err(|_| Error::SetupFdt)?;
 

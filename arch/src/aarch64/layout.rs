@@ -98,6 +98,12 @@ pub const RAM_START: GuestAddress = GuestAddress(0x4000_0000);
 pub const MEM_32BIT_RESERVED_START: GuestAddress = GuestAddress(0xfc00_0000);
 pub const MEM_32BIT_RESERVED_SIZE: u64 = 0x0400_0000;
 
+/// Hyper-V legacy GIC region. This will be used when the hypervisor
+/// does not support setting custom GIC addresses.
+pub const HV_LEGACY_GIC_REGION_START: GuestAddress = GuestAddress(0xeff6_8000);
+pub const HV_LEGACY_GIC_REGION_SIZE: u64 =
+    MEM_32BIT_RESERVED_START.0 - HV_LEGACY_GIC_REGION_START.0;
+
 /// TPM Address Range
 /// This Address range is specific to CRB Interface
 pub const TPM_START: GuestAddress = GuestAddress(0xfed4_0000);

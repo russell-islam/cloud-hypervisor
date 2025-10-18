@@ -222,6 +222,9 @@ pub const AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ: u32 = 14;
 pub const AARCH64_ARCH_TIMER_VIRT_IRQ: u32 = 11;
 pub const AARCH64_ARCH_TIMER_HYP_IRQ: u32 = 10;
 
+#[cfg(feature = "mshv")]
+pub const AARCH64_MSHV_LEGACY_ARCH_TIMER_VIRT_IRQ: u32 = 4;
+
 // PMU PPI interrupt number
 pub const AARCH64_PMU_IRQ: u32 = 7;
 

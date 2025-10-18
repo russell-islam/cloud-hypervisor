@@ -28,6 +28,13 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
+pub struct VgicLocations {
+    pub gicd_start: u64,
+    pub gicr_start: u64,
+    pub msi_addr: u64,
+}
+
+#[derive(Debug)]
 pub struct VgicConfig {
     pub vcpu_count: u64,
     pub dist_addr: u64,

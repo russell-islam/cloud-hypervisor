@@ -215,6 +215,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     numa_nodes: &NumaNodes,
     virtio_iommu_bdf: Option<u32>,
     pmu_supported: bool,
+    timer_irqs: Option<(u32, u32, u32, u32)>,
 ) -> FdtWriterResult<Vec<u8>> {
     // Allocate stuff necessary for the holding the blob.
     let mut fdt = FdtWriter::new().unwrap();
@@ -237,7 +238,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
-    create_timer_node(&mut fdt)?;
+    create_timer_node(&mut fdt, timer_irqs)?;
     if pmu_supported {
         create_pmu_node(&mut fdt)?;
     }
@@ -695,16 +696,24 @@ fn create_clock_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     Ok(())
 }
 
-fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
-    // See
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/timer/arm%2Carch_timer.yaml
-    // These are fixed interrupt numbers for the timer device.
-    let irqs = [
-        AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
-        AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
-        AARCH64_ARCH_TIMER_VIRT_IRQ,
-        AARCH64_ARCH_TIMER_HYP_IRQ,
-    ];
+fn create_timer_node(
+    fdt: &mut FdtWriter,
+    timer_irqs: Option<(u32, u32, u32, u32)>,
+) -> FdtWriterResult<()> {
+    let irqs = if let Some(irqs) = timer_irqs {
+        [irqs.0, irqs.1, irqs.2, irqs.3]
+    } else {
+        // See
+        // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/timer/arm%2Carch_timer.yaml
+        // These are fixed interrupt numbers for the timer device.
+        [
+            AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+            AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+            AARCH64_ARCH_TIMER_VIRT_IRQ,
+            AARCH64_ARCH_TIMER_HYP_IRQ,
+        ]
+    };
+
     let compatible = "arm,armv8-timer";
 
     let mut timer_reg_cells: Vec<u32> = Vec::new();

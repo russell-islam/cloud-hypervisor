@@ -184,4 +184,12 @@ pub trait Hypervisor: Send + Sync {
             }
         }
     }
+
+    ///
+    /// Whether the hypervisor allows setting custom VGIC locations
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn vmm_can_set_vgic_locations(&self) -> bool {
+        true
+    }
 }

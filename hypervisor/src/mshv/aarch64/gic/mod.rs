@@ -33,6 +33,9 @@ pub struct MshvGicV2M {
 }
 
 pub const BASE_SPI_IRQ: u32 = 32;
+pub const HV_LEGACY_GICD_START: u64 = 0xffff_0000;
+pub const HV_LEGACY_GICR_START: u64 = 0xeffe_e000;
+pub const HV_LEGACY_GIC_MSI_ADDR: u64 = 0xeff6_8000;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct MshvGicV2MState {}

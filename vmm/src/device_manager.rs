@@ -1593,12 +1593,18 @@ impl DeviceManager {
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
-            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
-            let vgic_config = gic::Gic::create_default_config(vcpus.into());
-            (
-                vgic_config.msi_addr,
-                vgic_config.msi_addr + vgic_config.msi_size - 1,
-            )
+            let msi_properties = self
+                .get_interrupt_controller()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .get_vgic()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .msi_properties();
+
+            (msi_properties[0], msi_properties[0] + msi_properties[1] - 1)
         }
         #[cfg(target_arch = "riscv64")]
         {

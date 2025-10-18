@@ -1582,6 +1582,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            self.vm.timer_irq_overrides(),
         )
         .map_err(Error::ConfigureSystem)?;
 

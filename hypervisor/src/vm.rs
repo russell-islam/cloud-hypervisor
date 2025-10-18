@@ -23,7 +23,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+use crate::arch::aarch64::gic::{Vgic, VgicConfig, VgicLocations};
 #[cfg(target_arch = "riscv64")]
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
@@ -439,6 +439,20 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
     fn enable_x2apic_api(&self) -> Result<()> {
         unimplemented!("x2Apic is only supported on KVM/Linux hosts")
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn static_vgic_locations(&self) -> Option<VgicLocations> {
+        None
+    }
+
+    ///
+    /// Returns timer IRQ overrides in case the hypervisor uses non-standard IRQs
+    /// and doesn't allow the VMM to configure them.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn timer_irq_overrides(&self) -> Option<(u32, u32, u32, u32)> {
+        None
     }
 }
 
