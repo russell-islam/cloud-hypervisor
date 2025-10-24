@@ -880,7 +880,7 @@ impl Vmm {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .to_hypervisor_vm_config(),
+                .to_hypervisor_vm_config(self.hypervisor.hypervisor_type()),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
