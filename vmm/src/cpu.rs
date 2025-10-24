@@ -2896,14 +2896,16 @@ mod tests {
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::StandardRegisters;
     use hypervisor::arch::x86::{FpuState, LapicState};
+    use hypervisor::{HypervisorVmConfig, StandardRegisters};
     use linux_loader::loader::bootparam::setup_header;
 
     #[test]
     fn test_setlint() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
         vm.create_irq_chip().unwrap();
@@ -2929,7 +2931,9 @@ mod tests {
     #[test]
     fn test_setup_fpu() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_fpu(&vcpu).unwrap();
 
@@ -2953,7 +2957,9 @@ mod tests {
         use hypervisor::arch::x86::{MsrEntry, msr_index};
 
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
         setup_msrs(&vcpu).unwrap();
 
@@ -2979,7 +2985,9 @@ mod tests {
     #[test]
     fn test_setup_regs_for_pvh() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
@@ -3003,7 +3011,9 @@ mod tests {
     #[test]
     fn test_setup_regs_for_bzimage() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().expect("new VM fd creation failed");
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
         let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
@@ -3035,7 +3045,6 @@ mod tests {
     use std::{mem, mem::offset_of};
 
     use arch::layout;
-    use hypervisor::HypervisorCpuError;
     use hypervisor::arch::aarch64::regs::MPIDR_EL1;
     #[cfg(feature = "kvm")]
     use hypervisor::arm64_core_reg_id;
@@ -3045,11 +3054,12 @@ mod tests {
     use hypervisor::kvm::kvm_bindings::{
         KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_SIZE_U64, user_pt_regs,
     };
+    use hypervisor::{HypervisorCpuError, HypervisorVmConfig};
 
     #[test]
     fn test_setup_regs() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
         // Must fail when vcpu is not initialized yet.
@@ -3065,7 +3075,7 @@ mod tests {
     #[test]
     fn test_read_mpidr() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
@@ -3090,7 +3100,7 @@ mod tests {
     #[test]
     fn test_save_restore_core_regs() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
@@ -3140,7 +3150,7 @@ mod tests {
     #[test]
     fn test_get_set_mpstate() {
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
