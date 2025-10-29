@@ -1,5 +1,5 @@
 schemaVersion: 0.0.1
-isProduction: true
+isProduction: false
 accountableOwners:
   service: 1a2c4fe9-ca61-4351-8fea-21bbfe2d816c
 routing:
