@@ -2661,7 +2661,6 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    #[cfg(not(feature = "mshv"))]
     fn test_cpu_physical_bits() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2867,7 +2866,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_user_defined_memory_regions() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2935,7 +2933,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_guest_numa_nodes() {
         _test_guest_numa_nodes(false);
     }
@@ -4960,7 +4957,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_cpu_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -5138,7 +5134,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_mem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5843,7 +5838,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_balloon_free_page_reporting() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7918,13 +7912,11 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem() {
         _test_live_migration_ivshmem(false)
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem_local() {
         _test_live_migration_ivshmem(true)
     }
@@ -7936,7 +7928,6 @@ mod common_sequential {
     use crate::*;
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_memory_mergeable_on() {
         test_memory_mergeable(true)
     }
@@ -7991,13 +7982,11 @@ mod common_sequential {
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         _test_snapshot_restore(true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
         _test_snapshot_restore(false);
     }
@@ -8255,7 +8244,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg_attr(target_arch = "aarch64", ignore = "See #6970")]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -8479,7 +8467,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
         _test_snapshot_restore_devices(true);
