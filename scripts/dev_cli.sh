@@ -28,7 +28,11 @@ DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
 # Host paths for MS-IGVM and MS-VMLINUX
 MS_CLH_FILES_PATH="/usr/share/cloud-hypervisor"
 # Assign VMLINUX_PATH to default MSFT kernel if unset and if USE_MS_GUEST_KERNEL is set
-VMLINUX_PATH="${VMLINUX_PATH:-${USE_MS_GUEST_KERNEL:+${MS_CLH_FILES_PATH}/vmlinux.bin}}"
+if [ "$(uname -m)" = "x86_64" ]; then
+    VMLINUX_PATH="${VMLINUX_PATH:-${USE_MS_GUEST_KERNEL:+${MS_CLH_FILES_PATH}/vmlinux.bin}}"
+elif [ "$(uname -m)" = "aarch64" ]; then
+    IMAGE_ARM64_PATH="${IMAGE_ARM64_PATH:-${USE_MS_GUEST_KERNEL:+${MS_CLH_FILES_PATH}/Image}}"
+fi
 
 # Assign HV_FW_PATH to default MSFT hypervisor-fw if unset and if USE_MS_HV_FW is set
 HV_FW_PATH="${HV_FW_PATH:-${USE_MS_HV_FW:+${MS_CLH_FILES_PATH}/hypervisor-fw}}"
@@ -453,13 +457,22 @@ cmd_tests() {
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
-    if [ -n "$VMLINUX_PATH" ]; then
+    if [ -n "$VMLINUX_PATH" ] && [ "$(uname -m)" = "x86_64" ]; then
 	    echo "Using custom kernel: $VMLINUX_PATH"
 	    if [ ! -f "$VMLINUX_PATH" ]; then
 		    echo "File not found: $VMLINUX_PATH"
 		    exit 1
 	    fi
-	    sudo cp $VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux
+	    sudo cp $VMLINUX_PATH $CLH_INTEGRATION_WORKLOADS/vmlinux-x86_64
+    fi
+
+    if [ -n "$IMAGE_ARM64_PATH" ] && [ "$(uname -m)" = "aarch64" ]; then
+        echo "Using custom kernel: $IMAGE_ARM64_PATH"
+        if [ ! -f "$IMAGE_ARM64_PATH" ]; then
+            echo "File not found: $IMAGE_ARM64_PATH"
+            exit 1
+        fi
+        sudo cp $IMAGE_ARM64_PATH $CLH_INTEGRATION_WORKLOADS/Image-arm64
     fi
 
     if [ -n "$HV_FW_PATH" ]; then
@@ -480,13 +493,13 @@ cmd_tests() {
 	    sudo cp $OVMF_FW_PATH $CLH_INTEGRATION_WORKLOADS/CLOUDHV.fd
     fi
 
-    if [ -n "$BZ_IMAGE_PATH" ]; then
+    if [ -n "$BZ_IMAGE_PATH" ] && [ "$(uname -m)" = "x86_64" ]; then
 	    echo "Using custom bzImage: $BZ_IMAGE_PATH"
 	    if [ ! -f "$BZ_IMAGE_PATH" ]; then
 		    echo "File not found: $BZ_IMAGE_PATH"
 		    exit 1
 	    fi
-	    sudo cp $BZ_IMAGE_PATH $CLH_INTEGRATION_WORKLOADS/bzImage
+	    sudo cp $BZ_IMAGE_PATH $CLH_INTEGRATION_WORKLOADS/bzImage-x86_64
     fi
 
     if [ "$integration" = true ]; then
