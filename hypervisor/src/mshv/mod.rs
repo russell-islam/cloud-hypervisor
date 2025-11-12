@@ -410,8 +410,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         #[cfg(target_arch = "aarch64")]
         {
-            use crate::Hypervisor;
-
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
