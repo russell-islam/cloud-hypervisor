@@ -875,12 +875,12 @@ impl Vmm {
 
         let vm = Vm::create_hypervisor_vm(
             &self.hypervisor,
-            #[cfg(feature = "tdx")]
-            false,
-            #[cfg(feature = "sev_snp")]
-            false,
-            #[cfg(feature = "sev_snp")]
-            config.lock().unwrap().memory.total_size(),
+            self.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .to_hypervisor_vm_config(self.hypervisor.hypervisor_type()),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
@@ -2372,6 +2372,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nested: None,
             },
             memory: MemoryConfig {
                 size: 536_870_912,

@@ -45,7 +45,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
-use hypervisor::{HypervisorVmError, VmOps};
+use hypervisor::{HypervisorVmConfig, HypervisorVmError, VmOps};
 use libc::{SIGWINCH, termios};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1052,21 +1052,12 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
-        #[cfg(feature = "sev_snp")]
-        let sev_snp_enabled = if snapshot.is_some() {
-            false
-        } else {
-            vm_config.lock().unwrap().is_sev_snp_enabled()
-        };
-
         let vm = Self::create_hypervisor_vm(
             &hypervisor,
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled,
-            #[cfg(feature = "sev_snp")]
-            vm_config.lock().unwrap().memory.total_size(),
+            vm_config
+                .lock()
+                .unwrap()
+                .to_hypervisor_vm_config(hypervisor.hypervisor_type()),
         )?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1124,31 +1115,10 @@ impl Vm {
 
     pub fn create_hypervisor_vm(
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
-        #[cfg(feature = "sev_snp")] mem_size: u64,
+        config: HypervisorVmConfig,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
-
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "tdx")] {
-                // Passing KVM_X86_TDX_VM: 1 if tdx_enabled is true
-                // Otherwise KVM_X86_LEGACY_VM: 0
-                // value of tdx_enabled is mapped to KVM_X86_TDX_VM or KVM_X86_LEGACY_VM
-                let vm = hypervisor
-                    .create_vm_with_type(u64::from(tdx_enabled))
-                    .unwrap();
-            } else if #[cfg(feature = "sev_snp")] {
-                // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
-                // Otherwise SEV_SNP_DISABLED: 0
-                // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
-                let vm = hypervisor
-                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
-                    .unwrap();
-            } else {
-                let vm = hypervisor.create_vm().unwrap();
-            }
-        }
+        let vm = hypervisor.create_vm(config).unwrap();
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -3543,7 +3513,7 @@ mod tests {
         .collect();
 
         let hv = hypervisor::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let gic = vm
             .create_vgic(Gic::create_default_config(1))
             .expect("Cannot create gic");
@@ -3587,7 +3557,9 @@ pub fn test_vm() {
     let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
 
     let hv = hypervisor::new().unwrap();
-    let vm = hv.create_vm().expect("new VM creation failed");
+    let vm = hv
+        .create_vm(HypervisorVmConfig::default())
+        .expect("Cannot create VM");
 
     for (index, region) in mem.iter().enumerate() {
         let mem_region = vm.make_user_memory_region(

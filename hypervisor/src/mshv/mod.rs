@@ -14,7 +14,10 @@ use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
-use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
+use mshv_ioctls::{
+    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_partition_create_arg,
+    make_default_synthetic_features_mask, set_registers_64,
+};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -40,7 +43,7 @@ use crate::mshv::aarch64::gic::{
 };
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::{HypervisorType, cpu, hypervisor, vec_with_array_field};
+use crate::{HypervisorType, HypervisorVmConfig, cpu, hypervisor, vec_with_array_field};
 
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
@@ -278,77 +281,6 @@ impl MshvHypervisor {
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
-
-    fn create_vm_with_type_and_memory_int(
-        &self,
-        vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: Option<u64>,
-    ) -> hypervisor::Result<Arc<dyn crate::Vm>> {
-        let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
-            Ok(vm_type) => vm_type,
-            Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
-        };
-        let fd: VmFd;
-        loop {
-            match self.mshv.create_vm_with_type(mshv_vm_type) {
-                Ok(res) => fd = res,
-                Err(e) => {
-                    if e.errno() == libc::EINTR {
-                        // If the error returned is EINTR, which means the
-                        // ioctl has been interrupted, we have to retry as
-                        // this can't be considered as a regular error.
-                        continue;
-                    } else {
-                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
-                    }
-                }
-            }
-            break;
-        }
-
-        let vm_fd = Arc::new(fd);
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            let msr_list = self.get_msr_list()?;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                msr_list.len()
-            ];
-            for (pos, index) in msr_list.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-
-            Ok(Arc::new(MshvVm {
-                fd: vm_fd,
-                msrs,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                #[cfg(feature = "sev_snp")]
-                sev_snp_enabled: mshv_vm_type == VmType::Snp,
-                #[cfg(feature = "sev_snp")]
-                host_access_pages: ArcSwap::new(
-                    AtomicBitmap::new(
-                        _mem_size.unwrap_or_default() as usize,
-                        NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
-                    )
-                    .into(),
-                ),
-            }))
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            use crate::Hypervisor;
-
-            Ok(Arc::new(MshvVm {
-                fd: vm_fd,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                use_hyp_fixed_gic: !self.vmm_can_set_vgic_locations(),
-            }))
-        }
-    }
 }
 
 impl MshvHypervisor {
@@ -377,50 +309,18 @@ impl MshvHypervisor {
 ///
 /// ```
 /// use hypervisor::mshv::MshvHypervisor;
+/// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl hypervisor::Hypervisor for MshvHypervisor {
-    ///
     /// Returns the type of the hypervisor
     ///
     fn hypervisor_type(&self) -> HypervisorType {
         HypervisorType::Mshv
     }
-    ///
-    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
-    /// Return a hypervisor-agnostic Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use hypervisor::kvm::KvmHypervisor;
-    /// use hypervisor::kvm::KvmVm;
-    /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm_with_type(0, 512*1024*1024).unwrap();
-    /// ```
-    fn create_vm_with_type_and_memory(
-        &self,
-        vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: u64,
-    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        self.create_vm_with_type_and_memory_int(
-            vm_type,
-            #[cfg(feature = "sev_snp")]
-            Some(_mem_size),
-        )
-    }
-
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
-        self.create_vm_with_type_and_memory_int(
-            vm_type,
-            #[cfg(feature = "sev_snp")]
-            None,
-        )
-    }
-
     /// Create a mshv vm object and return the object as Vm trait object
     ///
     /// # Examples
@@ -429,12 +329,93 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// # extern crate hypervisor;
     /// use hypervisor::mshv::MshvHypervisor;
     /// use hypervisor::mshv::MshvVm;
+    /// use hypervisor::HypervisorVmConfig;
+    /// let config = HypervisorVmConfig::default();
     /// let hypervisor = MshvHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap();
+    /// let vm = hypervisor.create_vm(config).unwrap();
     /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        let vm_type = 0;
-        self.create_vm_with_type(vm_type)
+    fn create_vm(&self, _config: HypervisorVmConfig) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        #[allow(unused_mut)]
+        #[allow(unused_assignments)]
+        let mut mshv_vm_type = VmType::Normal; // Create with default platform type
+        #[cfg(feature = "sev_snp")]
+        {
+            mshv_vm_type = if _config.sev_snp_enabled {
+                VmType::Snp
+            } else {
+                VmType::Normal
+            };
+        }
+
+        let mut create_args = make_default_partition_create_arg(mshv_vm_type);
+        if _config.nested_enabled {
+            create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
+        }
+        let synthetic_features_mask = make_default_synthetic_features_mask();
+        let fd: VmFd;
+        loop {
+            match self.mshv.create_vm_with_args(&create_args) {
+                Ok(res) => fd = res,
+                Err(e) => {
+                    if e.errno() == libc::EINTR {
+                        // If the error returned is EINTR, which means the
+                        // ioctl has been interrupted, we have to retry as
+                        // this can't be considered as a regular error.
+                        continue;
+                    } else {
+                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
+                    }
+                }
+            }
+            break;
+        }
+
+        fd.set_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_SYNTHETIC_PROC_FEATURES,
+            synthetic_features_mask,
+        )
+        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
+
+        let vm_fd = Arc::new(fd);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let msr_list = self.get_msr_list()?;
+            let mut msrs: Vec<MsrEntry> = vec![
+                MsrEntry {
+                    ..Default::default()
+                };
+                msr_list.len()
+            ];
+            for (pos, index) in msr_list.iter().enumerate() {
+                msrs[pos].index = *index;
+            }
+
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                msrs,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                #[cfg(feature = "sev_snp")]
+                host_access_pages: ArcSwap::new(
+                    AtomicBitmap::new(
+                        _config.mem_size as usize,
+                        NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
+                    )
+                    .into(),
+                ),
+            }))
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Ok(Arc::new(MshvVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                use_hyp_fixed_gic: !self.vmm_can_set_vgic_locations(),
+            }))
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -539,10 +520,11 @@ pub struct MshvVcpu {
 ///
 /// ```
 /// use hypervisor::mshv::MshvHypervisor;
+/// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
@@ -1853,10 +1835,11 @@ impl MshvVm {
 /// ```
 /// extern crate hypervisor;
 /// use hypervisor::mshv::MshvHypervisor;
+/// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for MshvVm {
     #[cfg(target_arch = "x86_64")]
