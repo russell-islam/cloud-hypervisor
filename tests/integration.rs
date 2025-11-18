@@ -7470,6 +7470,10 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "See ADO #60229037"
+    )]
     fn test_vfio_user() {
         let jammy_image = JAMMY_IMAGE_NAME.to_string();
         let jammy = UbuntuDiskConfig::new(jammy_image);
@@ -8150,6 +8154,10 @@ mod dbus_api {
     // to create a VM, boot it, and verify that it can be shut down and then
     // booted again.
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "disabled for mshv arm64, see ADO #60239414"
+    )]
     fn test_api_dbus_and_http_interleaved() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8244,6 +8252,10 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "disabled for mshv arm64, see ADO #60239414"
+    )]
     fn test_api_dbus_create_boot() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8252,6 +8264,10 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "disabled for mshv arm64, see ADO #60239414"
+    )]
     fn test_api_dbus_shutdown() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8260,6 +8276,10 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "disabled for mshv arm64, see ADO #60239414"
+    )]
     fn test_api_dbus_delete() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8268,6 +8288,10 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "disabled for mshv arm64, see ADO #60239414"
+    )]
     fn test_api_dbus_pause_resume() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8471,6 +8495,10 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "see ADO #60243449"
+    )]
     fn test_ivshmem() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -8753,11 +8781,19 @@ mod common_sequential {
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "Snapshot restore not implemented for mshv arm64"
+    )]
     fn test_snapshot_restore_hotplug_virtiomem() {
         _test_snapshot_restore(true);
     }
 
     #[test]
+    #[cfg_attr(
+        all(feature = "mshv", target_arch = "aarch64"),
+        ignore = "Snapshot restore not implemented for mshv arm64"
+    )]
     fn test_snapshot_restore_basic() {
         _test_snapshot_restore(false);
     }
@@ -11959,49 +11995,86 @@ mod live_migration {
     mod live_migration_parallel {
         use super::*;
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_basic() {
             _test_live_migration(false, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_local() {
             _test_live_migration(false, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_tcp() {
             _test_live_migration_tcp();
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_watchdog() {
             _test_live_migration_watchdog(false, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_watchdog_local() {
             _test_live_migration_watchdog(false, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_local() {
             _test_live_migration(true, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
         }
+
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_live_migration_with_landlock() {
@@ -12009,47 +12082,80 @@ mod live_migration {
         }
     }
 
+    #[cfg(not(all(target_arch = "aarch64", feature = "mshv")))]
     mod live_migration_sequential {
         use super::*;
 
         // NUMA & balloon live migration tests are large so run sequentially
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_balloon() {
             _test_live_migration_balloon(false, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_balloon_local() {
             _test_live_migration_balloon(false, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_balloon() {
             _test_live_migration_balloon(true, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_numa() {
             _test_live_migration_numa(false, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_migration_numa_local() {
             _test_live_migration_numa(false, true)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not supported on mshv arm64"
+        )]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true)
         }
