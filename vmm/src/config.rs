@@ -593,6 +593,7 @@ impl CpusConfig {
             .add("kvm_hyperv")
             .add("max_phys_bits")
             .add("affinity")
+            .add("nested")
             .add("features");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 

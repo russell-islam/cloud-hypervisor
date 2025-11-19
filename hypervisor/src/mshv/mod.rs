@@ -348,8 +348,31 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
 
         let mut create_args = make_default_partition_create_arg(mshv_vm_type);
-        if _config.nested_enabled {
-            create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
+        let mut disable_proc_features = hv_partition_processor_features::default();
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        unsafe {
+            for i in 0..create_args.pt_num_cpu_fbanks {
+                disable_proc_features.as_uint64[i as usize] = create_args.pt_cpu_fbanks[i as usize];
+            }
+            #[cfg(target_arch = "x86_64")]
+            {
+                // Modify create_args based on user configuration
+                // For now we only handle nested virtualization, but more features can be added here
+                if _config.nested_enabled {
+                    create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
+                    disable_proc_features
+                        .__bindgen_anon_1
+                        .set_nested_virt_support(0u64);
+                } else {
+                    disable_proc_features
+                        .__bindgen_anon_1
+                        .set_nested_virt_support(1u64);
+                }
+            }
+            // Modified feature bit fields are written back to create_args
+            for i in 0..create_args.pt_num_cpu_fbanks {
+                create_args.pt_cpu_fbanks[i as usize] = disable_proc_features.as_uint64[i as usize];
+            }
         }
         let synthetic_features_mask = make_default_synthetic_features_mask();
         let fd: VmFd;
