@@ -64,6 +64,7 @@ pub use x86_64::{VcpuMshvState, emulator};
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
+    mshv_ioctls::make_default_synthetic_features_mask, mshv_ioctls::make_default_partition_create_arg,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -337,9 +338,37 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             };
         }
 
+        let mut create_args = make_default_partition_create_arg(mshv_vm_type);
+        let mut disable_proc_features = hv_partition_processor_features::default();
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        unsafe {
+            for i in 0..create_args.pt_num_cpu_fbanks {
+                disable_proc_features.as_uint64[i as usize] = create_args.pt_cpu_fbanks[i as usize];
+            }
+            #[cfg(target_arch = "x86_64")]
+            {
+                // Modify create_args based on user configuration
+                // For now we only handle nested virtualization, but more features can be added here
+                if false {
+                    create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
+                    disable_proc_features
+                        .__bindgen_anon_1
+                        .set_nested_virt_support(0u64);
+                } else {
+                    disable_proc_features
+                        .__bindgen_anon_1
+                        .set_nested_virt_support(1u64);
+                }
+            }
+            // Modified feature bit fields are written back to create_args
+            for i in 0..create_args.pt_num_cpu_fbanks {
+                create_args.pt_cpu_fbanks[i as usize] = disable_proc_features.as_uint64[i as usize];
+            }
+        }
+        let synthetic_features_mask = make_default_synthetic_features_mask();
         let fd: VmFd;
         loop {
-            match self.mshv.create_vm_with_type(mshv_vm_type) {
+            match self.mshv.create_vm_with_args(&create_args) {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -354,6 +383,12 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             }
             break;
         }
+
+        fd.set_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_SYNTHETIC_PROC_FEATURES,
+            synthetic_features_mask,
+        )
+        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
 
         let vm_fd = Arc::new(fd);
 
@@ -392,6 +427,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                use_hyp_fixed_gic: !self.vmm_can_set_vgic_locations(),
             }))
         }
     }
@@ -786,6 +822,11 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+                    self.host_access_pages.rcu(|bitmap| {
+                        let bm = bitmap.clone();
+                        bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
+                        bm
+                    });
                     debug!(
                         "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
                         gfn_start, gfn_count
@@ -893,6 +934,7 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
 
                     match ghcb_op {
+                        GHCB_INFO_SPECIAL_DBGPRINT => {}
                         GHCB_INFO_HYP_FEATURE_REQUEST => {
                             // Pre-condition: GHCB data must be zero
                             assert!(ghcb_data == 0);
