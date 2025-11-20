@@ -15,8 +15,8 @@ use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
 use mshv_ioctls::{
-    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_partition_create_arg,
-    make_default_synthetic_features_mask, set_registers_64,
+    Mshv, NoDatamatch, VcpuFd, VmFd, VmType,
+    set_registers_64,
 };
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
@@ -69,6 +69,7 @@ pub use x86_64::{VcpuMshvState, emulator};
 pub use {
     mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
+    mshv_ioctls::make_default_synthetic_features_mask, mshv_ioctls::make_default_partition_create_arg,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -381,6 +382,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                use_hyp_fixed_gic: !self.vmm_can_set_vgic_locations(),
             }))
         }
     }
@@ -884,6 +886,7 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
 
                     match ghcb_op {
+                        GHCB_INFO_SPECIAL_DBGPRINT => {}
                         GHCB_INFO_HYP_FEATURE_REQUEST => {
                             // Pre-condition: GHCB data must be zero
                             assert!(ghcb_data == 0);

@@ -666,17 +666,62 @@ impl Vm {
 
         // For MSHV, we need to create the interrupt controller before we initialize the VM.
         // Because we need to set the base address of GICD before we initialize the VM.
+        #[cfg(all(feature = "mshv", not(target_arch = "aarch64")))]
+        {
+            if is_mshv {
+                println!("MUISLAM: VM init\n");
+                vm.init().map_err(Error::InitializeVm)?;
+            }
+        }
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            println!("MUISLAM: create boot vcpus\n");
+            cpu_manager
+                .lock()
+                .unwrap()
+                .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+                .map_err(Error::CpuManager)?;
+        }
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            println!("MUISLAM: SEV-SNP init\n");
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
+
+        #[cfg(feature = "sev_snp")]
+        // Loading the igvm file is pushed down here because
+        // igvm parser needs cpu_manager to retrieve cpuid leaf.
+        // Currently, Microsoft Hypervisor does not provide any
+        // Hypervisor specific common cpuid, we need to call get_cpuid_values
+        // per cpuid through cpu_manager.
+        let load_payload_handle = if snapshot.is_none() && sev_snp_enabled {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
+        } else {
+            None
+        };
         #[cfg(feature = "mshv")]
         {
             if is_mshv {
+                println!("MUISLAM: create interrupt controller\n");
                 let ic = device_manager
                     .lock()
                     .unwrap()
                     .create_interrupt_controller()
                     .map_err(Error::DeviceManager)?;
-
+                #[cfg(target_arch = "aarch64")]
                 vm.init().map_err(Error::InitializeVm)?;
-
+                println!("MUISLAM: mshv create_devices\n");
                 device_manager
                     .lock()
                     .unwrap()
@@ -690,11 +735,22 @@ impl Vm {
             }
         }
 
+        #[cfg(not(feature = "sev_snp"))]
         memory_manager
             .lock()
             .unwrap()
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
+
+        #[cfg(feature = "sev_snp")]
+        if !sev_snp_enabled {
+            println!("MUISLAM: allocate address space\n");
+            memory_manager
+                .lock()
+                .unwrap()
+                .allocate_address_space()
+                .map_err(Error::MemoryManager)?;
+        }
 
         #[cfg(target_arch = "aarch64")]
         memory_manager
@@ -703,11 +759,7 @@ impl Vm {
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
 
-        // Loading the igvm file is pushed down here because
-        // igvm parser needs cpu_manager to retrieve cpuid leaf.
-        // Currently, Microsoft Hypervisor does not provide any
-        // Hypervisor specific common cpuid, we need to call get_cpuid_values
-        // per cpuid through cpu_manager.
+        #[cfg(not(feature = "sev_snp"))]
         let load_payload_handle = if snapshot.is_none() {
             Self::load_payload_async(
                 &memory_manager,
@@ -720,13 +772,21 @@ impl Vm {
         } else {
             None
         };
-
+        #[cfg(not(feature = "sev_snp"))]
         cpu_manager
             .lock()
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
-
+        #[cfg(feature = "sev_snp")]
+        if !sev_snp_enabled {
+            println!("MUISLAM: create boot vcpus 2\n");
+            cpu_manager
+                .lock()
+                .unwrap()
+                .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
+                .map_err(Error::CpuManager)?;
+        }
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
         // This means that we need to create interrupt controller after we restore in case of KVM guests.
@@ -747,14 +807,6 @@ impl Vm {
                     .create_devices(console_info, console_resize_pipe, original_termios, ic)
                     .map_err(Error::DeviceManager)?;
             }
-        }
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "fw_cfg")]
@@ -1285,6 +1337,7 @@ impl Vm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
                 #[cfg(feature = "sev_snp")]
                 if sev_snp_enabled {
+                    println!("MUISLAM: load_payload with SEV-SNP enabled\n");
                     return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
                 }
                 #[cfg(not(feature = "sev_snp"))]
