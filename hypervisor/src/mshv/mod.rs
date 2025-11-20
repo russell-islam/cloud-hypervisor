@@ -786,6 +786,11 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+                    self.host_access_pages.rcu(|bitmap| {
+                        let bm = bitmap.clone();
+                        bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
+                        bm
+                    });
                     debug!(
                         "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
                         gfn_start, gfn_count
