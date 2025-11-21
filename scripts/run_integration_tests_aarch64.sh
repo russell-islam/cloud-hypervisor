@@ -245,24 +245,24 @@ fi
 
 # Run tests on dbus_api
 if [ $RES -eq 0 ]; then
-    cargo build --features "dbus_api" --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 
 # Run tests on fw_cfg
 if [ $RES -eq 0 ]; then
-    cargo build --features "fw_cfg" --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
-    cargo build --features ivshmem --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "ivshmem::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "ivshmem::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 
