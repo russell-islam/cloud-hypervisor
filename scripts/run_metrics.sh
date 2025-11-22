@@ -95,7 +95,12 @@ if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
     CFLAGS="-I /usr/include/${TEST_ARCH}-linux-musl/ -idirafter /usr/include/"
 fi
 
-cargo build --features "kvm,mshv,igvm,sev_snp" --all --release --target $BUILD_TARGET
+features="mshv"
+if [ "${TEST_ARCH}" == "x86_64" ]; then
+	features+=",igvm,sev_snp"
+fi
+
+cargo build --features $features --all --release --target $BUILD_TARGET
 
 # Get the total memory in gb
 TOTAL_MEM_GB=$(free -g | grep Mem | awk '{print $2}')
