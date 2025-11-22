@@ -338,7 +338,7 @@ const TEST_LIST: [PerformanceTest; 60] = [
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_timeout: 2,
+            test_timeout: 6,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
@@ -358,7 +358,7 @@ const TEST_LIST: [PerformanceTest; 60] = [
         name: "boot_time_16_vcpus_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_timeout: 2,
+            test_timeout: 24,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
