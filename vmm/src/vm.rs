@@ -448,7 +448,7 @@ impl VmOps for VmOpsHandler {
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
-            info!("Guest MMIO read to unregistered address 0x{gpa:x}");
+            info!("Guest MMIO read to unregistered address 0x{:x}", gpa);
         }
         Ok(())
     }
@@ -456,7 +456,7 @@ impl VmOps for VmOpsHandler {
     fn mmio_write(&self, gpa: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.mmio_bus.write(gpa, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
-                info!("Guest MMIO write to unregistered address 0x{gpa:x}");
+                info!("Guest MMIO write to unregistered address 0x{:x}", gpa);
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
@@ -471,7 +471,7 @@ impl VmOps for VmOpsHandler {
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
-            info!("Guest PIO read to unregistered address 0x{port:x}");
+            info!("Guest PIO read to unregistered address 0x{:x}", port);
         }
         Ok(())
     }
@@ -480,7 +480,7 @@ impl VmOps for VmOpsHandler {
     fn pio_write(&self, port: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.io_bus.write(port, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
-                info!("Guest PIO write to unregistered address 0x{port:x}");
+                info!("Guest PIO write to unregistered address 0x{:x}", port);
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
@@ -493,7 +493,7 @@ impl VmOps for VmOpsHandler {
     }
 }
 
-pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8) -> u8 {
+pub fn physical_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>, max_phys_bits: u8) -> u8 {
     let host_phys_bits = get_host_cpu_phys_bits(hypervisor);
 
     cmp::min(host_phys_bits, max_phys_bits)
@@ -567,7 +567,6 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
-
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
         #[cfg(not(feature = "guest_debug"))]
@@ -592,7 +591,7 @@ impl Vm {
             reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
-            hypervisor.clone(),
+            &hypervisor,
             seccomp_action.clone(),
             vm_ops,
             #[cfg(feature = "tdx")]
@@ -608,7 +607,7 @@ impl Vm {
             .lock()
             .unwrap()
             .populate_cpuid(
-                hypervisor.as_ref(),
+                &hypervisor,
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
             )
@@ -643,6 +642,7 @@ impl Vm {
         let device_manager = DeviceManager::new(
             io_bus,
             mmio_bus,
+            hypervisor.clone(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
@@ -660,46 +660,32 @@ impl Vm {
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
-
         // For MSHV, we need to create the interrupt controller before we initialize the VM.
         // Because we need to set the base address of GICD before we initialize the VM.
-        #[cfg(feature = "mshv")]
+        #[cfg(all(feature = "mshv", not(target_arch = "aarch64")))]
         {
             if is_mshv {
-                let ic = device_manager
-                    .lock()
-                    .unwrap()
-                    .create_interrupt_controller()
-                    .map_err(Error::DeviceManager)?;
-
                 vm.init().map_err(Error::InitializeVm)?;
-
-                device_manager
-                    .lock()
-                    .unwrap()
-                    .create_devices(
-                        console_info.clone(),
-                        console_resize_pipe.clone(),
-                        original_termios.clone(),
-                        ic,
-                    )
-                    .map_err(Error::DeviceManager)?;
             }
         }
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            cpu_manager
+                .lock()
+                .unwrap()
+                .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+                .map_err(Error::CpuManager)?;
+        }
 
-        memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
-        #[cfg(target_arch = "aarch64")]
-        memory_manager
-            .lock()
-            .unwrap()
-            .add_uefi_flash()
-            .map_err(Error::MemoryManager)?;
-
+        #[cfg(feature = "sev_snp")]
         // Loading the igvm file is pushed down here because
         // igvm parser needs cpu_manager to retrieve cpuid leaf.
         // Currently, Microsoft Hypervisor does not provide any
@@ -717,12 +703,79 @@ impl Vm {
         } else {
             None
         };
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+                #[cfg(target_arch = "aarch64")]
+                vm.init().map_err(Error::InitializeVm)?;
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(
+                        console_info.clone(),
+                        console_resize_pipe.clone(),
+                        original_termios.clone(),
+                        ic,
+                    )
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
 
+        #[cfg(not(feature = "sev_snp"))]
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
+        #[cfg(feature = "sev_snp")]
+        if !sev_snp_enabled {
+            memory_manager
+                .lock()
+                .unwrap()
+                .allocate_address_space()
+                .map_err(Error::MemoryManager)?;
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        memory_manager
+            .lock()
+            .unwrap()
+            .add_uefi_flash()
+            .map_err(Error::MemoryManager)?;
+
+        #[cfg(not(feature = "sev_snp"))]
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
+        } else {
+            None
+        };
+        #[cfg(not(feature = "sev_snp"))]
         cpu_manager
             .lock()
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
+        #[cfg(feature = "sev_snp")]
+        if !sev_snp_enabled {
+            cpu_manager
+                .lock()
+                .unwrap()
+                .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+                .map_err(Error::CpuManager)?;
+        }
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
@@ -744,14 +797,6 @@ impl Vm {
                     .create_devices(console_info, console_resize_pipe, original_termios, ic)
                     .map_err(Error::DeviceManager)?;
             }
-        }
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "fw_cfg")]
@@ -939,7 +984,7 @@ impl Vm {
                             }
                             node.memory_zones.push(memory_zone.clone());
                         } else {
-                            error!("Unknown memory zone '{memory_zone}'");
+                            error!("Unknown memory zone '{}'", memory_zone);
                             return Err(Error::InvalidNumaConfig);
                         }
                     }
@@ -959,12 +1004,12 @@ impl Vm {
                         let dist = distance.distance;
 
                         if !configs.iter().any(|cfg| cfg.guest_numa_id == dest) {
-                            error!("Unknown destination NUMA node {dest}");
+                            error!("Unknown destination NUMA node {}", dest);
                             return Err(Error::InvalidNumaConfig);
                         }
 
                         if node.distances.contains_key(&dest) {
-                            error!("Destination NUMA node {dest} has been already set");
+                            error!("Destination NUMA node {} has been already set", dest);
                             return Err(Error::InvalidNumaConfig);
                         }
 
@@ -1007,21 +1052,12 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
-        #[cfg(feature = "sev_snp")]
-        let sev_snp_enabled = if snapshot.is_some() {
-            false
-        } else {
-            vm_config.lock().unwrap().is_sev_snp_enabled()
-        };
-
         let vm = Self::create_hypervisor_vm(
-            hypervisor.as_ref(),
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled,
-            #[cfg(feature = "sev_snp")]
-            vm_config.lock().unwrap().memory.total_size(),
+            &hypervisor,
+            vm_config
+                .lock()
+                .unwrap()
+                .to_hypervisor_vm_config(hypervisor.hypervisor_type()),
         )?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1029,10 +1065,7 @@ impl Vm {
             vm.enable_x2apic_api().unwrap();
         }
 
-        let phys_bits = physical_bits(
-            hypervisor.as_ref(),
-            vm_config.lock().unwrap().cpus.max_phys_bits,
-        );
+        let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
 
         let memory_manager = if let Some(snapshot) =
             snapshot_from_id(snapshot.as_ref(), MEMORY_MANAGER_SNAPSHOT_ID)
@@ -1081,21 +1114,10 @@ impl Vm {
     }
 
     pub fn create_hypervisor_vm(
-        hypervisor: &dyn hypervisor::Hypervisor,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
-        #[cfg(feature = "sev_snp")] mem_size: u64,
+        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        config: HypervisorVmConfig,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
-        let config = HypervisorVmConfig {
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled,
-            #[cfg(feature = "sev_snp")]
-            mem_size,
-        };
-
         let vm = hypervisor.create_vm(config).unwrap();
 
         #[cfg(target_arch = "x86_64")]
@@ -1530,6 +1552,7 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+            self.vm.timer_irq_overrides(),
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -1754,7 +1777,7 @@ impl Vm {
             }
         }
 
-        error!("Could not find the memory zone {id} for the resize");
+        error!("Could not find the memory zone {} for the resize", id);
         Err(Error::ResizeZone)
     }
 
@@ -2535,12 +2558,12 @@ impl Vm {
             Request::memory_fd(std::mem::size_of_val(&slot) as u64)
                 .write_to(socket)
                 .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {e}"))
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {}", e))
                 })?;
             socket
                 .send_with_fd(&slot.to_le_bytes()[..], fd)
                 .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error sending memory fd: {e}"))
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd: {}", e))
                 })?;
 
             Response::read_from(socket)?.ok_or_abandon(
@@ -2579,7 +2602,8 @@ impl Vm {
                     )
                     .map_err(|e| {
                         MigratableError::MigrateSend(anyhow!(
-                            "Error transferring memory to socket: {e}"
+                            "Error transferring memory to socket: {}",
+                            e
                         ))
                     })?;
                 offset += bytes_written as u64;
@@ -2768,19 +2792,19 @@ impl Pausable for Vm {
         let mut state = self
             .state
             .try_write()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {e}")))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {}", e)))?;
         let new_state = VmState::Paused;
 
         state
             .valid_transition(new_state)
-            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
 
         #[cfg(target_arch = "x86_64")]
         {
             let mut clock = self
                 .vm
                 .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
             clock.reset_flags();
             self.saved_clock = Some(clock);
         }
@@ -2788,7 +2812,7 @@ impl Pausable for Vm {
         // Before pausing the vCPUs activate any pending virtio devices that might
         // need activation between starting the pause (or e.g. a migration it's part of)
         self.activate_virtio_devices().map_err(|e| {
-            MigratableError::Pause(anyhow!("Error activating pending virtio devices: {e:?}"))
+            MigratableError::Pause(anyhow!("Error activating pending virtio devices: {:?}", e))
         })?;
 
         self.cpu_manager.lock().unwrap().pause()?;
@@ -2796,7 +2820,7 @@ impl Pausable for Vm {
 
         self.vm
             .pause()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {e}")))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {}", e)))?;
 
         *state = new_state;
 
@@ -2810,27 +2834,27 @@ impl Pausable for Vm {
         let mut state = self
             .state
             .try_write()
-            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {e}")))?;
+            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {}", e)))?;
         let new_state = VmState::Running;
 
         state
             .valid_transition(new_state)
-            .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
+            .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
 
         self.cpu_manager.lock().unwrap().resume()?;
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(clock) = &self.saved_clock {
-                self.vm
-                    .set_clock(clock)
-                    .map_err(|e| MigratableError::Resume(anyhow!("Could not set VM clock: {e}")))?;
+                self.vm.set_clock(clock).map_err(|e| {
+                    MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
+                })?;
             }
         }
 
         if current_state == VmState::Paused {
             self.vm
                 .resume()
-                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {e}")))?;
+                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {}", e)))?;
         }
 
         self.device_manager.lock().unwrap().resume()?;
@@ -2879,11 +2903,11 @@ impl Snapshottable for Vm {
         let common_cpuid = {
             let amx = self.config.lock().unwrap().cpus.features.amx;
             let phys_bits = physical_bits(
-                self.hypervisor.as_ref(),
+                &self.hypervisor,
                 self.config.lock().unwrap().cpus.max_phys_bits,
             );
             arch::generate_common_cpuid(
-                self.hypervisor.as_ref(),
+                &self.hypervisor,
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
@@ -2893,7 +2917,7 @@ impl Snapshottable for Vm {
                 },
             )
             .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {e:?}"))
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
             })?
         };
 
@@ -3505,12 +3529,14 @@ mod tests {
             &BTreeMap::new(),
             None,
             true,
+            None,
         )
         .unwrap();
     }
 }
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+#[cfg(not(feature = "sev_snp"))]
 #[test]
 pub fn test_vm() {
     use hypervisor::VmExit;
@@ -3533,7 +3559,7 @@ pub fn test_vm() {
     let hv = hypervisor::new().unwrap();
     let vm = hv
         .create_vm(HypervisorVmConfig::default())
-        .expect("new VM creation failed");
+        .expect("Cannot create VM");
 
     for (index, region) in mem.iter().enumerate() {
         let mem_region = vm.make_user_memory_region(
@@ -3551,7 +3577,7 @@ pub fn test_vm() {
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
-    let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
+    let vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
 
     let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
     vcpu_sregs.cs.base = 0;

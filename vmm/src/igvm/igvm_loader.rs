@@ -24,7 +24,7 @@ use crate::GuestMemoryMmap;
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
-use crate::memory_manager::MemoryManager;
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -46,6 +46,8 @@ pub enum Error {
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
     #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
+    #[error("allocate address space")]
+    MemoryManager(MemoryManagerError),
 }
 
 #[allow(dead_code)]
@@ -418,6 +420,11 @@ pub fn load_igvm(
 
     #[cfg(feature = "sev_snp")]
     {
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
         use std::time::Instant;
 
         let mut now = Instant::now();
