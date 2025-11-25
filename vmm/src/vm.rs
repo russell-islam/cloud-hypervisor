@@ -665,11 +665,13 @@ impl Vm {
         #[cfg(all(feature = "mshv", not(target_arch = "aarch64")))]
         {
             if is_mshv {
+                println!("MUISLAM: vm init\n");
                 vm.init().map_err(Error::InitializeVm)?;
             }
         }
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
+            println!("MUISLAM: create_boot_vcpus\n");
             cpu_manager
                 .lock()
                 .unwrap()
@@ -682,6 +684,7 @@ impl Vm {
         // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
+            println!("MUISLAM: sev_snp_init\n");
             vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
@@ -706,6 +709,7 @@ impl Vm {
         #[cfg(feature = "mshv")]
         {
             if is_mshv {
+                println!("MUISLAM: create interrupt controller\n");
                 let ic = device_manager
                     .lock()
                     .unwrap()
@@ -713,6 +717,7 @@ impl Vm {
                     .map_err(Error::DeviceManager)?;
                 #[cfg(target_arch = "aarch64")]
                 vm.init().map_err(Error::InitializeVm)?;
+                println!("MUISLAM: mshv create_devices\n");
                 device_manager
                     .lock()
                     .unwrap()
@@ -770,6 +775,7 @@ impl Vm {
             .map_err(Error::CpuManager)?;
         #[cfg(feature = "sev_snp")]
         if !sev_snp_enabled {
+            println!("MUISLAM: create_boot_vcpus 2\n");
             cpu_manager
                 .lock()
                 .unwrap()
@@ -1324,6 +1330,7 @@ impl Vm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
                 #[cfg(feature = "sev_snp")]
                 if sev_snp_enabled {
+                    println!("MUISLAM: load_payload with SEV-SNP enabled");
                     return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
                 }
                 #[cfg(not(feature = "sev_snp"))]

@@ -420,6 +420,7 @@ pub fn load_igvm(
 
     #[cfg(feature = "sev_snp")]
     {
+        println!("MUISLAM: allocate address space igvm_loader\n");
         memory_manager
             .lock()
             .unwrap()
