@@ -12118,6 +12118,10 @@ mod live_migration {
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
         )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
+        )]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false)
         }
@@ -12126,6 +12130,10 @@ mod live_migration {
         #[cfg_attr(
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
+        )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
         )]
         fn test_live_upgrade_local() {
             _test_live_migration(true, true)
@@ -12136,6 +12144,10 @@ mod live_migration {
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
         )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
+        )]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false)
         }
@@ -12144,6 +12156,10 @@ mod live_migration {
         #[cfg_attr(
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
+        )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
         )]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
@@ -12185,6 +12201,10 @@ mod live_migration {
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
         )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
+        )]
         fn test_live_upgrade_balloon() {
             _test_live_migration_balloon(true, false)
         }
@@ -12193,6 +12213,10 @@ mod live_migration {
         #[cfg_attr(
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
+        )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
         )]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true)
@@ -12203,6 +12227,10 @@ mod live_migration {
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
         )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
+        )]
         fn test_live_migration_numa() {
             _test_live_migration_numa(false, false)
         }
@@ -12211,6 +12239,10 @@ mod live_migration {
         #[cfg_attr(
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
+        )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
         )]
         fn test_live_migration_numa_local() {
             _test_live_migration_numa(false, true)
@@ -12221,6 +12253,10 @@ mod live_migration {
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
         )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
+        )]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
         }
@@ -12229,6 +12265,10 @@ mod live_migration {
         #[cfg_attr(
             all(feature = "mshv", target_arch = "aarch64"),
             ignore = "live migration not supported on mshv arm64"
+        )]
+        #[cfg_attr(
+            all(feature = "mshv", not(target_arch = "aarch64")),
+            ignore = "See #7542"
         )]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true)
