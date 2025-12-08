@@ -39,12 +39,18 @@ mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
     pub const JAMMY_VFIO_IMAGE_NAME: &str =
         "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
-    pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
-    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
-        "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -58,12 +64,18 @@ mod aarch64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
-    pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
-    pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
-        "focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
     pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
     pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
@@ -3609,9 +3621,14 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn _test_virtio_block(image_name: &str, disable_io_uring: bool, disable_aio: bool) {
-        let focal = UbuntuDiskConfig::new(image_name.to_string());
-        let guest = Guest::new(Box::new(focal));
+    fn _test_virtio_block(
+        image_name: &str,
+        disable_io_uring: bool,
+        disable_aio: bool,
+        verify_os_disk: bool,
+    ) {
+        let disk_config = UbuntuDiskConfig::new(image_name.to_string());
+        let guest = Guest::new(Box::new(disk_config));
 
         let mut workload_path = dirs::home_dir().unwrap();
         workload_path.push("workloads");
@@ -3702,31 +3719,86 @@ mod common_parallel {
         let output = cloud_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+
+        if verify_os_disk {
+            disk_check_consistency(guest.disk_config.disk(DiskType::OperatingSystem).unwrap());
+        }
     }
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true)
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true)
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false);
+    }
+
+    /// Uses `qemu-img check` to verify disk image consistency.
+    ///
+    /// Supported formats are `qcow2` (compressed and uncompressed),
+    /// `vhdx`, `qed`, `parallels`, `vmdk`, and `vdi`. See man page
+    /// for more details.
+    ///
+    /// It takes either a full path to the image or just the name of
+    /// the image located in the `workloads` directory.
+    fn disk_check_consistency(path_or_image_name: impl AsRef<std::path::Path>) {
+        let path = if path_or_image_name.as_ref().exists() {
+            // A full path is provided
+            path_or_image_name.as_ref().to_path_buf()
+        } else {
+            // An image name is provided
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            workload_path.as_path().join(path_or_image_name.as_ref())
+        };
+
+        let output = std::process::Command::new("qemu-img")
+            .args(["check", path.to_str().unwrap()])
+            .output()
+            .expect("should spawn and run command successfully");
+
+        assert!(
+            output.status.success(),
+            "qemu-img check failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false, false)
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true);
     }
 
     #[test]
-    fn test_virtio_block_qcow2_backing_file() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false, false)
+    fn test_virtio_block_qcow2_zlib() {
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zstd() {
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_zstd_file() {
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE, false, false, true);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_uncompressed_file() {
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            false,
+            false,
+            true,
+        );
     }
 
     #[test]
@@ -3751,7 +3823,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false);
     }
 
     #[test]
@@ -3775,7 +3847,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true);
     }
 
     #[test]
@@ -3868,6 +3940,8 @@ mod common_parallel {
         let output = cloud_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+
+        disk_check_consistency(vhdx_path);
     }
 
     fn vhdx_image_size(disk_name: &str) -> u64 {
