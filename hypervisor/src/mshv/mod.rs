@@ -78,6 +78,7 @@ pub use x86_64::{VcpuMshvState, emulator};
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
 pub use {
+    mshv_bindings::hv_partition_property_code_HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET as HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET,
     mshv_bindings::mshv_create_device as CreateDevice,
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
@@ -1828,6 +1829,16 @@ impl MshvVm {
         self.fd.get_partition_property(
             hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
         ).is_ok()
+    }
+
+    ///
+    /// Sets a partition property.
+    ///
+    /// This allows runtime configuration of partition properties.
+    pub fn set_partition_property(&self, code: u32, value: u64) -> anyhow::Result<()> {
+        self.fd
+            .set_partition_property(code, value)
+            .map_err(|e| anyhow!("Failed to set partition property: {e:?}"))
     }
 }
 
