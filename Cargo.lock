@@ -407,6 +407,7 @@ version = "48.0.0"
 dependencies = [
  "anyhow",
  "api_client",
+ "block",
  "clap",
  "dhat",
  "dirs",
