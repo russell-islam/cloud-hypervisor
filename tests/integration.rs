@@ -3631,6 +3631,7 @@ mod common_parallel {
         disable_io_uring: bool,
         disable_aio: bool,
         verify_os_disk: bool,
+        backing_files: bool,
     ) {
         let disk_config = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3653,8 +3654,9 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                    "path={},backing_files={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+                    if backing_files { "on"} else {"off"}
                 )
                 .as_str(),
                 format!(
@@ -3741,17 +3743,17 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false, false);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false, false);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false, false);
     }
 
     fn run_qemu_img(path: &std::path::Path, args: &[&str]) -> std::process::Output {
@@ -3927,22 +3929,28 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_zstd_file() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE, false, false, true);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
+            false,
+            false,
+            true,
+            true,
+        );
     }
 
     #[test]
@@ -3952,12 +3960,19 @@ mod common_parallel {
             false,
             false,
             true,
+            true,
         );
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE, false, false, true);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
+            false,
+            false,
+            true,
+            true,
+        );
     }
 
     #[test]
@@ -3982,7 +3997,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false, false);
     }
 
     #[test]
@@ -4006,7 +4021,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true, false);
     }
 
     #[test]

@@ -790,6 +790,7 @@ pub trait AsyncAdaptor {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
 pub enum ImageType {
     FixedVhd,
     Qcow2,
