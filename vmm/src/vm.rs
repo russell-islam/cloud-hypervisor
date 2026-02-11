@@ -567,6 +567,7 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
+
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
         #[cfg(not(feature = "guest_debug"))]
@@ -660,14 +661,16 @@ impl Vm {
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
-        // For MSHV, we need to create the interrupt controller before we initialize the VM.
-        // Because we need to set the base address of GICD before we initialize the VM.
+
+        // Initialize the VM now that we have created the device manager.
+        // For MSHV and non aarch64, we need to initialize the VM before creating vCPUs.
+        // For aarch64, we need to initialize the VM after creating interrupt controller.
+        // Push down write after the IC(Interrupt Controller) creation for MSHV aarch64.
         #[cfg(all(feature = "mshv", not(target_arch = "aarch64")))]
-        {
-            if is_mshv {
-                vm.init().map_err(Error::InitializeVm)?;
-            }
+        if is_mshv {
+            vm.init().map_err(Error::InitializeVm)?;
         }
+        
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
             cpu_manager
@@ -677,11 +680,11 @@ impl Vm {
                 .map_err(Error::CpuManager)?;
         }
 
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
+            // This initial SEV-SNP configuration must be done immediately after
+            // vCPUs are created. As part of this initialization we are
+            // transitioning the guest into secure state.
             vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
@@ -691,7 +694,7 @@ impl Vm {
         // Currently, Microsoft Hypervisor does not provide any
         // Hypervisor specific common cpuid, we need to call get_cpuid_values
         // per cpuid through cpu_manager.
-        let load_payload_handle = if snapshot.is_none() {
+        let _load_payload_handle = if snapshot.is_none() && sev_snp_enabled {
             Self::load_payload_async(
                 &memory_manager,
                 &config,
@@ -703,6 +706,7 @@ impl Vm {
         } else {
             None
         };
+
         #[cfg(feature = "mshv")]
         {
             if is_mshv {
@@ -725,7 +729,7 @@ impl Vm {
                     .map_err(Error::DeviceManager)?;
             }
         }
-
+    
         #[cfg(not(feature = "sev_snp"))]
         memory_manager
             .lock()
@@ -742,6 +746,7 @@ impl Vm {
                 .map_err(Error::MemoryManager)?;
         }
 
+
         #[cfg(target_arch = "aarch64")]
         memory_manager
             .lock()
@@ -749,8 +754,22 @@ impl Vm {
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
 
+        // First case is when sev_snp is enabled(compiled), but run time non-cvn
+        // guest boot. 2nd case is when sev_snp is not compiled in, KVM and MSHV regular guest boot.
         #[cfg(not(feature = "sev_snp"))]
-        let load_payload_handle = if snapshot.is_none() {
+        let _load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+            )?
+        } else {
+            None
+        };
+
+        #[cfg(feature = "sev_snp")]
+        let _load_payload_handle = if snapshot.is_none() && !sev_snp_enabled {
             Self::load_payload_async(
                 &memory_manager,
                 &config,
@@ -762,12 +781,16 @@ impl Vm {
         } else {
             None
         };
-        #[cfg(not(feature = "sev_snp"))]
+
+                #[cfg(not(feature = "sev_snp"))]
         cpu_manager
             .lock()
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
+
+        // First case is when sev_snp is enabled(compiled), but run time non-cvn
+        // guest boot. 2nd case is when sev_snp is not compiled in, KVM and MSHV regular guest boot.
         #[cfg(feature = "sev_snp")]
         if !sev_snp_enabled {
             cpu_manager
@@ -806,8 +829,7 @@ impl Vm {
                 .unwrap()
                 .payload
                 .as_ref()
-                .map(|p| p.fw_cfg_config.is_some())
-                .unwrap_or(false);
+                .is_some_and(|p| p.fw_cfg_config.is_some());
             if fw_cfg_config {
                 device_manager
                     .lock()
@@ -870,7 +892,7 @@ impl Vm {
             #[cfg(not(target_arch = "riscv64"))]
             hypervisor,
             stop_on_boot,
-            load_payload_handle,
+            load_payload_handle: _load_payload_handle,
         })
     }
 
