@@ -1096,6 +1096,11 @@ impl VmConfig {
             #[cfg(feature = "sev_snp")]
             mem_size: self.memory.total_size(),
             nested_enabled: self.cpus.nested_supported(hypervisor_type),
+            smt_enabled: self
+                .cpus
+                .topology
+                .as_ref()
+                .is_some_and(|t| t.threads_per_core > 1),
         }
     }
 }
