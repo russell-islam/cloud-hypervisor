@@ -66,7 +66,7 @@ pub struct EntryPoint {
 
 /// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
-    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    vcpu: &dyn hypervisor::Vcpu,
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
 ) -> super::Result<u64> {
@@ -131,7 +131,7 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
-    vcpu_mpidr: Vec<u64>,
+    vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     initrd: &Option<super::InitramfsConfig>,
@@ -162,7 +162,7 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
         fdt::print_fdt(&fdt_final);
     }
 
-    fdt::write_fdt_to_memory(fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
+    fdt::write_fdt_to_memory(&fdt_final, guest_mem).map_err(Error::WriteFdtToMemory)?;
 
     Ok(())
 }
@@ -188,7 +188,7 @@ pub fn initramfs_load_addr(
     }
 }
 
-pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     let host_cpu_phys_bits = hypervisor.get_host_ipa_limit().try_into().unwrap();
     if host_cpu_phys_bits == 0 {
         // Host kernel does not support `get_host_ipa_limit`,
@@ -200,7 +200,7 @@ pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

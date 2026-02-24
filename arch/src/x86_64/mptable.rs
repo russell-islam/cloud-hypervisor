@@ -8,6 +8,7 @@
 use std::{mem, result, slice};
 
 use libc::c_uchar;
+use log::{info, warn};
 use thiserror::Error;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
@@ -297,7 +298,7 @@ pub fn setup_mptable(
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::bitmap::BitmapSlice;
     use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
 

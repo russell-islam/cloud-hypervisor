@@ -13,6 +13,7 @@ use std::{mem, thread};
 #[cfg_attr(target_env = "musl", allow(deprecated))]
 use libc::time_t;
 use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
+use log::{info, warn};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -87,11 +88,11 @@ impl BusDevice for Cmos {
                         }
                     }
                 } else {
-                    self.data[(self.index & INDEX_MASK) as usize] = data[0]
+                    self.data[(self.index & INDEX_MASK) as usize] = data[0];
                 }
             }
-            o => warn!("bad write offset on CMOS device: {}", o),
-        };
+            o => warn!("bad write offset on CMOS device: {o}"),
+        }
         None
     }
 
@@ -164,7 +165,7 @@ impl BusDevice for Cmos {
                 }
             }
             o => {
-                warn!("bad read offset on CMOS device: {}", o);
+                warn!("bad read offset on CMOS device: {o}");
                 0
             }
         }

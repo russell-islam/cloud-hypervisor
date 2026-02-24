@@ -8,6 +8,7 @@
 use std::str::FromStr;
 use std::{fmt, io};
 
+use log::error;
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
@@ -38,13 +39,10 @@ impl MacAddr {
             if v[i].len() != 2 {
                 return common_err;
             }
-            bytes[i] = u8::from_str_radix(v[i], 16).map_err(|e| {
-                io::Error::other(format!(
-                    "parsing of {} into a MAC address failed: {}",
-                    s.as_ref(),
-                    e
-                ))
-            })?;
+            if !v[i].bytes().all(|a| a.is_ascii_hexdigit()) {
+                return common_err;
+            }
+            bytes[i] = u8::from_str_radix(v[i], 16).unwrap();
         }
 
         Ok(MacAddr { bytes })
@@ -83,10 +81,7 @@ impl MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = [0u8; MAC_ADDR_LEN];
         if let Err(e) = getrandom::fill(&mut random_bytes) {
-            error!(
-                "Error populating MAC address with random data: {}",
-                e.to_string()
-            );
+            error!("Error populating MAC address with random data: {e}");
         }
 
         // Set the first byte to make the OUI a locally administered OUI
@@ -142,7 +137,7 @@ impl FromStr for MacAddr {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]
@@ -188,6 +183,8 @@ mod tests {
 
         let bytes = mac.get_bytes();
         assert_eq!(bytes, [0x12u8, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
+
+        MacAddr::parse_str("12:34:56:78:9a:+c").unwrap_err();
 
         let s = serde_json::to_string(&mac).expect("MacAddr serialization failed.");
         assert_eq!(s, "\"12:34:56:78:9a:bc\"");

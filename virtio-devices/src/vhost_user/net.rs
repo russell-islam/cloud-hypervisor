@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, thread};
 
+use event_monitor::event;
+use log::{error, info};
 use net_util::{CtrlQueue, MacAddr, VirtioNetConfig, build_net_config_space};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -26,11 +28,10 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use crate::vhost_user::{Error, Result, VhostUserCommon};
+use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_IOMMU_PLATFORM,
-    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
 };
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -90,7 +91,7 @@ impl Net {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-net {}", id);
+            info!("Restoring vhost-user-net {id}");
 
             // The backend acknowledged features must not contain
             // VIRTIO_NET_F_MAC since we don't expect the backend
@@ -120,9 +121,7 @@ impl Net {
             // Filling device and vring features VMM supports.
             let mut avail_features = (1 << VIRTIO_NET_F_MRG_RXBUF)
                 | (1 << VIRTIO_NET_F_CTRL_VQ)
-                | (1 << VIRTIO_F_RING_EVENT_IDX)
-                | (1 << VIRTIO_F_VERSION_1)
-                | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+                | DEFAULT_VIRTIO_FEATURES;
 
             if mtu.is_some() {
                 avail_features |= 1u64 << VIRTIO_NET_F_MTU;
@@ -169,8 +168,7 @@ impl Net {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-net requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -246,7 +244,7 @@ impl Drop for Net {
         if let Some(kill_evt) = self.common.kill_evt.take()
             && let Err(e) = kill_evt.write(1)
         {
-            error!("failed to kill vhost-user-net: {:?}", e);
+            error!("failed to kill vhost-user-net: {e:?}");
         }
 
         self.common.wait_for_epoll_threads();
@@ -254,13 +252,13 @@ impl Drop for Net {
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
 
         if let Some(thread) = self.ctrl_queue_epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -283,7 +281,7 @@ impl VirtioDevice for Net {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -296,7 +294,7 @@ impl VirtioDevice for Net {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();
@@ -335,7 +333,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioVhostNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || ctrl_handler.run_ctrl(paused, paused_sync.unwrap()),
+                move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
@@ -352,7 +350,7 @@ impl VirtioDevice for Net {
 
         let mut handler = self.vu_common.activate(
             mem,
-            queues,
+            &queues,
             interrupt_cb,
             backend_acked_features,
             backend_req_handler,
@@ -370,7 +368,7 @@ impl VirtioDevice for Net {
             Thread::VirtioVhostNet,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 
@@ -386,7 +384,7 @@ impl VirtioDevice for Net {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 

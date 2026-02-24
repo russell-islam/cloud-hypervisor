@@ -6,12 +6,19 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::sync::Arc;
+
 pub mod interrupts;
 pub mod layout;
+pub mod regs;
+
+#[cfg(feature = "tdx")]
+pub mod tdx;
+
 mod mpspec;
 mod mptable;
-pub mod regs;
+mod smbios;
+
+use std::arch::x86_64;
 use std::mem;
 
 use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
@@ -20,6 +27,7 @@ use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
+use log::{debug, error, info};
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
@@ -27,10 +35,6 @@ use vm_memory::{
 };
 
 use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
-mod smbios;
-use std::arch::x86_64;
-#[cfg(feature = "tdx")]
-pub mod tdx;
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -40,11 +44,16 @@ pub const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
 #[cfg(feature = "kvm")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
+const VMX_ECX_BIT: u8 = 5; // VMX for Intel
+const SVM_ECX_BIT: u8 = 2; // SVM for AMD
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 const INVARIANT_TSC_EDX_BIT: u8 = 8; // Invariant TSC bit on 0x8000_0007 EDX
 const AMX_BF16: u8 = 22; // AMX tile computation on bfloat16 numbers
 const AMX_TILE: u8 = 24; // AMX tile load/store instructions
 const AMX_INT8: u8 = 25; // AMX tile computation on 8-bit integers
+
+const AMX_FP16: u8 = 21; // AMX tile computation on fp16 numbers
+const AMX_COMPLEX: u8 = 8; // AMX tile computation on complex numbers
 
 // KVM feature bits
 #[cfg(feature = "tdx")]
@@ -279,7 +288,7 @@ impl CpuidPatch {
         }
     }
 
-    pub fn patch_cpuid(cpuid: &mut [CpuIdEntry], patches: Vec<CpuidPatch>) {
+    pub fn patch_cpuid(cpuid: &mut [CpuIdEntry], patches: &[CpuidPatch]) {
         for entry in cpuid {
             for patch in patches.iter() {
                 if entry.function == patch.function && entry.index == patch.index {
@@ -547,9 +556,10 @@ impl CpuidFeatureEntry {
 }
 
 pub fn generate_common_cpuid(
-    hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+    hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
+    #[allow(unused_unsafe)]
     // SAFETY: cpuid called with valid leaves
     if unsafe { x86_64::__cpuid(1) }.ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
         // SAFETY: cpuid called with valid leaves
@@ -616,14 +626,14 @@ pub fn generate_common_cpuid(
         .get_supported_cpuid()
         .map_err(Error::CpuidGetSupported)?;
 
-    CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
+    CpuidPatch::patch_cpuid(&mut cpuid, &cpuid_patches);
 
     #[cfg(feature = "tdx")]
     let tdx_capabilities = if config.tdx {
         let caps = hypervisor
             .tdx_capabilities()
             .map_err(Error::TdxCapabilities)?;
-        info!("TDX capabilities {:#?}", caps);
+        info!("TDX capabilities {caps:#?}");
         Some(caps)
     } else {
         None
@@ -634,8 +644,14 @@ pub fn generate_common_cpuid(
         match entry.function {
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 => {
-                if !config.amx && entry.index == 0 {
-                    entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8))
+                if !config.amx {
+                    if entry.index == 0 {
+                        entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8));
+                    }
+                    if entry.index == 1 {
+                        entry.eax &= !(1 << AMX_FP16);
+                        entry.edx &= !(1 << AMX_COMPLEX);
+                    }
                 }
             }
             0xd =>
@@ -657,9 +673,29 @@ pub fn generate_common_cpuid(
                     }
                 }
             }
+            0x1d => {
+                // Tile Information (purely AMX related).
+                if !config.amx {
+                    entry.eax = 0;
+                    entry.ebx = 0;
+                    entry.ecx = 0;
+                    entry.edx = 0;
+                }
+            }
+            0x1e => {
+                // TMUL information (purely AMX related)
+                if !config.amx {
+                    entry.eax = 0;
+                    entry.ebx = 0;
+                    entry.ecx = 0;
+                    entry.edx = 0;
+                }
+            }
+
             // Copy host L1 cache details if not populated by KVM
             0x8000_0005 => {
                 if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                    #[allow(unused_unsafe)]
                     // SAFETY: cpuid called with valid leaves
                     if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 {
                         // SAFETY: cpuid called with valid leaves
@@ -674,8 +710,10 @@ pub fn generate_common_cpuid(
             // Copy host L2 cache details if not populated by KVM
             0x8000_0006 => {
                 if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                    #[allow(unused_unsafe)]
                     // SAFETY: cpuid called with valid leaves
                     if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 {
+                        #[allow(unused_unsafe)]
                         // SAFETY: cpuid called with valid leaves
                         let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
                         entry.eax = leaf.eax;
@@ -702,7 +740,7 @@ pub fn generate_common_cpuid(
                         | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
                         | (1 << KVM_FEATURE_ASYNC_PF_BIT)
                         | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
-                        | (1 << KVM_FEATURE_STEAL_TIME_BIT))
+                        | (1 << KVM_FEATURE_STEAL_TIME_BIT));
                 }
             }
             _ => {}
@@ -713,6 +751,7 @@ pub fn generate_common_cpuid(
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
         // SAFETY: call cpuid with valid leaves
+        #[allow(unused_unsafe)]
         let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
         cpuid.push(CpuIdEntry {
             function: i,
@@ -774,14 +813,16 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn configure_vcpu(
-    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    vcpu: &dyn hypervisor::Vcpu,
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: (u16, u16, u16, u16),
+    nested: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, Some(topology));
 
@@ -800,6 +841,17 @@ pub fn configure_vcpu(
             entry.ebx &= 0xffffff;
             entry.ebx |= x2apic_id << 24;
             apic_id_patched = true;
+            if !nested {
+                // Disable nested virtualization for Intel
+                entry.ecx &= !(1 << VMX_ECX_BIT);
+            }
+            break;
+        }
+        if entry.function == 0x8000_0001 {
+            if !nested {
+                // Disable the nested virtualization for AMD
+                entry.ecx &= !(1 << SVM_ECX_BIT);
+            }
             break;
         }
     }
@@ -812,6 +864,7 @@ pub fn configure_vcpu(
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv && let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
         // Need to check that the TSC doesn't vary with dynamic frequency
+        #[allow(unused_unsafe)]
         // SAFETY: cpuid called with valid leaves
         if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT)
             > 0
@@ -825,11 +878,11 @@ pub fn configure_vcpu(
                                * APIC_BUS_CYCLE_NS */
                 ..Default::default()
             });
-        };
+        }
     }
 
     for c in &cpuid {
-        debug!("{}", c);
+        debug!("{c}");
     }
 
     vcpu.set_cpuid2(&cpuid)
@@ -995,17 +1048,15 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
             && (first_region_end <= &mem_32bit_reserved_start))
         {
             error!(
-                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
-                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
-                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
+                "Unexpected first memory region layout: (start: 0x{first_region_start:08x}, end: 0x{first_region_end:08x}).
+                high_ram_start: 0x{high_ram_start:08x}, mem_32bit_reserved_start: 0x{mem_32bit_reserved_start:08x}"
             );
 
             return Err(super::Error::MemmapTableSetup);
         }
 
         info!(
-            "first usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
-            high_ram_start, first_region_end
+            "first usable physical memory range, start: 0x{high_ram_start:08x}, end: 0x{first_region_end:08x}"
         );
 
         (high_ram_start, *first_region_end)
@@ -1260,8 +1311,9 @@ pub fn initramfs_load_addr(
     Ok(aligned_addr)
 }
 
-pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     // SAFETY: call cpuid with valid leaves
+    #[allow(unused_unsafe)]
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
 
@@ -1306,9 +1358,10 @@ fn update_cpuid_topology(
     let die_width = u16::BITS - (dies_per_package - 1).leading_zeros() + core_width;
 
     // The very old way: a flat number of logical CPUs per package: CPUID.1H:EBX[23:16] bits.
+    let core_count = dies_per_package as u32 * cores_per_die as u32 * threads_per_core as u32;
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
-    cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
-        & (0xff << 16);
+    cpu_ebx &= !(0xff << 16);
+    cpu_ebx |= (core_count & 0xff) << 16;
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
 
     let mut cpu_edx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX).unwrap_or(0);
@@ -1349,6 +1402,7 @@ fn update_cpuid_topology(
         u32::from(threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::ECX, 1 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EDX, x2apic_id);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EAX, core_width);
     CpuidPatch::set_cpuid_reg(
@@ -1359,6 +1413,7 @@ fn update_cpuid_topology(
         u32::from(cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::ECX, 2 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EDX, x2apic_id);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EAX, die_width);
     CpuidPatch::set_cpuid_reg(
@@ -1369,6 +1424,7 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EDX, x2apic_id);
 
     if matches!(cpu_vendor, CpuVendor::AMD) {
         CpuidPatch::set_cpuid_reg(
@@ -1415,7 +1471,7 @@ fn update_cpuid_topology(
                     edx_bit: Some(28),
                 },
             ];
-            CpuidPatch::patch_cpuid(cpuid, cpuid_patches);
+            CpuidPatch::patch_cpuid(cpuid, &cpuid_patches);
             CpuidPatch::set_cpuid_reg(
                 cpuid,
                 0x8000_0008,
@@ -1430,7 +1486,7 @@ fn update_cpuid_topology(
     }
 }
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
 
     use super::*;

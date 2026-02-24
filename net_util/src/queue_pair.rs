@@ -8,6 +8,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use log::{error, info};
 use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
@@ -45,7 +46,7 @@ impl TxVirtio {
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<bool, NetQueuePairError> {
         let mut retry_write = false;
         let mut rate_limit_reached = false;
@@ -67,8 +68,9 @@ impl TxVirtio {
                     let buf = desc_chain
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?
-                        .ptr_guard_mut();
+                        .map_err(NetQueuePairError::GuestMemory)?;
+                    assert!(buf.len() >= desc.len() as usize);
+                    let buf = buf.ptr_guard_mut();
                     let iovec = libc::iovec {
                         iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
@@ -86,7 +88,9 @@ impl TxVirtio {
                 next_desc = desc_chain.next();
             }
 
-            let len = if !iovecs.is_empty() {
+            let len = if iovecs.is_empty() {
+                0
+            } else {
                 // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::writev(
@@ -105,7 +109,7 @@ impl TxVirtio {
                         retry_write = true;
                         break;
                     }
-                    error!("net: tx: failed writing to tap: {}", e);
+                    error!("net: tx: failed writing to tap: {e}");
                     return Err(NetQueuePairError::WriteTap(e));
                 }
 
@@ -117,8 +121,6 @@ impl TxVirtio {
                 self.counter_frames += Wrapping(1);
 
                 result as u32
-            } else {
-                0
             };
 
             // For the sake of simplicity (similar to the RX rate limiting), we always
@@ -173,7 +175,7 @@ impl RxVirtio {
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<bool, NetQueuePairError> {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
@@ -208,8 +210,9 @@ impl RxVirtio {
                     let buf = desc_chain
                         .memory()
                         .get_slice(desc_addr, desc.len() as usize)
-                        .map_err(NetQueuePairError::GuestMemory)?
-                        .ptr_guard_mut();
+                        .map_err(NetQueuePairError::GuestMemory)?;
+                    assert!(buf.len() >= desc.len() as usize);
+                    let buf = buf.ptr_guard_mut();
                     let iovec = libc::iovec {
                         iov_base: buf.as_ptr() as *mut libc::c_void,
                         iov_len: desc.len() as libc::size_t,
@@ -227,7 +230,9 @@ impl RxVirtio {
                 next_desc = desc_chain.next();
             }
 
-            let len = if !iovecs.is_empty() {
+            let len = if iovecs.is_empty() {
+                0
+            } else {
                 // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::readv(
@@ -246,7 +251,7 @@ impl RxVirtio {
                         break;
                     }
 
-                    error!("net: rx: failed reading from tap: {}", e);
+                    error!("net: rx: failed reading from tap: {e}");
                     return Err(NetQueuePairError::ReadTap(e));
                 }
 
@@ -265,8 +270,6 @@ impl RxVirtio {
                 self.counter_frames += Wrapping(1);
 
                 result as u32
-            } else {
-                0
             };
 
             // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and
@@ -413,7 +416,7 @@ impl NetQueuePair {
             &self.tap,
             queue,
             &mut self.tx_rate_limiter,
-            self.access_platform.as_ref(),
+            self.access_platform.as_deref(),
         )?;
 
         // We got told to try again when writing to the tap. Wait for the TAP to be writable
@@ -463,7 +466,7 @@ impl NetQueuePair {
             &self.tap,
             queue,
             &mut self.rx_rate_limiter,
-            self.access_platform.as_ref(),
+            self.access_platform.as_deref(),
         )?;
         let rate_limit_reached = self
             .rx_rate_limiter

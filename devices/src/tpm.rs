@@ -4,6 +4,7 @@
 //
 
 use std::cmp;
+use std::path::Path;
 use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
@@ -11,6 +12,7 @@ use anyhow::anyhow;
 use arch::aarch64::layout::{TPM_SIZE, TPM_START};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::layout::{TPM_SIZE, TPM_START};
+use log::{debug, error, warn};
 use thiserror::Error;
 use tpm::TPM_CRB_BUFFER_MAX;
 use tpm::emulator::{BackendCmd, Emulator};
@@ -26,6 +28,7 @@ pub enum Error {
 type Result<T> = anyhow::Result<T, Error>;
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum LocStateFields {
     TpmEstablished,
     LocAssigned,
@@ -34,12 +37,14 @@ enum LocStateFields {
     TpmRegValidSts,
 }
 
+#[derive(Copy, Clone)]
 enum LocStsFields {
     Granted,
     BeenSeized,
 }
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum IntfIdFields {
     InterfaceType,
     InterfaceVersion,
@@ -57,16 +62,19 @@ enum IntfIdFields {
 }
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum IntfId2Fields {
     Vid,
     Did,
 }
 
+#[derive(Copy, Clone)]
 enum CtrlStsFields {
     TpmSts,
     TpmIdle,
 }
 
+#[derive(Copy, Clone)]
 enum CrbRegister {
     LocState(LocStateFields),
     LocSts(LocStsFields),
@@ -99,6 +107,7 @@ const CRB_LOC_CTRL_REQUEST_ACCESS: u32 = 1 << 0;
 const CRB_LOC_CTRL_RELINQUISH: u32 = 1 << 1;
 const CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT: u32 = 1 << 3;
 const CRB_LOC_STS: u32 = 0x0C;
+
 const fn get_crb_loc_sts_field(f: LocStsFields) -> (u32, u32, u32) {
     let (offset, len) = match f {
         LocStsFields::Granted => (0, 1),
@@ -219,9 +228,9 @@ pub struct Tpm {
 }
 
 impl Tpm {
-    pub fn new(path: String) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let emulator = Emulator::new(path)
-            .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {:?}", e)))?;
+            .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {e:?}")))?;
         let mut tpm = Tpm {
             emulator,
             regs: [0; TPM_CRB_R_MAX],
@@ -331,8 +340,7 @@ impl Tpm {
 
         if let Err(e) = self.emulator.startup_tpm(self.backend_buff_size) {
             return Err(Error::Init(anyhow!(
-                "Failed while running Startup TPM. Error: {:?}",
-                e
+                "Failed while running Startup TPM. Error: {e:?}"
             )));
         }
         Ok(())
@@ -460,7 +468,7 @@ impl BusDevice for Tpm {
                         && (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE != 0)
                         && let Err(e) = self.emulator.cancel_cmd()
                     {
-                        error!("Failed to run cancel command. Error: {:?}", e);
+                        error!("Failed to run cancel command. Error: {e:?}");
                     }
                 }
                 CRB_CTRL_START => {
@@ -481,10 +489,7 @@ impl BusDevice for Tpm {
                     }
                 }
                 CRB_LOC_CTRL => {
-                    warn!(
-                        "CRB_LOC_CTRL locality to write = {:?} val = {:?}",
-                        locality, v
-                    );
+                    warn!("CRB_LOC_CTRL locality to write = {locality:?} val = {v:?}");
                     match v {
                         CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT => {}
                         CRB_LOC_CTRL_RELINQUISH => {
@@ -517,7 +522,7 @@ impl BusDevice for Tpm {
                             );
                         }
                         _ => {
-                            error!("Invalid value to write in CRB_LOC_CTRL {:#X} ", v);
+                            error!("Invalid value to write in CRB_LOC_CTRL {v:#X} ");
                         }
                     }
                 }
@@ -535,7 +540,7 @@ impl BusDevice for Tpm {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

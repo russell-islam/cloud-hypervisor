@@ -15,6 +15,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use hypervisor::HypervisorType;
+use log::error;
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
 };
@@ -29,7 +30,7 @@ use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
     VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot,
-    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
+    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::landlock::Landlock;
@@ -75,6 +76,7 @@ const HTTP_ROOT: &str = "/api/v1";
 /// The error message contained in the response is supposed to be user-facing,
 /// thus insightful and helpful while balancing technical accuracy and
 /// simplicity.
+#[allow(clippy::needless_pass_by_value)]
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
 
@@ -250,6 +252,10 @@ pub static HTTP_ROUTES: LazyLock<HttpRoutes> = LazyLock::new(|| {
         Box::new(VmActionHandler::new(&VmResize)),
     );
     r.routes.insert(
+        endpoint!("/vm.resize-disk"),
+        Box::new(VmActionHandler::new(&VmResizeDisk)),
+    );
+    r.routes.insert(
         endpoint!("/vm.resize-zone"),
         Box::new(VmActionHandler::new(&VmResizeZone)),
     );
@@ -338,7 +344,7 @@ fn start_http_thread(
                 apply_filter(&api_seccomp_filter)
                     .map_err(VmmError::ApplySeccompFilter)
                     .map_err(|e| {
-                        error!("Error applying seccomp filter: {:?}", e);
+                        error!("Error applying seccomp filter: {e:?}");
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -350,7 +356,7 @@ fn start_http_thread(
                     .restrict_self()
                     .map_err(VmmError::ApplyLandlock)
                     .map_err(|e| {
-                        error!("Error applying landlock to http-server thread: {:?}", e);
+                        error!("Error applying landlock to http-server thread: {e:?}");
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -365,7 +371,7 @@ fn start_http_thread(
                                 if let Err(e) = server.respond(server_request.process(|request| {
                                     handle_http_request(request, &api_notifier, &api_sender)
                                 })) {
-                                    error!("HTTP server error on response: {}", e);
+                                    error!("HTTP server error on response: {e}");
                                 }
                             }
                         }
@@ -374,10 +380,7 @@ fn start_http_thread(
                             return;
                         }
                         Err(e) => {
-                            error!(
-                                "HTTP server error on retrieving incoming request. Error: {}",
-                                e
-                            );
+                            error!("HTTP server error on retrieving incoming request. Error: {e}");
                         }
                     }
                 }

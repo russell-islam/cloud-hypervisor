@@ -5,9 +5,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-#[macro_use]
-extern crate log;
-
 mod ctrl_queue;
 mod mac;
 mod open_tap;
@@ -189,7 +186,7 @@ pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

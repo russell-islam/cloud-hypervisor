@@ -6,7 +6,7 @@ on:
   pull_request:
     paths: resources/Dockerfile
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -41,7 +41,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # generate Docker tags based on the following events/attributes
           tags: |
-            type=raw,value=20250815-0
+            type=raw,value=20251114-0
             type=sha
 
       - name: Build and push

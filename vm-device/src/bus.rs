@@ -43,7 +43,7 @@ impl<B: BusDevice> BusDeviceSync for Mutex<B> {
     fn read(&self, base: u64, offset: u64, data: &mut [u8]) {
         self.lock()
             .expect("Failed to acquire device lock")
-            .read(base, offset, data)
+            .read(base, offset, data);
     }
     /// Writes at `offset` into this device
     fn write(&self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -147,6 +147,7 @@ impl Bus {
         None
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
@@ -192,12 +193,13 @@ impl Bus {
     }
 
     /// Removes all entries referencing the given device.
-    pub fn remove_by_device(&self, device: &Arc<dyn BusDeviceSync>) -> Result<()> {
+    pub fn remove_by_device(&self, device: &dyn BusDeviceSync) -> Result<()> {
         let mut device_list = self.devices.write().unwrap();
         let mut remove_key_list = Vec::new();
 
         for (key, value) in device_list.iter() {
-            if Arc::ptr_eq(&value.upgrade().unwrap(), device) {
+            let value = value.upgrade().unwrap();
+            if core::ptr::eq(Arc::as_ptr(&value), device) {
                 remove_key_list.push(*key);
             }
         }
@@ -258,7 +260,7 @@ impl Bus {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     struct DummyDevice;
@@ -274,7 +276,7 @@ mod tests {
 
         fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
             for (i, v) in data.iter().enumerate() {
-                assert_eq!(*v, (offset as u8) + (i as u8))
+                assert_eq!(*v, (offset as u8) + (i as u8));
             }
 
             None
@@ -302,7 +304,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn bus_read_write() {
         let bus = Bus::new();
         let dummy = Arc::new(DummyDevice);
@@ -320,7 +321,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn bus_read_write_values() {
         let bus = Bus::new();
         let dummy = Arc::new(ConstantDevice);
@@ -336,7 +336,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn busrange_cmp() {
         let range = BusRange { base: 0x10, len: 2 };
         assert_eq!(range, BusRange { base: 0x10, len: 3 });

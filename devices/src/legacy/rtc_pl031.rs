@@ -15,6 +15,7 @@ use std::result;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 
+use log::warn;
 use thiserror::Error;
 use vm_device::BusDevice;
 
@@ -201,12 +202,11 @@ impl BusDevice for Rtc {
         if data.len() <= 4 {
             let v = read_le_u32(data);
             if let Err(e) = self.handle_write(offset, v) {
-                warn!("Failed to write to RTC PL031 device: {}", e);
+                warn!("Failed to write to RTC PL031 device: {e}");
             }
         } else {
             warn!(
-                "Invalid RTC PL031 write: offset {}, data length {}",
-                offset,
+                "Invalid RTC PL031 write: offset {offset}, data length {}",
                 data.len()
             );
         }
@@ -216,7 +216,7 @@ impl BusDevice for Rtc {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::{
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,

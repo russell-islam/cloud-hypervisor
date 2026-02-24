@@ -7,6 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::PciBarType;
@@ -593,7 +594,7 @@ impl PciConfiguration {
                     writable_bits[9] = 0xfff0_fff0; // Memory base and limit
                     writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
                 }
-            };
+            }
             registers[11] = (u32::from(subsystem_id) << 16) | u32::from(subsystem_vendor_id);
 
             (
@@ -662,7 +663,7 @@ impl PciConfiguration {
         if let Some(r) = self.registers.get_mut(reg_idx) {
             *r = (*r & !self.writable_bits[reg_idx]) | (value & mask);
         } else {
-            warn!("bad PCI register write {}", reg_idx);
+            warn!("bad PCI register write {reg_idx}");
         }
     }
 
@@ -672,7 +673,7 @@ impl PciConfiguration {
             0 => 0,
             2 => 16,
             _ => {
-                warn!("bad PCI config write offset {}", offset);
+                warn!("bad PCI config write offset {offset}");
                 return;
             }
         };
@@ -684,7 +685,7 @@ impl PciConfiguration {
             let shifted_value = (u32::from(value) << shift) & writable_mask;
             *r = *r & !mask | shifted_value;
         } else {
-            warn!("bad PCI config write offset {}", offset);
+            warn!("bad PCI config write offset {offset}");
         }
     }
 
@@ -708,7 +709,7 @@ impl PciConfiguration {
             let shifted_value = (u32::from(value) << shift) & writable_mask;
             *r = *r & !mask | shifted_value;
         } else {
-            warn!("bad PCI config write offset {}", offset);
+            warn!("bad PCI config write offset {offset}");
         }
     }
 
@@ -947,12 +948,11 @@ impl PciConfiguration {
                     self.pending_bar_reprogram
                 );
                 return self.pending_bar_reprogram.drain(..).collect();
-            } else {
-                info!(
-                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
-                    self.pending_bar_reprogram
-                );
             }
+            info!(
+                "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                self.pending_bar_reprogram
+            );
         }
 
         Vec::new()
@@ -1180,7 +1180,7 @@ impl PciBarConfiguration {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::ByteValued;
 
     use super::*;

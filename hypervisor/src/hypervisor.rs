@@ -89,6 +89,13 @@ pub enum HypervisorError {
     ///
     #[error("Unsupported VmType")]
     UnsupportedVmType(),
+
+    ///
+    /// The attempt to enable AMX tile state components failed
+    ///
+    #[cfg(target_arch = "x86_64")]
+    #[error("Failed to enable AMX tile state components")]
+    CouldNotEnableAmxStateComponents(#[source] crate::arch::x86::AmxGuestSupportError),
 }
 
 ///
@@ -148,7 +155,8 @@ pub trait Hypervisor: Send + Sync {
     /// Determine CPU vendor
     ///
     fn get_cpu_vendor(&self) -> CpuVendor {
-        // SAFETY: call cpuid with valid leaves
+        #[allow(unused_unsafe)]
+        // SAFETY: not actually unsafe, but considered unsafe by current stable
         unsafe {
             let leaf = x86_64::__cpuid(0x0);
 
@@ -173,5 +181,20 @@ pub trait Hypervisor: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn vmm_can_set_vgic_locations(&self) -> bool {
         true
+    }
+
+    /// This function enables the AMX related TILECFG and TILEDATA state components for guests.
+    ///
+    /// # Background
+    /// AMX uses a concept of tiles which are small 2D blocks of data stored in registers on the CPU,
+    /// where the TILECFG state component defines the shape and size of each tile (rows and columns),
+    /// and the TILEDATA state component holds the actual elements of these tiles used by matrix operations.
+    #[cfg(target_arch = "x86_64")]
+    fn enable_amx_state_components(&self) -> Result<()> {
+        let cpu_vendor = self.get_cpu_vendor();
+        crate::arch::x86::amx_supported(cpu_vendor)
+            .map_err(HypervisorError::CouldNotEnableAmxStateComponents)?;
+        crate::arch::x86::request_guest_amx_support()
+            .map_err(HypervisorError::CouldNotEnableAmxStateComponents)
     }
 }

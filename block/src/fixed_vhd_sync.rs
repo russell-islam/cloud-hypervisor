@@ -23,13 +23,23 @@ impl FixedVhdDiskSync {
 }
 
 impl DiskFile for FixedVhdDiskSync {
-    fn size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.0.size().unwrap())
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
+        Ok(self.0.logical_size().unwrap())
+    }
+
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.0.physical_size().map_err(|e| {
+            let io_inner = match e {
+                crate::Error::GetFileMetadata(e) => e,
+                _ => unreachable!(),
+            };
+            DiskFileError::Size(io_inner)
+        })
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
-            FixedVhdSync::new(self.0.as_raw_fd(), self.0.size().unwrap())
+            FixedVhdSync::new(self.0.as_raw_fd(), self.0.logical_size().unwrap())
                 .map_err(DiskFileError::NewAsyncIo)?,
         ) as Box<dyn AsyncIo>)
     }
@@ -102,5 +112,17 @@ impl AsyncIo for FixedVhdSync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.raw_file_sync.next_completed_request()
+    }
+
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::PunchHole(std::io::Error::other(
+            "punch_hole not supported for fixed VHD",
+        )))
+    }
+
+    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+            "write_zeroes not supported for fixed VHD",
+        )))
     }
 }

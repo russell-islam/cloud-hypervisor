@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use acpi_tables::{Aml, aml};
 use arch::layout;
+use log::info;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo};
@@ -227,7 +228,7 @@ impl Aml for PciDevSlot {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -281,7 +282,7 @@ impl Aml for PciDevSlotMethods {
                 &aml::Release::new("\\_SB_.PHPR.BLCK".into()),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -344,7 +345,7 @@ impl Aml for PciDsmMethod {
                 &aml::Return::new(&aml::BufferData::new(vec![0])),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -470,6 +471,6 @@ impl Aml for PciSegment {
             format!("_SB_.PC{:02X}", self.id).as_str().into(),
             pci_dsdt_inner_data,
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }

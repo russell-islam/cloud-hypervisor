@@ -15,6 +15,9 @@ use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
 use igvm_defs::{
     IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType, IgvmPlatformType,
 };
+use log::debug;
+#[cfg(feature = "sev_snp")]
+use log::info;
 use mshv_bindings::*;
 use thiserror::Error;
 use zerocopy::IntoBytes;
@@ -46,7 +49,7 @@ pub enum Error {
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
     #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
-    #[error("allocate address space")]
+    #[error("Error allocating address space")]
     MemoryManager(MemoryManagerError),
 }
 
@@ -130,7 +133,7 @@ fn import_parameter(
 /// Right now it only supports SNP based isolation.
 /// We can boot legacy VM with an igvm file without
 /// any isolation.
-///
+#[allow(clippy::needless_pass_by_value)]
 pub fn load_igvm(
     mut file: &std::fs::File,
     memory_manager: Arc<Mutex<MemoryManager>>,

@@ -4,7 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io::{self, BufWriter, Seek, SeekFrom, Write};
+use std::fmt::Debug;
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
 
@@ -13,25 +14,184 @@ use vmm_sys_util::write_zeroes::WriteZeroes;
 
 use super::RawFile;
 
+// Type aliases for the refcount read/write function pointers
+type RefcountReader = fn(&mut RawFile, usize) -> io::Result<Vec<u64>>;
+type RefcountWriter = fn(&mut RawFile, &[u64]) -> io::Result<()>;
+
+/// Big-endian file access trait.
+pub(super) trait BeUint: Sized + Copy {
+    fn from_be_slice(bytes: &[u8]) -> u64;
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self>;
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()>;
+}
+
+impl BeUint for u8 {
+    #[inline(always)]
+    fn from_be_slice(bytes: &[u8]) -> u64 {
+        bytes[0] as u64
+    }
+    #[inline(always)]
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u8()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u8(val)
+    }
+}
+
+impl BeUint for u16 {
+    #[inline(always)]
+    fn from_be_slice(bytes: &[u8]) -> u64 {
+        u16::from_be_bytes([bytes[0], bytes[1]]) as u64
+    }
+    #[inline(always)]
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u16::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u16::<BigEndian>(val)
+    }
+}
+
+impl BeUint for u32 {
+    #[inline(always)]
+    fn from_be_slice(bytes: &[u8]) -> u64 {
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
+    }
+    #[inline(always)]
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u32::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u32::<BigEndian>(val)
+    }
+}
+
+impl BeUint for u64 {
+    #[inline(always)]
+    fn from_be_slice(bytes: &[u8]) -> u64 {
+        u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
+    }
+    #[inline(always)]
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u64::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u64::<BigEndian>(val)
+    }
+}
+
+/// Read byte-aligned refcounts.
+fn read_refcount<T: BeUint>(file: &mut RawFile, count: usize) -> io::Result<Vec<u64>> {
+    let bytes_per_entry = size_of::<T>();
+    let mut data = vec![0u8; count * bytes_per_entry];
+    file.read_exact(&mut data)?;
+    Ok(data
+        .chunks_exact(bytes_per_entry)
+        .map(T::from_be_slice)
+        .collect())
+}
+
+/// Write byte-aligned refcounts.
+fn write_refcount<T: BeUint + TryFrom<u64>>(file: &mut RawFile, table: &[u64]) -> io::Result<()>
+where
+    <T as TryFrom<u64>>::Error: Debug,
+{
+    let bytes_per_entry = size_of::<T>();
+    let mut buffer = BufWriter::with_capacity(table.len() * bytes_per_entry, file);
+    for &val in table {
+        let converted = T::try_from(val).expect("refcount values are validated on increment");
+        T::write_be(&mut buffer, converted)?;
+    }
+    buffer.flush()
+}
+
+/// Read sub-byte refcounts. Bit 0 is the least significant bit.
+fn read_refcount_subbyte<const BITS: usize>(
+    file: &mut RawFile,
+    count: usize,
+) -> io::Result<Vec<u64>> {
+    const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
+    let entries_per_byte = 8 / BITS;
+    let mask = (1u64 << BITS) - 1;
+    let bytes_needed = count.div_ceil(entries_per_byte);
+    let mut bytes = vec![0u8; bytes_needed];
+    file.read_exact(&mut bytes)?;
+
+    let mut table = vec![0u64; count];
+    for (i, val) in table.iter_mut().enumerate() {
+        let byte_idx = i / entries_per_byte;
+        let bit_offset = (i % entries_per_byte) * BITS;
+        *val = (bytes[byte_idx] as u64 >> bit_offset) & mask;
+    }
+    Ok(table)
+}
+
+/// Write sub-byte refcounts. Bit 0 is the least significant bit.
+fn write_refcount_subbyte<const BITS: usize>(file: &mut RawFile, table: &[u64]) -> io::Result<()> {
+    const { assert!(BITS == 1 || BITS == 2 || BITS == 4) };
+    let entries_per_byte = 8 / BITS;
+    let mask = (1u64 << BITS) - 1;
+    let mut buffer = BufWriter::with_capacity(table.len().div_ceil(entries_per_byte), file);
+
+    for chunk in table.chunks(entries_per_byte) {
+        let mut byte = 0u8;
+        for (i, &val) in chunk.iter().enumerate() {
+            let bit_offset = i * BITS;
+            byte |= ((val & mask) << bit_offset) as u8;
+        }
+        buffer.write_u8(byte)?;
+    }
+    buffer.flush()
+}
+
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]
 pub struct QcowRawFile {
     file: RawFile,
     cluster_size: u64,
     cluster_mask: u64,
+    refcount_block_entries: u64,
+    read_refcount_fn: RefcountReader,
+    write_refcount_fn: RefcountWriter,
 }
 
 impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
-    /// a power of two.
-    pub fn from(file: RawFile, cluster_size: u64) -> Option<Self> {
+    /// a power of two or refcount_bits is invalid.
+    pub fn from(file: RawFile, cluster_size: u64, refcount_bits: u64) -> Option<Self> {
         if !cluster_size.is_power_of_two() {
             return None;
         }
+
+        let (read_refcount_fn, write_refcount_fn): (RefcountReader, RefcountWriter) =
+            match refcount_bits {
+                1 => (read_refcount_subbyte::<1>, write_refcount_subbyte::<1>),
+                2 => (read_refcount_subbyte::<2>, write_refcount_subbyte::<2>),
+                4 => (read_refcount_subbyte::<4>, write_refcount_subbyte::<4>),
+                8 => (read_refcount::<u8>, write_refcount::<u8>),
+                16 => (read_refcount::<u16>, write_refcount::<u16>),
+                32 => (read_refcount::<u32>, write_refcount::<u32>),
+                64 => (read_refcount::<u64>, write_refcount::<u64>),
+                _ => return None,
+            };
+
+        // For sub-byte refcounts (1,2,4 bits), entries pack multiple per byte
+        let refcount_block_entries = cluster_size * 8 / refcount_bits;
+
         Some(QcowRawFile {
             file,
             cluster_size,
             cluster_mask: cluster_size - 1,
+            refcount_block_entries,
+            read_refcount_fn,
+            write_refcount_fn,
         })
     }
 
@@ -61,47 +221,65 @@ impl QcowRawFile {
         self.read_pointer_table(offset, count, mask)
     }
 
-    /// Writes `table` of u64 pointers to `offset` in the file.
-    /// `non_zero_flags` will be ORed with all non-zero values in `table`.
-    /// writing.
-    pub fn write_pointer_table(
+    /// Internal helper for creating a buffered writer for pointer tables.
+    #[inline]
+    fn setup_pointer_table_writer<T>(
         &mut self,
         offset: u64,
-        table: &[u64],
-        non_zero_flags: u64,
-    ) -> io::Result<()> {
+        entries: &impl Iterator<Item = T>,
+    ) -> io::Result<BufWriter<RawFile>> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = BufWriter::with_capacity(std::mem::size_of_val(table), &mut self.file);
-        for addr in table {
-            let val = if *addr == 0 {
-                0
-            } else {
-                *addr | non_zero_flags
-            };
-            buffer.write_u64::<BigEndian>(val)?;
+        let my_file = self.file.try_clone()?;
+        let capacity = entries.size_hint().0 * size_of::<u64>();
+        Ok(BufWriter::with_capacity(capacity, my_file))
+    }
+
+    /// Writes a pointer table to `offset` in the file.
+    /// Entries are computed on-the-fly by the callback.
+    pub fn write_pointer_table<'a, T: Copy + 'a>(
+        &mut self,
+        offset: u64,
+        entries: impl Iterator<Item = &'a T>,
+        mut f: impl FnMut(&mut QcowRawFile, T) -> io::Result<u64>,
+    ) -> io::Result<()> {
+        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
+
+        for addr in entries {
+            let entry = f(self, *addr)?;
+            u64::write_be(&mut buffer, entry)?;
         }
+        buffer.flush()?;
+        Ok(())
+    }
+
+    /// Writes a pointer table directly without transforming values.
+    pub fn write_pointer_table_direct<'a>(
+        &mut self,
+        offset: u64,
+        entries: impl Iterator<Item = &'a u64>,
+    ) -> io::Result<()> {
+        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
+
+        for &entry in entries {
+            u64::write_be(&mut buffer, entry)?;
+        }
+        buffer.flush()?;
         Ok(())
     }
 
     /// Read a refcount block from the file and returns a Vec containing the block.
     /// Always returns a cluster's worth of data.
-    pub fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u16>> {
-        let count = self.cluster_size / size_of::<u16>() as u64;
-        let mut table = vec![0; count as usize];
+    #[inline]
+    pub fn read_refcount_block(&mut self, offset: u64) -> io::Result<Vec<u64>> {
         self.file.seek(SeekFrom::Start(offset))?;
-        self.file.read_u16_into::<BigEndian>(&mut table)?;
-        Ok(table)
+        (self.read_refcount_fn)(&mut self.file, self.refcount_block_entries as usize)
     }
 
     /// Writes a refcount block to the file.
-    pub fn write_refcount_block(&mut self, offset: u64, table: &[u16]) -> io::Result<()> {
+    #[inline]
+    pub fn write_refcount_block(&mut self, offset: u64, table: &[u64]) -> io::Result<()> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = BufWriter::with_capacity(std::mem::size_of_val(table), &mut self.file);
-
-        for count in table {
-            buffer.write_u16::<BigEndian>(*count)?;
-        }
-        Ok(())
+        (self.write_refcount_fn)(&mut self.file, table)
     }
 
     /// Allocates a new cluster at the end of the current file, return the address.
@@ -118,6 +296,11 @@ impl QcowRawFile {
         self.file.set_len(new_cluster_address + self.cluster_size)?;
 
         Ok(Some(new_cluster_address))
+    }
+
+    /// Returns a reference to the underlying file.
+    pub fn file(&self) -> &RawFile {
+        &self.file
     }
 
     /// Returns a mutable reference to the underlying file.
@@ -149,10 +332,14 @@ impl QcowRawFile {
     }
 
     /// Writes
-    pub fn write_cluster(&mut self, address: u64, data: Vec<u8>) -> io::Result<()> {
+    pub fn write_cluster(&mut self, address: u64, data: &[u8]) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
         self.file.seek(SeekFrom::Start(address))?;
         self.file.write_all(&data[0..cluster_size])
+    }
+
+    pub fn physical_size(&self) -> Result<u64, std::io::Error> {
+        self.file.metadata().map(|m| m.len())
     }
 }
 
@@ -162,6 +349,9 @@ impl Clone for QcowRawFile {
             file: self.file.try_clone().expect("QcowRawFile cloning failed"),
             cluster_size: self.cluster_size,
             cluster_mask: self.cluster_mask,
+            refcount_block_entries: self.refcount_block_entries,
+            read_refcount_fn: self.read_refcount_fn,
+            write_refcount_fn: self.write_refcount_fn,
         }
     }
 }

@@ -2,12 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
 use std::{fs, result};
 
+use block::ImageType;
+use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -68,7 +70,8 @@ pub struct CpusConfig {
     pub affinity: Option<Vec<CpuAffinity>>,
     #[serde(default)]
     pub features: CpuFeatures,
-    pub nested: Option<bool>,
+    #[serde(default = "default_cpusconfig_nested")]
+    pub nested: bool,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -83,7 +86,7 @@ impl Default for CpusConfig {
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),
-            nested: None,
+            nested: true,
         }
     }
 }
@@ -175,6 +178,10 @@ pub enum HotplugMethod {
 }
 
 fn default_memoryconfig_thp() -> bool {
+    true
+}
+
+fn default_cpusconfig_nested() -> bool {
     true
 }
 
@@ -280,6 +287,10 @@ pub struct DiskConfig {
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
     #[serde(default)]
     pub backing_files: bool,
+    #[serde(default = "default_diskconfig_sparse")]
+    pub sparse: bool,
+    #[serde(default)]
+    pub image_type: ImageType,
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -303,14 +314,16 @@ pub fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_DISK_QUEUE_SIZE
 }
 
+pub fn default_diskconfig_sparse() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
-    #[serde(default = "default_netconfig_ip")]
-    pub ip: IpAddr,
-    #[serde(default = "default_netconfig_mask")]
-    pub mask: IpAddr,
+    pub ip: Option<IpAddr>,
+    pub mask: Option<IpAddr>,
     #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
     #[serde(default)]
@@ -330,11 +343,13 @@ pub struct NetConfig {
     pub vhost_mode: VhostMode,
     #[serde(default)]
     pub id: Option<String>,
-    #[serde(
-        default,
-        serialize_with = "serialize_netconfig_fds",
-        deserialize_with = "deserialize_netconfig_fds"
-    )]
+    // Special deserialize handling:
+    // Therefore, we don't serialize FDs, and whatever value is here after
+    // deserialization is invalid.
+    //
+    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
+    // and will be populated into this struct on the destination VMM eventually.
+    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
@@ -356,20 +371,6 @@ pub fn default_netconfig_tap() -> Option<String> {
     None
 }
 
-pub fn default_netconfig_ip() -> IpAddr {
-    warn!(
-        "Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon."
-    );
-    IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
-}
-
-pub fn default_netconfig_mask() -> IpAddr {
-    warn!(
-        "Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon."
-    );
-    IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
-}
-
 pub fn default_netconfig_mac() -> MacAddr {
     MacAddr::local_random()
 }
@@ -386,29 +387,14 @@ pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
 }
 
-fn serialize_netconfig_fds<S>(x: &Option<Vec<i32>>, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(x) = x {
-        warn!(
-            "'NetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs."
-        );
-        let invalid_fds = vec![-1; x.len()];
-        s.serialize_some(&invalid_fds)
-    } else {
-        s.serialize_none()
-    }
-}
-
 fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!(
-            "'NetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs."
+        debug!(
+            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
         );
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
@@ -699,7 +685,6 @@ pub struct NumaDistance {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaConfig {
-    #[serde(default)]
     pub guest_numa_id: u32,
     #[serde(default)]
     pub cpus: Option<Vec<u32>>,
@@ -709,6 +694,8 @@ pub struct NumaConfig {
     pub memory_zones: Option<Vec<String>>,
     #[serde(default)]
     pub pci_segments: Option<Vec<u16>>,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 /// Errors describing a misconfigured payload, i.e., a configuration that
@@ -726,7 +713,7 @@ pub enum PayloadConfigError {
     MissingBootitem,
     #[cfg(feature = "igvm")]
     /// Specifying a kernel or firmware is not supported when an igvm is provided.
-    #[error("Specifying a kernel or firmware is not supported when a igvm is provided")]
+    #[error("Specifying a kernel or firmware is not supported when an igvm is provided")]
     IgvmPlusOtherPayloads,
 }
 
@@ -829,7 +816,7 @@ impl PayloadConfig {
     pub fn validate(&mut self) -> Result<(), PayloadConfigError> {
         #[cfg(feature = "igvm")]
         {
-            if let Some(_igvm) = &self.igvm {
+            if self.igvm.is_some() {
                 if self.firmware.is_some() || self.kernel.is_some() {
                     return Err(PayloadConfigError::IgvmPlusOtherPayloads);
                 }
@@ -840,13 +827,11 @@ impl PayloadConfig {
             (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
             (Some(_firmware), None) => {
                 if self.cmdline.is_some() {
-                    log::warn!("Ignoring cmdline parameter as firmware is provided as the payload");
+                    warn!("Ignoring cmdline parameter as firmware is provided as the payload");
                     self.cmdline = None;
                 }
                 if self.initramfs.is_some() {
-                    log::warn!(
-                        "Ignoring initramfs parameter as firmware is provided as the payload"
-                    );
+                    warn!("Ignoring initramfs parameter as firmware is provided as the payload");
                     self.initramfs = None;
                 }
                 Ok(())
@@ -972,6 +957,10 @@ pub struct VmConfig {
     // VmConfig instance, such as FDs for creating TAP devices.
     // Preserved FDs will stay open as long as the holding VmConfig instance is
     // valid, and will be closed when the holding VmConfig instance is destroyed.
+    //
+    // This is populated as devices are added at runtime. Removing them again
+    // causes the FDs to be closed early. This allows management software to
+    // gracefully clean up resources (e.g., libvirt closes tap devices).
     #[serde(skip)]
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
@@ -1083,26 +1072,6 @@ impl VmConfig {
             ))
         } else {
             self.cpus.max_vcpus
-        }
-    }
-
-    pub(crate) fn to_hypervisor_vm_config(
-        &self,
-        hypervisor_type: hypervisor::HypervisorType,
-    ) -> hypervisor::HypervisorVmConfig {
-        hypervisor::HypervisorVmConfig {
-            #[cfg(feature = "tdx")]
-            tdx_enabled: self.platform.as_ref().map(|p| p.tdx).unwrap_or(false),
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled: self.is_sev_snp_enabled(),
-            #[cfg(feature = "sev_snp")]
-            mem_size: self.memory.total_size(),
-            nested_enabled: self.cpus.nested_supported(hypervisor_type),
-            smt_enabled: self
-                .cpus
-                .topology
-                .as_ref()
-                .is_some_and(|t| t.threads_per_core > 1),
         }
     }
 }

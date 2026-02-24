@@ -23,7 +23,7 @@ if [ "$hypervisor" = "mshv" ]; then
     fi
 fi
 
-cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
+cp scripts/sha1sums-x86_64* "$WORKLOADS_DIR"
 
 if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
     download_hypervisor_fw
@@ -33,37 +33,53 @@ if [ ! -f "$WORKLOADS_DIR/CLOUDHV.fd" ]; then
     download_ovmf
 fi
 
-FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
-FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
-FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
-if [ ! -f "$FOCAL_OS_IMAGE" ]; then
+download_x86_guest_images
+
+JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2"
+JAMMY_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_ZLIB_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
+    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
+        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZLIB_FILE_IMAGE_NAME
     popd || exit
 fi
 
-FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
-FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
-if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
+JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2"
+JAMMY_OS_QCOW_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
+        "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW_ZSTD_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
-JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
-JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2"
+JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
+    time qemu-img create -f qcow2 \
+        -b "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" \
+        -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
     popd || exit
 fi
 
-JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
-JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2"
+JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img create -f qcow2 \
+        -b "$JAMMY_OS_IMAGE" \
+        -F qcow2 $JAMMY_OS_QCOW_BACKING_UNCOMPRESSED_FILE_IMAGE_NAME
+    popd || exit
+fi
+
+JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2"
+JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
+    pushd "$WORKLOADS_DIR" || exit
+    time qemu-img create -f qcow2 \
+        -b "$JAMMY_OS_RAW_IMAGE" \
+        -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
     popd || exit
 fi
 
@@ -142,7 +158,7 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
 fi
 
 pushd "$WORKLOADS_DIR" || exit
-if ! sha1sum sha1sums-x86_64 --check; then
+if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
 fi
@@ -161,7 +177,7 @@ if [ ! -f "$VIRTIOFSD" ]; then
     pushd "$WORKLOADS_DIR" || exit
     git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
     pushd $VIRTIOFSD_DIR || exit
-    git checkout v1.8.0
+    git checkout v1.13.3
     time cargo build --release
     cp target/release/virtiofsd "$VIRTIOFSD" || exit 1
     popd || exit
@@ -224,43 +240,38 @@ ulimit -l unlimited
 # Set number of open descriptors high enough for VFIO tests to run
 ulimit -n 4096
 
-# Set number of open descriptors high enough for VFIO tests to run
-ulimit -n 4096
-
+# Common configuration for every test run
 export RUST_BACKTRACE=1
-time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]} --test-threads=$((($(nproc) * 3) / 4))
+export RUSTFLAGS="$RUSTFLAGS"
+
+time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "common_parallel::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    export RUST_BACKTRACE=1
-    time cargo test --release --target "$BUILD_TARGET" $test_features "common_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "common_sequential::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 # Run tests on dbus_api
-cargo build --features "$build_features,dbus_api" --all --release --target "$BUILD_TARGET"
-export RUST_BACKTRACE=1
-# integration tests now do not reply on build feature "dbus_api"
-time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}
-
-if [ $? -ne 0 ]; then
+if [ $RES -eq 0 ]; then
+    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
+    # integration tests now do not reply on build feature "dbus_api"
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "dbus_api::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 # Run tests on fw_cfg
 if [ $RES -eq 0 ]; then
-    cargo build --features "$build_features,fw_cfg" --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    time cargo test $test_features "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "fw_cfg::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
-    cargo build --features mshv,ivshmem --all --release --target "$BUILD_TARGET"
-    export RUST_BACKTRACE=1
-    time cargo test $test_features "ivshmem::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "ivshmem::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 

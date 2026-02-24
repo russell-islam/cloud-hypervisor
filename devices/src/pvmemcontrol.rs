@@ -8,6 +8,7 @@ use std::ffi::CString;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{io, result};
 
+use log::{debug, warn};
 use num_enum::TryFromPrimitive;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -390,7 +391,7 @@ impl PvmemcontrolDevice {
             .iter()
             .skip(offset as usize)
             .zip(data.iter_mut())
-            .for_each(|(src, dest)| *dest = *src)
+            .for_each(|(src, dest)| *dest = *src);
     }
 
     /// can only write to transport payload
@@ -402,7 +403,7 @@ impl PvmemcontrolDevice {
             .iter_mut()
             .skip(offset as usize)
             .zip(data.iter())
-            .for_each(|(dest, src)| *dest = *src)
+            .for_each(|(dest, src)| *dest = *src);
     }
 
     fn find_connection(&self, conn: GuestConnection) -> Option<GuestAddress> {
@@ -429,22 +430,20 @@ impl PvmemcontrolBusDevice {
     /// [`range_base`, `range_base` + `range_len`) is present in the guest
     fn operate_on_memory_range<F>(&self, addr: u64, length: u64, f: F) -> result::Result<(), Error>
     where
-        F: FnOnce(*mut libc::c_void, libc::size_t) -> libc::c_int,
+        F: FnOnce(*mut libc::c_void, usize) -> libc::c_int,
     {
         let memory = self.mem.memory();
         let range_base = GuestAddress(addr);
         let range_len = usize::try_from(length).map_err(|_| Error::InvalidRequest)?;
 
         // assume guest memory is not interleaved with vmm memory on the host.
-        if !memory.check_range(range_base, range_len) {
+        let Ok(slice) = memory.get_slice(range_base, range_len) else {
             return Err(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
                 range_base,
             )));
-        }
-        let hva = memory
-            .get_host_address(range_base)
-            .map_err(Error::GuestMemory)?;
-        let res = f(hva as *mut libc::c_void, range_len as libc::size_t);
+        };
+        assert!(slice.len() >= range_len);
+        let res = f(slice.ptr_guard_mut().as_ptr() as _, slice.len());
         if res != 0 {
             return Err(Error::LibcFail(io::Error::last_os_error()));
         }
@@ -491,7 +490,7 @@ impl PvmemcontrolBusDevice {
         } else {
             std::ptr::null()
         };
-        debug!("addr {:X} length {} name {:?}", addr, length, name);
+        debug!("addr {addr:X} length {length} name {name:?}");
 
         // SAFETY: [`base`, `base` + `len`) is guest memory
         self.operate_on_memory_range(addr, length, |base, len| unsafe {
@@ -581,7 +580,7 @@ impl PvmemcontrolBusDevice {
                     ..Default::default()
                 },
                 Error::GuestMemory(err) => {
-                    warn!("{}", err);
+                    warn!("{err}");
                     PvmemcontrolResp {
                         ret_errno: (libc::EINVAL as u32).into(),
                         ret_code: (func_code as u32).into(),
@@ -606,7 +605,7 @@ impl PvmemcontrolBusDevice {
         let response: PvmemcontrolResp = match self.handle_request(request) {
             Ok(x) => x,
             Err(e) => {
-                warn!("cannot process request {:?} with error {}", request, e);
+                warn!("cannot process request {request:?} with error {e}");
                 return;
             }
         };
@@ -649,14 +648,16 @@ impl PvmemcontrolBusDevice {
                             .find_connection(conn)
                             .ok_or(Error::InvalidConnection(conn.command))
                     })
-                    .map(|gpa| self.handle_pvmemcontrol_request(gpa))
-                    .unwrap_or_else(|err| warn!("{:?}", err));
+                    .map_or_else(
+                        |err| warn!("{err:?}"),
+                        |gpa| self.handle_pvmemcontrol_request(gpa),
+                    );
             }
         }
     }
 
     fn handle_guest_read(&self, offset: u64, data: &mut [u8]) {
-        self.dev.read().unwrap().read_transport(offset, data)
+        self.dev.read().unwrap().read_transport(offset, data);
     }
 }
 
@@ -760,7 +761,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
-            mmio32_allocator.free(GuestAddress(bar.addr()), bar.size())
+            mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
         Ok(())
     }
@@ -805,7 +806,7 @@ impl Migratable for PvmemcontrolPciDevice {}
 
 impl BusDeviceSync for PvmemcontrolBusDevice {
     fn read(&self, _base: u64, offset: u64, data: &mut [u8]) {
-        self.handle_guest_read(offset, data)
+        self.handle_guest_read(offset, data);
     }
 
     fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

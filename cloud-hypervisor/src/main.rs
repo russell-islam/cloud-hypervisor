@@ -15,7 +15,7 @@ use std::{env, io};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
-use log::{LevelFilter, error, warn};
+use log::{LevelFilter, error, info, warn};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
@@ -133,29 +133,25 @@ impl log::Log for Logger {
 
         let now = std::time::Instant::now();
         let duration = now.duration_since(self.start);
+        let duration_s = duration.as_secs_f32();
 
-        if record.file().is_some() && record.line().is_some() {
-            write!(
-                *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{}:{} -- {}\r\n",
-                duration,
-                std::thread::current().name().unwrap_or("anonymous"),
-                record.level(),
-                record.file().unwrap(),
-                record.line().unwrap(),
-                record.args()
-            )
+        let location = if let (Some(file), Some(line)) = (record.file(), record.line()) {
+            format!("{file}:{line}")
         } else {
-            write!(
-                *(*(self.output.lock().unwrap())),
-                "cloud-hypervisor: {:.6?}: <{}> {}:{} -- {}\r\n",
-                duration,
-                std::thread::current().name().unwrap_or("anonymous"),
-                record.level(),
-                record.target(),
-                record.args()
-            )
-        }
+            record.target().to_string()
+        };
+
+        let mut out = self.output.lock().unwrap();
+        write!(
+            &mut *out,
+            // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
+            "cloud-hypervisor: {:>10.6?}s: <{}> {}:{} -- {}\r\n",
+            duration_s,
+            std::thread::current().name().unwrap_or("anonymous"),
+            record.level(),
+            location,
+            record.args(),
+        )
         .ok();
     }
     fn flush(&self) {}
@@ -222,22 +218,16 @@ fn get_cli_options_sorted(
             )
             .default_value(default_vcpus)
             .group("vm-config"),
-        #[cfg(target_arch = "x86_64")]
-        Arg::new("debug-console")
-            .long("debug-console")
-            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
-            .default_value("off,iobase=0xe9")
-            .group("vm-config"),
-        #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-service-name")
-            .long("dbus-service-name")
-            .help("Well known name of the device")
-            .num_args(1)
-            .group("vmm-config"),
         #[cfg(feature = "dbus_api")]
         Arg::new("dbus-object-path")
             .long("dbus-object-path")
             .help("Object path to serve the dbus interface")
+            .num_args(1)
+            .group("vmm-config"),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-service-name")
+            .long("dbus-service-name")
+            .help("Well known name of the device")
             .num_args(1)
             .group("vmm-config"),
         #[cfg(feature = "dbus_api")]
@@ -247,6 +237,12 @@ fn get_cli_options_sorted(
             .help("Use the system bus instead of a session bus")
             .num_args(0)
             .group("vmm-config"),
+        #[cfg(target_arch = "x86_64")]
+        Arg::new("debug-console")
+            .long("debug-console")
+            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+            .default_value("off,iobase=0xe9")
+            .group("vm-config"),
         Arg::new("device")
             .long("device")
             .help(DeviceConfig::SYNTAX)
@@ -491,7 +487,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .args(args)
 }
 
-fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
+fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -727,7 +723,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
         if payload_present {
-            let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+            let vm_params = VmParams::from_arg_matches(cmd_arguments);
             let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
             // Create and boot the VM based off the VM config we just built.
@@ -775,7 +771,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         .map_err(Error::VmmThread)?;
 
     if let Some(api_handle) = vmm_thread_handle.http_api_handle {
-        http_api_graceful_shutdown(api_handle).map_err(Error::HttpApiShutdown)?
+        http_api_graceful_shutdown(api_handle).map_err(Error::HttpApiShutdown)?;
     }
 
     #[cfg(feature = "dbus_api")]
@@ -889,9 +885,10 @@ fn main() {
         warn!("Error expanding FD table: {e}");
     }
 
-    let exit_code = match start_vmm(cmd_arguments) {
+    let exit_code = match start_vmm(&cmd_arguments) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
+            info!("Cloud Hypervisor exited successfully");
             0
         }
         Err(top_error) => {
@@ -965,7 +962,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
-                nested: None,
+                nested: true,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
@@ -1095,8 +1092,7 @@ mod unit_tests {
 
     #[test]
     fn test_valid_vm_config_memory() {
-        [
-            (
+        [(
                 vec!["cloud-hypervisor", "--kernel", "/path/to/kernel", "--memory", "size=1073741824"],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
@@ -1151,8 +1147,7 @@ mod unit_tests {
                     "memory": {"size": 1073741824, "hotplug_method": "VirtioMem", "hotplug_size": 1073741824}
                 }"#,
                 true,
-            ),
-        ]
+            )]
         .iter()
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
@@ -1204,14 +1199,14 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
-                    "path=/path/to/disk/1",
+                    "path=/path/to/disk/1,image_type=raw",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
-                        {"path": "/path/to/disk/1"},
-                        {"path": "/path/to/disk/2"}
+                        {"path": "/path/to/disk/1", "image_type": "Raw"},
+                        {"path": "/path/to/disk/2", "image_type": "Unknown"}
                     ]
                 }"#,
                 true,
@@ -1222,8 +1217,8 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
-                    "path=/path/to/disk/1",
-                    "path=/path/to/disk/2",
+                    "path=/path/to/disk/1,image_type=raw",
+                    "path=/path/to/disk/2,image_type=qcow2",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
@@ -1285,8 +1280,8 @@ mod unit_tests {
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
-                        {"path": "/path/to/disk/1", "rate_limit_group": "group0"},
-                        {"path": "/path/to/disk/2", "rate_limit_group": "group0"}
+                        {"path": "/path/to/disk/1", "rate_limit_group": "group0", "image_type": "Unknown"},
+                        {"path": "/path/to/disk/2", "rate_limit_group": "group0", "image_type": "Unknown"}
                     ],
                     "rate_limit_groups": [
                         {"id": "group0", "rate_limiter_config": {"bandwidth": {"size": 1000, "one_time_burst": 0, "refill_time": 100}}}
@@ -1335,20 +1330,6 @@ mod unit_tests {
                     "payload": {"kernel": "/path/to/kernel"},
                     "net": [
                         {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--net",
-                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "net": [
-                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4"}
                     ]
                 }"#,
                 true,
@@ -2031,6 +2012,6 @@ mod unit_tests {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let args = get_cli_options_sorted(default_vcpus, default_memory, default_rng);
 
-        assert_args_sorted(|| args.iter())
+        assert_args_sorted(|| args.iter());
     }
 }

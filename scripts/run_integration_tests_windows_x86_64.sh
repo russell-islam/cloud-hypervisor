@@ -41,11 +41,13 @@ dmsetup mknodes
 
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured
-time cargo test $test_features "windows::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run --no-tests=pass $test_features "windows::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
 RES=$?
 
 dmsetup remove_all -f

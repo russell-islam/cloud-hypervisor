@@ -1,21 +1,6 @@
-[package]
-authors = ["The Cloud Hypervisor Authors"]
-build = "build.rs"
-default-run = "cloud-hypervisor"
-description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM & MSHV"
-edition = "2024"
-homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
-license = "Apache-2.0 AND BSD-3-Clause"
-name = "cloud-hypervisor"
-version = "48.0.0"
-# Minimum buildable version:
-# Keep in sync with version in .github/workflows/build.yaml
-# Policy on MSRV (see #4318):
-# Can only be bumped if satisfying any of the following:
-# a.) A dependency requires it,
-# b.) If we want to use a new feature and that MSRV is at least 6 months old,
-# c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.88.0"
+# Cloud Hypervisor Workspace
+#
+# The main crate producing the binaries is in `./cloud-hypervisor`.
 
 [profile.release]
 codegen-units = 1
@@ -28,60 +13,12 @@ debug = true
 inherits = "release"
 strip = false
 
-[dependencies]
-anyhow = { workspace = true }
-api_client = { path = "api_client" }
-clap = { workspace = true, features = ["string"] }
-dhat = { workspace = true, optional = true }
-env_logger = { workspace = true }
-epoll = { workspace = true }
-event_monitor = { path = "event_monitor" }
-hypervisor = { path = "hypervisor" }
-libc = { workspace = true }
-log = { workspace = true, features = ["std"] }
-option_parser = { path = "option_parser" }
-seccompiler = { workspace = true }
-serde_json = { workspace = true }
-signal-hook = { workspace = true }
-thiserror = { workspace = true }
-tpm = { path = "tpm" }
-tracer = { path = "tracer" }
-vm-memory = { workspace = true }
-vmm = { path = "vmm" }
-vmm-sys-util = { workspace = true }
-zbus = { version = "5.7.1", optional = true }
-
-[dev-dependencies]
-block = { path = "block" }
-dirs = { workspace = true }
-net_util = { path = "net_util" }
-serde_json = { workspace = true }
-test_infra = { path = "test_infra" }
-wait-timeout = { workspace = true }
-
-# Please adjust `vmm::feature_list()` accordingly when changing the
-# feature list below
-[features]
-dbus_api = ["vmm/dbus_api", "zbus"]
-default = ["io_uring", "kvm"]
-dhat-heap = ["dhat", "vmm/dhat-heap"]       # For heap profiling
-fw_cfg = ["vmm/fw_cfg"]
-guest_debug = ["vmm/guest_debug"]
-igvm = ["mshv", "vmm/igvm"]
-io_uring = ["vmm/io_uring"]
-ivshmem = ["vmm/ivshmem"]
-kvm = ["vmm/kvm"]
-mshv = ["vmm/mshv"]
-pvmemcontrol = ["vmm/pvmemcontrol"]
-sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
-tdx = ["vmm/tdx"]
-tracing = ["tracer/tracing", "vmm/tracing"]
-
 [workspace]
 members = [
   "api_client",
   "arch",
   "block",
+  "cloud-hypervisor",
   "devices",
   "event_monitor",
   "hypervisor",
@@ -104,14 +41,14 @@ members = [
   "vmm",
 ]
 package.edition = "2024"
+resolver = "3"
 
 [workspace.dependencies]
 # rust-vmm crates
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.12.0"
-kvm-ioctls = "0.22.0"
-# TODO: update to 0.13.1+
-linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main" }
+acpi_tables = "0.2.0"
+kvm-bindings = "0.12.1"
+kvm-ioctls = "0.22.1"
+linux-loader = "0.13.1"
 mshv-bindings = "0.6.7"
 mshv-ioctls = "0.6.7"
 seccompiler = "0.5.0"
@@ -122,35 +59,63 @@ vhost = { version = "0.14.0", default-features = false }
 vhost-user-backend = { version = "0.20.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.16.0"
-vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
+vm-fdt = "0.3.0"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.14.0"
 
 # igvm crates
-# TODO: bump to 0.3.5 release
-igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
-igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
+igvm = "0.4.0"
+igvm_defs = "0.4.0"
 
 # serde crates
-serde = "1.0.208"
-serde_json = "1.0.143"
-serde_with = { version = "3.14.0", default-features = false }
+serde = "1.0.228"
+serde_json = "1.0.149"
+serde_with = { version = "3.16.1", default-features = false }
 
 # other crates
-anyhow = "1.0.98"
-bitflags = "2.9.4"
+anyhow = "1.0.101"
+bitflags = "2.11.0"
 byteorder = "1.5.0"
-cfg-if = "1.0.0"
-clap = "4.5.47"
+cfg-if = "1.0.4"
+clap = "4.5.59"
 dhat = "0.3.3"
 dirs = "6.0.0"
 env_logger = "0.11.8"
-epoll = "4.3.3"
-flume = "0.11.1"
-libc = "0.2.167"
-log = "0.4.22"
-signal-hook = "0.3.18"
-thiserror = "2.0.12"
-uuid = { version = "1.18.1" }
+epoll = "4.4.0"
+flume = "0.12.0"
+itertools = "0.14.0"
+libc = "0.2.182"
+log = "0.4.29"
+signal-hook = "0.4.3"
+thiserror = "2.0.18"
+uuid = { version = "1.21.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.26", default-features = false }
+zerocopy = { version = "0.8.39", default-features = false }
+
+[workspace.lints.clippy]
+# Any clippy lint (group) in alphabetical order:
+# https://rust-lang.github.io/rust-clippy/master/index.html
+
+# Groups
+all = "deny"         # shorthand for the other groups but here for compleness
+complexity = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
+suspicious = "deny"
+
+# Individual Lints
+assertions_on_result_states = "deny"
+if_not_else = "deny"
+manual_string_new = "deny"
+map_unwrap_or = "deny"
+needless_pass_by_value = "deny"
+redundant_else = "deny"
+semicolon_if_nothing_returned = "deny"
+undocumented_unsafe_blocks = "deny"
+uninlined_format_args = "deny"
+unnecessary_semicolon = "deny"
+
+[workspace.lints.rust]
+# `level = warn` is irrelevant here but mandatory for rustc/cargo
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }

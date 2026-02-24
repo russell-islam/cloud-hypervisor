@@ -15,6 +15,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
 use libc::c_void;
+use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
@@ -121,6 +122,17 @@ impl RawFile {
 
     pub fn is_direct(&self) -> bool {
         self.direct_io
+    }
+
+    /// Returns true if the file was opened with write access.
+    pub fn is_writable(&self) -> bool {
+        // SAFETY: fcntl with F_GETFL is safe and doesn't modify the file descriptor
+        let flags = unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_GETFL) };
+        if flags < 0 {
+            return false;
+        }
+        let access_mode = flags & libc::O_ACCMODE;
+        access_mode == libc::O_WRONLY || access_mode == libc::O_RDWR
     }
 }
 
@@ -259,7 +271,7 @@ impl Write for RawFile {
                 // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
                 unsafe { dealloc(tmp_ptr, layout) };
                 return Err(io::Error::last_os_error());
-            };
+            }
 
             tmp_buf[file_offset..(file_offset + buf_len)].copy_from_slice(buf);
 
@@ -327,6 +339,12 @@ impl PunchHole for RawFile {
     }
 }
 
+impl FileSync for RawFile {
+    fn fsync(&mut self) -> std::io::Result<()> {
+        self.file.fsync()
+    }
+}
+
 impl SeekHole for RawFile {
     fn seek_hole(&mut self, offset: u64) -> std::io::Result<Option<u64>> {
         match self.file.seek_hole(offset) {
@@ -354,7 +372,11 @@ impl SeekHole for RawFile {
 }
 
 impl BlockBackend for RawFile {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
+    }
+
+    fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
     }
 }

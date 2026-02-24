@@ -36,7 +36,7 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum OptionParserError {
     #[error("unknown option: {0}")]
     UnknownOption(String),
@@ -73,7 +73,7 @@ fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
                 continue;
             }
             _ => {}
-        };
+        }
         current.push(c);
     }
     list.push(current);
@@ -407,7 +407,7 @@ fn dequote(s: &str) -> String {
         } else {
             out.push(i);
         }
-        prev_byte = i
+        prev_byte = i;
     }
     assert!(!in_quotes, "split_commas didn't reject unbalanced quotes");
     // SAFETY: the non-ASCII bytes in the output are the same
@@ -442,7 +442,7 @@ impl Parseable for StringList {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]
@@ -515,6 +515,6 @@ mod tests {
 
     #[test]
     fn check_dequote() {
-        assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"")
+        assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"");
     }
 }

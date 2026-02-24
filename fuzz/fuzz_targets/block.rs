@@ -67,6 +67,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
         queue_affinity,
+        true,
+        false,
     )
     .unwrap();
 

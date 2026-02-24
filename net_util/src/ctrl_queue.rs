@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::sync::Arc;
-
+use log::{error, info, warn};
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
@@ -67,7 +66,7 @@ impl CtrlQueue {
         &mut self,
         mem: &GuestMemoryMmap,
         queue: &mut Queue,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<()> {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
@@ -100,10 +99,10 @@ impl CtrlQueue {
                     } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
                         || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
                     {
-                        warn!("Number of MQ pairs out of range: {}", queue_pairs);
+                        warn!("Number of MQ pairs out of range: {queue_pairs}");
                         false
                     } else {
-                        info!("Number of MQ pairs requested: {}", queue_pairs);
+                        info!("Number of MQ pairs requested: {queue_pairs}");
                         true
                     }
                 }
@@ -112,25 +111,25 @@ impl CtrlQueue {
                         .memory()
                         .read_obj::<u64>(data_desc_addr)
                         .map_err(Error::GuestMemory)?;
-                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
-                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
-                        false
-                    } else {
+                    if u32::from(ctrl_hdr.cmd) == VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
                         let mut ok = true;
                         for tap in self.taps.iter_mut() {
-                            info!("Reprogramming tap offload with features: {}", features);
+                            info!("Reprogramming tap offload with features: {features}");
                             tap.set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
-                                    error!("Error programming tap offload: {:?}", e);
-                                    ok = false
+                                    error!("Error programming tap offload: {e:?}");
+                                    ok = false;
                                 })
                                 .ok();
                         }
                         ok
+                    } else {
+                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                        false
                     }
                 }
                 _ => {
-                    warn!("Unsupported command {:?}", ctrl_hdr);
+                    warn!("Unsupported command {ctrl_hdr:?}");
                     false
                 }
             };

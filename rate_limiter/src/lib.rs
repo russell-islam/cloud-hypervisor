@@ -43,8 +43,6 @@
 //! It is meant to be used in an external event loop and thus implements the `AsRawFd`
 //! trait and provides an *event-handler* as part of its API. This *event-handler*
 //! needs to be called by the user on every event on the rate limiter's `AsRawFd` FD.
-#[macro_use]
-extern crate log;
 
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -52,6 +50,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use log::error;
 use thiserror::Error;
 use vmm_sys_util::timerfd::TimerFd;
 
@@ -169,12 +168,11 @@ impl TokenBucket {
                 self.last_update = Instant::now();
                 // No need to continue to the refill process, we still have burst budget to consume from.
                 return BucketReduction::Success;
-            } else {
-                // We still have burst budget for *some* of the tokens requests.
-                // The tokens left unfulfilled will be consumed from current `self.budget`.
-                tokens -= self.one_time_burst;
-                self.one_time_burst = 0;
             }
+            // We still have burst budget for *some* of the tokens requests.
+            // The tokens left unfulfilled will be consumed from current `self.budget`.
+            tokens -= self.one_time_burst;
+            self.one_time_burst = 0;
         }
 
         // Compute time passed since last refill/update.
@@ -247,6 +245,7 @@ impl TokenBucket {
 }
 
 /// Enum that describes the type of token used.
+#[derive(Copy, Clone)]
 pub enum TokenType {
     /// Token type used for bandwidth limiting.
     Bytes,
@@ -300,7 +299,7 @@ impl RateLimiterInner {
         self.timer_fd
             .reset(dur, None)
             .expect("Can't arm the timer (unexpected 'timerfd_settime' failure).");
-        flag.store(true, Ordering::Relaxed)
+        flag.store(true, Ordering::Relaxed);
     }
 }
 
@@ -491,12 +490,12 @@ impl RateLimiter {
             BucketUpdate::Disabled => guard.bandwidth = None,
             BucketUpdate::Update(tb) => guard.bandwidth = Some(tb),
             BucketUpdate::None => (),
-        };
+        }
         match ops {
             BucketUpdate::Disabled => guard.ops = None,
             BucketUpdate::Update(tb) => guard.ops = Some(tb),
             BucketUpdate::None => (),
-        };
+        }
     }
 }
 
@@ -522,7 +521,7 @@ impl Default for RateLimiter {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) mod unit_tests {
     use std::{fmt, thread};
 
     use super::*;

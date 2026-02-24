@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self};
-use std::ops::{BitAnd, Deref, Not, Sub};
+use std::ops::{BitAnd, Not, Sub};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -25,6 +25,7 @@ use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -405,8 +406,10 @@ fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
     }
 
     // The `hugepages` is enabled and the `hugepage_size` is specified, just use it directly.
-    if zone.hugepages && zone.hugepage_size.is_some() {
-        return Ok(zone.hugepage_size.unwrap());
+    if let Some(hugepage_size) = zone.hugepage_size
+        && zone.hugepages
+    {
+        return Ok(hugepage_size);
     }
 
     // There are two scenarios here:
@@ -472,10 +475,7 @@ impl BusDevice for MemoryManager {
                     }
                 }
                 _ => {
-                    warn!(
-                        "Unexpected offset for accessing memory manager device: {:#}",
-                        offset
-                    );
+                    warn!("Unexpected offset for accessing memory manager device: {offset:#}");
                 }
             }
         } else {
@@ -508,12 +508,9 @@ impl BusDevice for MemoryManager {
                 }
             }
             _ => {
-                warn!(
-                    "Unexpected offset for accessing memory manager device: {:#}",
-                    offset
-                );
+                warn!("Unexpected offset for accessing memory manager device: {offset:#}");
             }
-        };
+        }
         None
     }
 }
@@ -724,7 +721,7 @@ impl MemoryManager {
     fn fill_saved_regions(
         &mut self,
         file_path: PathBuf,
-        saved_regions: MemoryRangeTable,
+        saved_regions: &MemoryRangeTable,
     ) -> Result<(), Error> {
         if saved_regions.is_empty() {
             return Ok(());
@@ -769,62 +766,7 @@ impl MemoryManager {
     ) -> Result<(u64, Vec<MemoryZoneConfig>, bool), Error> {
         let mut allow_mem_hotplug = false;
 
-        if !user_provided_zones {
-            if config.zones.is_some() {
-                error!(
-                    "User defined memory regions can't be provided if the \
-                    memory size is not 0"
-                );
-                return Err(Error::InvalidMemoryParameters);
-            }
-
-            if config.hotplug_size.is_some() {
-                allow_mem_hotplug = true;
-            }
-
-            if let Some(hotplugged_size) = config.hotplugged_size {
-                if let Some(hotplug_size) = config.hotplug_size {
-                    if hotplugged_size > hotplug_size {
-                        error!(
-                            "'hotplugged_size' {} can't be bigger than \
-                            'hotplug_size' {}",
-                            hotplugged_size, hotplug_size,
-                        );
-                        return Err(Error::InvalidMemoryParameters);
-                    }
-                } else {
-                    error!(
-                        "Invalid to define 'hotplugged_size' when there is\
-                        no 'hotplug_size'"
-                    );
-                    return Err(Error::InvalidMemoryParameters);
-                }
-                if config.hotplug_method == HotplugMethod::Acpi {
-                    error!(
-                        "Invalid to define 'hotplugged_size' with hotplug \
-                        method 'acpi'"
-                    );
-                    return Err(Error::InvalidMemoryParameters);
-                }
-            }
-
-            // Create a single zone from the global memory config. This lets
-            // us reuse the codepath for user defined memory zones.
-            let zones = vec![MemoryZoneConfig {
-                id: String::from(DEFAULT_MEMORY_ZONE),
-                size: config.size,
-                file: None,
-                shared: config.shared,
-                hugepages: config.hugepages,
-                hugepage_size: config.hugepage_size,
-                host_numa_node: None,
-                hotplug_size: config.hotplug_size,
-                hotplugged_size: config.hotplugged_size,
-                prefault: config.prefault,
-            }];
-
-            Ok((config.size, zones, allow_mem_hotplug))
-        } else {
+        if user_provided_zones {
             if config.zones.is_none() {
                 error!(
                     "User defined memory regions must be provided if the \
@@ -861,9 +803,8 @@ impl MemoryManager {
                     if let Some(hotplug_size) = zone.hotplug_size {
                         if hotplugged_size > hotplug_size {
                             error!(
-                                "'hotplugged_size' {} can't be bigger than \
-                                'hotplug_size' {}",
-                                hotplugged_size, hotplug_size,
+                                "'hotplugged_size' {hotplugged_size} can't be bigger than \
+                                'hotplug_size' {hotplug_size}",
                             );
                             return Err(Error::InvalidMemoryParameters);
                         }
@@ -885,6 +826,60 @@ impl MemoryManager {
             }
 
             Ok((total_ram_size, zones, allow_mem_hotplug))
+        } else {
+            if config.zones.is_some() {
+                error!(
+                    "User defined memory regions can't be provided if the \
+                    memory size is not 0"
+                );
+                return Err(Error::InvalidMemoryParameters);
+            }
+
+            if config.hotplug_size.is_some() {
+                allow_mem_hotplug = true;
+            }
+
+            if let Some(hotplugged_size) = config.hotplugged_size {
+                if let Some(hotplug_size) = config.hotplug_size {
+                    if hotplugged_size > hotplug_size {
+                        error!(
+                            "'hotplugged_size' {hotplugged_size} can't be bigger than \
+                            'hotplug_size' {hotplug_size}",
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
+                } else {
+                    error!(
+                        "Invalid to define 'hotplugged_size' when there is\
+                        no 'hotplug_size'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+                if config.hotplug_method == HotplugMethod::Acpi {
+                    error!(
+                        "Invalid to define 'hotplugged_size' with hotplug \
+                        method 'acpi'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+            }
+
+            // Create a single zone from the global memory config. This lets
+            // us reuse the codepath for user defined memory zones.
+            let zones = vec![MemoryZoneConfig {
+                id: String::from(DEFAULT_MEMORY_ZONE),
+                size: config.size,
+                file: None,
+                shared: config.shared,
+                hugepages: config.hugepages,
+                hugepage_size: config.hugepage_size,
+                host_numa_node: None,
+                hotplug_size: config.hotplug_size,
+                hotplugged_size: config.hotplugged_size,
+                prefault: config.prefault,
+            }];
+
+            Ok((config.size, zones, allow_mem_hotplug))
         }
     }
 
@@ -908,14 +903,17 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                let slot = self.create_userspace_mapping(
-                    region.start_addr().raw_value(),
-                    region.len(),
-                    region.as_ptr() as u64,
-                    self.mergeable,
-                    false,
-                    self.log_dirty,
-                )?;
+                // SAFETY: guaranteed by GuestRegionMmap invariants
+                let slot = unsafe {
+                    self.create_userspace_mapping(
+                        region.start_addr().raw_value(),
+                        region.len().try_into().unwrap(),
+                        region.as_ptr(),
+                        self.mergeable,
+                        false,
+                        self.log_dirty,
+                    )
+                }?;
 
                 let file_offset = if let Some(file_offset) = region.file_offset() {
                     file_offset.start()
@@ -966,18 +964,21 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
-        let uefi_mem_region = self.vm.make_user_memory_region(
-            uefi_mem_slot,
-            uefi_region.start_addr().raw_value(),
-            uefi_region.len(),
-            uefi_region.as_ptr() as u64,
-            false,
-            false,
-        );
-        self.vm
-            .create_user_memory_region(uefi_mem_region)
-            .map_err(Error::CreateUefiFlash)?;
+        const _: () = assert!(core::mem::size_of::<usize>() == core::mem::size_of::<u64>());
 
+        // SAFETY: guaranteed by GuestRegionMmap
+        unsafe {
+            self.vm
+                .create_user_memory_region(
+                    uefi_mem_slot,
+                    uefi_region.start_addr().raw_value(),
+                    uefi_region.len() as usize,
+                    uefi_region.as_ptr(),
+                    false,
+                    false,
+                )
+                .map_err(Error::CreateUefiFlash)?;
+        }
         let uefi_flash =
             GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
 
@@ -994,7 +995,7 @@ impl MemoryManager {
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
-        existing_memory_files: Option<HashMap<u32, File>>,
+        existing_memory_files: HashMap<u32, File>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1029,7 +1030,7 @@ impl MemoryManager {
                 &data.guest_ram_mappings,
                 &zones,
                 prefault,
-                existing_memory_files.unwrap_or_default(),
+                existing_memory_files,
                 config.thp,
             )?;
             let guest_memory =
@@ -1168,7 +1169,7 @@ impl MemoryManager {
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
                 #[cfg(target_arch = "x86_64")]
-                vec![GsiApic::new(
+                &[GsiApic::new(
                     X86_64_IRQ_BASE,
                     ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
                 )],
@@ -1262,12 +1263,12 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
-                None,
+                Default::default(),
             )?;
 
             mm.lock()
                 .unwrap()
-                .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
+                .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?;
 
             Ok(mm)
         } else {
@@ -1290,7 +1291,7 @@ impl MemoryManager {
         addr: *mut u8,
         len: u64,
         mode: u32,
-        nodemask: Vec<u64>,
+        nodemask: &[u64],
         maxnode: u64,
         flags: u32,
     ) -> Result<(), io::Error> {
@@ -1353,13 +1354,17 @@ impl MemoryManager {
         Ok(FileOffset::new(f, 0))
     }
 
-    fn open_backing_file(backing_file: &PathBuf, file_offset: u64) -> Result<FileOffset, Error> {
+    fn open_backing_file(
+        backing_file: &PathBuf,
+        file_offset: u64,
+        shared: bool,
+    ) -> Result<FileOffset, Error> {
         if backing_file.is_dir() {
             Err(Error::DirectoryAsBackingFileForMemory)
         } else {
             let f = OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(shared)
                 .open(backing_file)
                 .map_err(Error::SharedFileCreate)?;
 
@@ -1368,10 +1373,9 @@ impl MemoryManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn create_ram_region(
+    pub fn create_ram_region_raw(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
-        start_addr: GuestAddress,
         size: usize,
         prefault: bool,
         shared: bool,
@@ -1380,7 +1384,7 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
-    ) -> Result<Arc<GuestRegionMmap>, Error> {
+    ) -> Result<MmapRegion<AtomicBitmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
@@ -1395,7 +1399,7 @@ impl MemoryManager {
             } else {
                 mmap_flags |= libc::MAP_PRIVATE;
             }
-            Some(Self::open_backing_file(backing_file, file_offset)?)
+            Some(Self::open_backing_file(backing_file, file_offset, shared)?)
         } else if shared || hugepages {
             // For hugepages we must also MAP_SHARED otherwise we will trigger #4805
             // because the MAP_PRIVATE will trigger CoW against the backing file with
@@ -1407,17 +1411,13 @@ impl MemoryManager {
             None
         };
 
-        let region = GuestRegionMmap::new(
-            MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
-                .map_err(Error::GuestMemoryRegion)?,
-            start_addr,
-        )
-        .map_err(Error::GuestMemory)?;
+        let region = MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
+            .map_err(Error::GuestMemoryRegion)?;
 
         // Apply NUMA policy if needed.
         if let Some(node) = host_numa_node {
-            let addr = region.deref().as_ptr();
-            let len = region.deref().size() as u64;
+            let addr = region.as_ptr();
+            let len = region.size() as u64;
             let mode = MPOL_BIND;
             let mut nodemask: Vec<u64> = Vec::new();
             let flags = MPOL_MF_STRICT | MPOL_MF_MOVE;
@@ -1442,7 +1442,7 @@ impl MemoryManager {
             // MPOL_BIND is the selected mode as it specifies a strict policy
             // that restricts memory allocation to the nodes specified in the
             // nodemask.
-            Self::mbind(addr, len, mode, nodemask, maxnode, flags)
+            Self::mbind(addr, len, mode, &nodemask, maxnode, flags)
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 
@@ -1452,10 +1452,7 @@ impl MemoryManager {
                 Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
 
             if !is_aligned(size, page_size) {
-                warn!(
-                    "Prefaulting memory size {} misaligned with page size {}",
-                    size, page_size
-                );
+                warn!("Prefaulting memory size {size} misaligned with page size {page_size}");
             }
 
             let num_pages = size / page_size;
@@ -1484,28 +1481,63 @@ impl MemoryManager {
                         };
                         if ret != 0 {
                             let e = io::Error::last_os_error();
-                            warn!("Failed to prefault pages: {}", e);
+                            warn!("Failed to prefault pages: {e}");
                         }
                     });
                 }
             });
         }
 
-        if region.file_offset().is_none() && thp {
-            info!(
-                "Anonymous mapping at 0x{:x} (size = 0x{:x})",
-                region.as_ptr() as u64,
-                size
-            );
+        info!(
+            "RAM region mapping at 0x{:x} (size = 0x{:x})",
+            region.as_ptr() as u64,
+            size
+        );
+
+        if thp && !hugepages {
             // SAFETY: FFI call with correct arguments
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
-                warn!("Failed to mark pages as THP eligible: {}", e);
+                warn!("Failed to mark pages as THP eligible: {e}");
+            } else {
+                debug!("Successfully marked pages as THP eligible");
             }
         }
 
-        Ok(Arc::new(region))
+        Ok(region)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_ram_region(
+        backing_file: &Option<PathBuf>,
+        file_offset: u64,
+        start_addr: GuestAddress,
+        size: usize,
+        prefault: bool,
+        shared: bool,
+        hugepages: bool,
+        hugepage_size: Option<u64>,
+        host_numa_node: Option<u32>,
+        existing_memory_file: Option<File>,
+        thp: bool,
+    ) -> Result<Arc<GuestRegionMmap>, Error> {
+        let r = Self::create_ram_region_raw(
+            backing_file,
+            file_offset,
+            size,
+            prefault,
+            shared,
+            hugepages,
+            hugepage_size,
+            host_numa_node,
+            existing_memory_file,
+            thp,
+        )?;
+
+        Ok(Arc::new(
+            GuestRegionMmap::new(r, start_addr).map_err(Error::GuestMemory)?,
+        ))
     }
 
     // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
@@ -1619,14 +1651,17 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        let slot = self.create_userspace_mapping(
-            region.start_addr().0,
-            region.len(),
-            region.as_ptr() as u64,
-            self.mergeable,
-            false,
-            self.log_dirty,
-        )?;
+        // SAFETY: guaranteed by GuestMmapRegion invariants
+        let slot = unsafe {
+            self.create_userspace_mapping(
+                region.start_addr().0,
+                region.len().try_into().unwrap(),
+                region.as_ptr(),
+                self.mergeable,
+                false,
+                self.log_dirty,
+            )
+        }?;
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
             size: region.len(),
@@ -1642,7 +1677,7 @@ impl MemoryManager {
     }
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
-        info!("Hotplugging new RAM: {}", size);
+        info!("Hotplugging new RAM: {size}");
 
         // Check that there is a free slot
         if self.next_hotplug_slot >= HOTPLUG_COUNT {
@@ -1719,33 +1754,39 @@ impl MemoryManager {
         self.memory_slot_allocator().next_memory_slot()
     }
 
-    pub fn create_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must be and remain valid
+    /// until `remove_userspace_mapping` is called.
+    pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         mergeable: bool,
         readonly: bool,
         log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            readonly,
-            log_dirty,
-        );
 
         info!(
-            "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
-            guest_phys_addr, userspace_addr, memory_size, slot
+            "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}, slot {slot}",
+            userspace_addr_ = userspace_addr as u64
         );
 
-        self.vm
-            .create_user_memory_region(mem_region)
-            .map_err(Error::CreateUserMemoryRegion)?;
+        // SAFETY: caller promises parameters are correct.
+        unsafe {
+            self.vm
+                .create_user_memory_region(
+                    slot,
+                    guest_phys_addr,
+                    memory_size,
+                    userspace_addr,
+                    readonly,
+                    log_dirty,
+                )
+                .map_err(Error::CreateUserMemoryRegion)?;
+        }
 
         // SAFETY: the address and size are valid since the
         // mmap succeeded.
@@ -1758,7 +1799,7 @@ impl MemoryManager {
         };
         if ret != 0 {
             let e = io::Error::last_os_error();
-            warn!("Failed to mark mapping as MADV_DONTDUMP: {}", e);
+            warn!("Failed to mark mapping as MADV_DONTDUMP: {e}");
         }
 
         // Mark the pages as mergeable if explicitly asked for.
@@ -1780,40 +1821,50 @@ impl MemoryManager {
                 if errno == libc::EINVAL {
                     warn!("kernel not configured with CONFIG_KSM");
                 } else {
-                    warn!("madvise error: {}", err);
+                    warn!("madvise error: {err}");
                 }
                 warn!("failed to mark pages as mergeable");
             }
         }
 
         info!(
-            "Created userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            "Created userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",
+            userspace_addr_ = userspace_addr as u64
         );
 
         Ok(slot)
     }
 
-    pub fn remove_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must have previously been passed
+    /// to `create_userspace_mapping`.
+    ///
+    /// # Errors
+    ///
+    /// If this function fails there is no way to clean up resources and you
+    /// should probably crash the process.
+    pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false, /* readonly -- don't care */
-            false, /* log dirty */
-        );
-
-        self.vm
-            .remove_user_memory_region(mem_region)
-            .map_err(Error::RemoveUserMemoryRegion)?;
+        // SAFETY: Caller promises parameters are correct.
+        unsafe {
+            self.vm
+                .remove_user_memory_region(
+                    slot,
+                    guest_phys_addr,
+                    memory_size,
+                    userspace_addr,
+                    false, /* readonly -- don't care */
+                    false, /* log dirty */
+                )
+                .map_err(Error::RemoveUserMemoryRegion)?;
+        }
 
         // Mark the pages as unmergeable if there were previously marked as
         // mergeable.
@@ -1835,15 +1886,15 @@ impl MemoryManager {
                 if errno == libc::EINVAL {
                     warn!("kernel not configured with CONFIG_KSM");
                 } else {
-                    warn!("madvise error: {}", err);
+                    warn!("madvise error: {err}");
                 }
                 warn!("failed to mark pages as unmergeable");
             }
         }
 
         info!(
-            "Removed userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            "Removed userspace mapping: {guest_phys_addr:x} -> {userspace_addr_:x} {memory_size:x}",
+            userspace_addr_ = userspace_addr as u64
         );
 
         Ok(())
@@ -2088,7 +2139,7 @@ impl MemoryManager {
             }
         }
 
-        debug!("coredump total bytes {}", total_bytes);
+        debug!("coredump total bytes {total_bytes}");
         Ok(())
     }
 
@@ -2119,8 +2170,7 @@ impl MemoryManager {
                     )
                     .map_err(|e| {
                         MigratableError::MigrateReceive(anyhow!(
-                            "Error receiving memory from socket: {}",
-                            e
+                            "Error receiving memory from socket: {e}"
                         ))
                     })?;
                 offset += bytes_read as u64;
@@ -2146,7 +2196,7 @@ impl Aml for MemoryNotify {
             &aml::Equal::new(&aml::Arg(0), &self.slot_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2193,7 +2243,7 @@ impl Aml for MemorySlot {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2376,7 +2426,7 @@ impl Aml for MemoryMethods {
                 &aml::Return::new(&aml::Path::new("MR64")),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2574,7 +2624,7 @@ impl Migratable for MemoryManager {
     // pages touched during our bulk copy are tracked.
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vm.start_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
+            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {e}"))
         })?;
 
         for r in self.guest_memory.memory().iter() {
@@ -2586,7 +2636,7 @@ impl Migratable for MemoryManager {
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vm.stop_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
+            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {e}"))
         })?;
 
         Ok(())
@@ -2598,7 +2648,7 @@ impl Migratable for MemoryManager {
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {e}"))
             })?;
             let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
             {
@@ -2615,13 +2665,12 @@ impl Migratable for MemoryManager {
                 }
             };
 
-            let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
+            let dirty_bitmap = vm_dirty_bitmap
                 .iter()
                 .zip(vmm_dirty_bitmap.iter())
-                .map(|(x, y)| x | y)
-                .collect();
+                .map(|(x, y)| x | y);
 
-            let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa, 4096);
+            let sub_table = MemoryRangeTable::from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
 
             if sub_table.regions().is_empty() {
                 info!("Dirty Memory Range Table is empty");

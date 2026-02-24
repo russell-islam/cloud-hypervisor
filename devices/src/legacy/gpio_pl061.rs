@@ -10,6 +10,7 @@
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
+use log::warn;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
@@ -261,7 +262,7 @@ impl BusDevice for Gpio {
             let index = ((offset - GPIO_ID_LOW) >> 2) as usize;
             value = u32::from(GPIO_ID[index]);
         } else if offset < OFS_DATA {
-            value = self.data & ((offset >> 2) as u32)
+            value = self.data & ((offset >> 2) as u32);
         } else {
             value = match offset {
                 GPIODIR => self.dir,
@@ -294,7 +295,7 @@ impl BusDevice for Gpio {
         if data.len() <= 4 {
             let value = read_le_u32(data);
             if let Err(e) = self.handle_write(offset, value) {
-                warn!("Failed to write to GPIO PL061 device: {}", e);
+                warn!("Failed to write to GPIO PL061 device: {e}");
             }
         } else {
             warn!(
@@ -323,7 +324,7 @@ impl Transportable for Gpio {}
 impl Migratable for Gpio {}
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
 

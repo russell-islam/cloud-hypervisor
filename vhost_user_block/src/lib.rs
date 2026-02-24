@@ -21,7 +21,7 @@ use std::{convert, io, process, result};
 use block::qcow::{self, ImageType, QcowFile};
 use block::{Request, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
-use log::*;
+use log::{debug, error, info, warn};
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
 use vhost::vhost_user::Listener;
@@ -152,7 +152,7 @@ impl VhostUserBlkThread {
                         .unwrap();
                 }
                 Err(err) => {
-                    error!("failed to parse available descriptor chain: {:?}", err);
+                    error!("failed to parse available descriptor chain: {err:?}");
                     len = 0;
                 }
             }
@@ -203,7 +203,7 @@ struct VhostUserBlkBackend {
 
 impl VhostUserBlkBackend {
     fn new(
-        image_path: String,
+        image_path: &str,
         num_queues: usize,
         rdonly: bool,
         direct: bool,
@@ -217,16 +217,16 @@ impl VhostUserBlkBackend {
         if direct {
             options.custom_flags(libc::O_DIRECT);
         }
-        let image: File = options.open(&image_path).unwrap();
+        let image: File = options.open(image_path).unwrap();
         let mut raw_img: qcow::RawFile = qcow::RawFile::new(image, direct);
 
         let serial = build_serial(&PathBuf::from(&image_path));
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
         let image = match image_type {
             ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
-            ImageType::Qcow2 => {
-                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
-            }
+            ImageType::Qcow2 => Arc::new(Mutex::new(
+                QcowFile::from_with_nesting_depth(raw_img, 0, true).unwrap(),
+            )) as Arc<Mutex<dyn DiskFile>>,
         };
 
         let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap()) / SECTOR_SIZE;
@@ -350,7 +350,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        debug!("event received: {:?}", device_event);
+        debug!("event received: {device_event:?}");
 
         let thread = self.threads[thread_id].get_mut().unwrap();
         match device_event {
@@ -395,8 +395,18 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         }
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        self.config.as_slice().to_vec()
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        let subset = self
+            .config
+            .as_slice()
+            .get(offset as usize..(offset + size) as usize);
+
+        if let Some(subset) = subset {
+            subset.to_vec()
+        } else {
+            warn!("Invalid config offset {offset} or size {size}");
+            vec![]
+        }
     }
 
     fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
@@ -510,7 +520,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
-            backend_config.path,
+            &backend_config.path,
             backend_config.num_queues,
             backend_config.readonly,
             backend_config.direct,
@@ -531,20 +541,17 @@ pub fn start_block_backend(backend_command: &str) {
     debug!("blk_daemon is created!\n");
 
     if let Err(e) = blk_daemon.start(listener) {
-        error!(
-            "Failed to start daemon for vhost-user-block with error: {:?}\n",
-            e
-        );
+        error!("Failed to start daemon for vhost-user-block with error: {e:?}\n");
         process::exit(1);
     }
 
     if let Err(e) = blk_daemon.wait() {
-        error!("Error from the main thread: {:?}", e);
+        error!("Error from the main thread: {e:?}");
     }
 
     for thread in blk_backend.read().unwrap().threads.iter() {
         if let Err(e) = thread.lock().unwrap().kill_evt.write(1) {
-            error!("Error shutting down worker thread: {:?}", e)
+            error!("Error shutting down worker thread: {e:?}");
         }
     }
 }

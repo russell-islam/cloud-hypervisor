@@ -268,7 +268,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Mov_RAX_moffs64 {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 
@@ -699,7 +699,7 @@ mod tests {
         }
 
         for (register, instruction_prefix) in test_inputs {
-            helper(register, instruction_prefix)
+            helper(register, instruction_prefix);
         }
     }
 
@@ -760,7 +760,7 @@ mod tests {
         }
 
         for (register, instruction_prefix) in test_inputs {
-            helper(register, instruction_prefix)
+            helper(register, instruction_prefix);
         }
     }
 }

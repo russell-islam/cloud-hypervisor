@@ -10,6 +10,8 @@
 // MOVS - Move Data from String to String
 //
 
+use anyhow::anyhow;
+
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
 
@@ -104,7 +106,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Movsb_m8_m8 {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

@@ -1,7 +1,7 @@
 name: Cloud Hypervisor Tests (ARM64)
 on: [pull_request, merge_group]
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - name: Fix workspace permissions
         run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Run unit tests (musl)

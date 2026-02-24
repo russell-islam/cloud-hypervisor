@@ -7,12 +7,13 @@ use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use io_uring::{IoUring, opcode, types};
+use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{BatchRequest, DiskTopology, RequestType};
+use crate::{BatchRequest, DiskTopology, RequestType, probe_sparse_support};
 
 pub struct RawFileDisk {
     file: File,
@@ -25,9 +26,16 @@ impl RawFileDisk {
 }
 
 impl DiskFile for RawFileDisk {
-    fn size(&mut self) -> DiskFileResult<u64> {
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
         self.file
             .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)
+    }
+
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
             .map_err(DiskFileError::Size)
     }
 
@@ -45,6 +53,14 @@ impl DiskFile for RawFileDisk {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
         }
+    }
+
+    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
+        self.file.set_len(size).map_err(DiskFileError::ResizeError)
+    }
+
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
@@ -97,7 +113,7 @@ impl AsyncIo for RawFileAsync {
                     .build()
                     .user_data(user_data),
             )
-            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?
+            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?;
         };
 
         // Update the submission queue and submit new operations to the
@@ -125,7 +141,7 @@ impl AsyncIo for RawFileAsync {
                     .build()
                     .user_data(user_data),
             )
-            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?
+            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?;
         };
 
         // Update the submission queue and submit new operations to the
@@ -147,7 +163,7 @@ impl AsyncIo for RawFileAsync {
                         .build()
                         .user_data(user_data),
                 )
-                .map_err(|_| AsyncIoError::Fsync(Error::other("Submission queue is full")))?
+                .map_err(|_| AsyncIoError::Fsync(Error::other("Submission queue is full")))?;
             };
 
             // Update the submission queue and submit new operations to the
@@ -199,7 +215,7 @@ impl AsyncIo for RawFileAsync {
                         )
                         .map_err(|_| {
                             AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
-                        })?
+                        })?;
                     };
                     submitted = true;
                 }
@@ -219,7 +235,7 @@ impl AsyncIo for RawFileAsync {
                         )
                         .map_err(|_| {
                             AsyncIoError::WriteVectored(Error::other("Submission queue is full"))
-                        })?
+                        })?;
                     };
                     submitted = true;
                 }
@@ -238,6 +254,60 @@ impl AsyncIo for RawFileAsync {
                 .submit()
                 .map_err(AsyncIoError::SubmitBatchRequests)?;
         }
+
+        Ok(())
+    }
+
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        const FALLOC_FL_PUNCH_HOLE: i32 = 0x02;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: The file descriptor is known to be valid.
+        unsafe {
+            sq.push(
+                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                    .offset(offset)
+                    .mode(mode)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|e| {
+                AsyncIoError::PunchHole(Error::other(format!("Submission queue is full: {e:?}")))
+            })?;
+        };
+
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::PunchHole)?;
+
+        Ok(())
+    }
+
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        const FALLOC_FL_ZERO_RANGE: i32 = 0x10;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: The file descriptor is known to be valid.
+        unsafe {
+            sq.push(
+                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                    .offset(offset)
+                    .mode(mode)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|e| {
+                AsyncIoError::WriteZeroes(Error::other(format!("Submission queue is full: {e:?}")))
+            })?;
+        };
+
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::WriteZeroes)?;
 
         Ok(())
     }

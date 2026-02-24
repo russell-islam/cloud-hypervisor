@@ -180,7 +180,7 @@ impl KvmAiaImsics {
     }
 
     /// Method to initialize the AIA device
-    pub fn new(vm: &dyn Vm, config: VaiaConfig) -> Result<KvmAiaImsics> {
+    pub fn new(vm: &dyn Vm, config: &VaiaConfig) -> Result<KvmAiaImsics> {
         // This is inside KVM module
         let vm = vm.as_any().downcast_ref::<KvmVm>().expect("Wrong VM type?");
 
@@ -250,7 +250,7 @@ impl Vaia for KvmAiaImsics {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::HypervisorVmConfig;
     use crate::arch::riscv64::aia::VaiaConfig;
     use crate::kvm::KvmAiaImsics;
@@ -270,6 +270,7 @@ mod tests {
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _vcpu = vm.create_vcpu(0, None).unwrap();
 
-        assert!(KvmAiaImsics::new(&*vm, create_test_vaia_config()).is_ok());
+        let vaia_config = create_test_vaia_config();
+        assert!(KvmAiaImsics::new(&*vm, &vaia_config).is_ok());
     }
 }

@@ -10,6 +10,8 @@
 // STOS - Store String
 //
 
+use anyhow::anyhow;
+
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
 
@@ -90,7 +92,7 @@ impl<T: CpuStateManager> InstructionHandler<T> for Stosb_m8_AL {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
 

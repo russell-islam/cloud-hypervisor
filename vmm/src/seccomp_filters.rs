@@ -25,6 +25,7 @@ use vhost::vhost_kern::vhost_binding::{
     VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
 
+#[derive(Copy, Clone)]
 pub enum Thread {
     HttpApi,
     #[cfg(feature = "dbus_api")]
@@ -103,7 +104,13 @@ mod kvm {
     pub const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
     pub const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
     pub const KVM_NMI: u64 = 0xae9a;
+    pub const KVM_GET_NESTED_STATE: u64 = 3229658814;
+    pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
 }
+
+// Block device ioctls for sparse support probing (not exported by libc)
+const BLKDISCARD: u64 = 0x1277; // _IO(0x12, 119)
+const BLKZEROOUT: u64 = 0x127f; // _IO(0x12, 127)
 
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
@@ -232,6 +239,8 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_NMI)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
     ])
 }
 
@@ -254,6 +263,8 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, BLKIOMIN as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, BLKIOOPT as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKDISCARD as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKZEROOUT as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
@@ -373,6 +384,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     const KVM_GET_TSC_KHZ: u64 = 0xaea3;
     const KVM_GET_XCRS: u64 = 0x8188_aea6;
     const KVM_GET_XSAVE: u64 = 0x9000_aea4;
+    const KVM_GET_XSAVE2: u64 = 0x9000_aecf;
     const KVM_KVMCLOCK_CTRL: u64 = 0xaead;
     const KVM_SET_CLOCK: u64 = 0x4030_ae7b;
     const KVM_SET_CPUID2: u64 = 0x4008_ae90;
@@ -401,6 +413,7 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_TSC_KHZ)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_XCRS,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_XSAVE,)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_XSAVE2,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_KVMCLOCK_CTRL)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_CLOCK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_CPUID2)?],
@@ -490,6 +503,7 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_mmap, vec![]),
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -529,6 +543,7 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_setsid, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
         #[cfg(debug_assertions)]
@@ -546,6 +561,8 @@ fn vmm_thread_rules(
         (libc::SYS_accept4, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_access, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_arch_prctl, vec![]),
         (libc::SYS_bind, vec![]),
         (libc::SYS_brk, vec![]),
         (libc::SYS_clock_gettime, vec![]),
@@ -634,12 +651,7 @@ fn vmm_thread_rules(
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_restart_syscall, vec![]),
-        // musl is missing this constant
-        // (libc::SYS_rseq, vec![]),
-        #[cfg(target_arch = "x86_64")]
-        (334, vec![]),
-        #[cfg(target_arch = "aarch64")]
-        (293, vec![]),
+        (libc::SYS_rseq, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_rt_sigreturn, vec![]),
@@ -697,6 +709,8 @@ fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_RUN,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_NMI)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
     ])
 }
 
@@ -781,6 +795,7 @@ fn vcpu_thread_rules(
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_fstat, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getpid, vec![]),
@@ -841,6 +856,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_ioctl, create_api_ioctl_seccomp_rule()?),
@@ -875,6 +891,7 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_exit, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_madvise, vec![]),
@@ -883,12 +900,7 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_munmap, vec![]),
         (libc::SYS_prctl, vec![]),
         (libc::SYS_recvmsg, vec![]),
-        // musl is missing this constant
-        // (libc::SYS_rseq, vec![]),
-        #[cfg(target_arch = "x86_64")]
-        (334, vec![]),
-        #[cfg(target_arch = "aarch64")]
-        (293, vec![]),
+        (libc::SYS_rseq, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_sched_yield, vec![]),
@@ -904,6 +916,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
     Ok(vec![
         (libc::SYS_brk, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_landlock_create_ruleset, vec![]),
         (libc::SYS_landlock_restrict_self, vec![]),

@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::{fs, io};
 
+use log::warn;
 use thiserror::Error;
 
 use super::{MacAddr, Tap, TapError, vnet_hdr_len};
@@ -79,21 +80,19 @@ fn open_tap_rx_q_0(
         None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
     };
     // Don't overwrite ip configuration of existing interfaces:
-    if !tap_exists {
-        if let Some(ip) = ip_addr {
-            tap.set_ip_addr(ip, netmask)
-                .map_err(Error::TapSetIpNetmask)?;
-        }
-    } else {
+    if tap_exists {
         warn!(
             "Tap {} already exists. IP configuration will not be overwritten.",
             if_name.unwrap_or_default()
         );
+    } else if let Some(ip) = ip_addr {
+        tap.set_ip_addr(ip, netmask)
+            .map_err(Error::TapSetIpNetmask)?;
     }
     if let Some(mac) = host_mac {
-        tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?
+        tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?;
     } else {
-        *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?)
+        *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?);
     }
     if let Some(mtu) = mtu {
         tap.set_mtu(mtu as i32).map_err(Error::TapSetMtu)?;

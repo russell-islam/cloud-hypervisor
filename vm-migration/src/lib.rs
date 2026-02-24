@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use crate::protocol::MemoryRangeTable;
 
+mod bitpos_iterator;
 pub mod protocol;
 
 #[derive(Error, Debug)]
@@ -49,7 +50,7 @@ pub enum MigratableError {
     #[error("Failed to complete migration for migratable component")]
     CompleteMigration(#[source] anyhow::Error),
 
-    #[error("Failed to release a disk lock before the migration")]
+    #[error("Failed to release a disk lock")]
     UnlockError(#[source] anyhow::Error),
 }
 
@@ -84,7 +85,7 @@ impl SnapshotData {
         T: Deserialize<'a>,
     {
         serde_json::from_str(&self.state)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
+            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {e}")))
     }
 
     /// Create from state that can be serialized
@@ -93,7 +94,7 @@ impl SnapshotData {
         T: Serialize,
     {
         let state = serde_json::to_string(state)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {e}")))?;
 
         Ok(SnapshotData { state })
     }
@@ -155,8 +156,8 @@ impl Snapshot {
     }
 }
 
-pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
-    snapshot.and_then(|s| s.snapshots.get(id).cloned())
+pub fn snapshot_from_id<'a>(snapshot: Option<&'a Snapshot>, id: &str) -> Option<&'a Snapshot> {
+    snapshot.and_then(|s| s.snapshots.get(id))
 }
 
 pub fn state_from_id<'a, T>(s: Option<&'a Snapshot>, id: &str) -> Result<Option<T>, MigratableError>

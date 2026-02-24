@@ -9,13 +9,14 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::{DiskTopology, probe_sparse_support};
 
 pub struct RawFileDiskAio {
     file: File,
@@ -28,9 +29,16 @@ impl RawFileDiskAio {
 }
 
 impl DiskFile for RawFileDiskAio {
-    fn size(&mut self) -> DiskFileResult<u64> {
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
         self.file
             .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)
+    }
+
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
             .map_err(DiskFileError::Size)
     }
 
@@ -48,6 +56,10 @@ impl DiskFile for RawFileDiskAio {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
         }
+    }
+
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
@@ -152,5 +164,17 @@ impl AsyncIo for RawFileAsyncAio {
         } else {
             Some((events[0].data, events[0].res as i32))
         }
+    }
+
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::PunchHole(std::io::Error::other(
+            "punch_hole not supported with AIO backend",
+        )))
+    }
+
+    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+            "write_zeroes not supported with AIO backend",
+        )))
     }
 }

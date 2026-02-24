@@ -14,6 +14,8 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -34,7 +36,7 @@ use super::{
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -105,7 +107,7 @@ struct Request {
 impl Request {
     fn parse(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
@@ -165,12 +167,12 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> result::Result<bool, Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            let len = match Request::parse(&mut desc_chain, self.access_platform.as_ref()) {
+            let len = match Request::parse(&mut desc_chain, self.access_platform.as_deref()) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
                         Err(e) => {
-                            error!("failed flushing disk image: {}", e);
+                            error!("failed flushing disk image: {e}");
                             VIRTIO_PMEM_RESP_TYPE_EIO
                         }
                     };
@@ -179,7 +181,7 @@ impl PmemEpollHandler {
                     match desc_chain.memory().write_obj(resp, req.status_addr) {
                         Ok(_) => size_of::<VirtioPmemResp>() as u32,
                         Err(e) => {
-                            error!("bad guest memory address: {}", e);
+                            error!("bad guest memory address: {e}");
                             0
                         }
                     }
@@ -190,7 +192,7 @@ impl PmemEpollHandler {
                     0
                 }
                 Err(e) => {
-                    error!("Failed to parse available descriptor chain: {:?}", e);
+                    error!("Failed to parse available descriptor chain: {e:?}");
                     0
                 }
             };
@@ -208,15 +210,15 @@ impl PmemEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(0))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -236,26 +238,22 @@ impl EpollHelperHandler for PmemEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
 
                 if needs_notification {
                     self.signal_used_queue().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -271,10 +269,6 @@ pub struct Pmem {
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-
-    // Hold ownership of the memory that is allocated for the device
-    // which will be automatically dropped when the device is dropped
-    _region: MmapRegion,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -291,14 +285,13 @@ impl Pmem {
         disk: File,
         addr: GuestAddress,
         mapping: UserspaceMapping,
-        _region: MmapRegion,
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<PmemState>,
     ) -> io::Result<Pmem> {
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-pmem {}", id);
+            info!("Restoring virtio-pmem {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -308,7 +301,7 @@ impl Pmem {
         } else {
             let config = VirtioPmemConfig {
                 start: addr.raw_value().to_le(),
-                size: (_region.size() as u64).to_le(),
+                size: (mapping.mapping.size() as u64).to_le(),
             };
 
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -335,7 +328,6 @@ impl Pmem {
             config,
             mapping,
             seccomp_action,
-            _region,
             exit_evt,
         })
     }
@@ -378,7 +370,7 @@ impl VirtioDevice for Pmem {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -391,11 +383,11 @@ impl VirtioDevice for Pmem {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
-                error!("failed cloning pmem disk: {}", e);
+                error!("failed cloning pmem disk: {e}");
                 ActivateError::BadActivate
             })?;
 
@@ -422,7 +414,7 @@ impl VirtioDevice for Pmem {
                 Thread::VirtioPmem,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || handler.run(paused, paused_sync.unwrap()),
+                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
 
             self.common.epoll_threads = Some(epoll_threads);
@@ -444,7 +436,7 @@ impl VirtioDevice for Pmem {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

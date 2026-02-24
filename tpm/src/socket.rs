@@ -6,8 +6,10 @@
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 use anyhow::anyhow;
+use log::debug;
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
@@ -57,21 +59,23 @@ impl SocketDev {
         }
     }
 
-    pub fn init(&mut self, path: String) -> Result<()> {
-        self.connect(&path)?;
+    pub fn init(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        self.connect(path)?;
         Ok(())
     }
 
-    pub fn connect(&mut self, socket_path: &str) -> Result<()> {
+    pub fn connect(&mut self, socket_path: impl AsRef<Path>) -> Result<()> {
+        let socket_path = socket_path.as_ref();
         self.state = SocketDevState::Connecting;
 
+        let socket_path_s = socket_path.to_str().unwrap();
         let s = UnixStream::connect(socket_path).map_err(|e| {
-            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {:?}", e))
+            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {e:?}"))
         })?;
         self.control_fd = s.as_raw_fd();
         self.stream = Some(s);
         self.state = SocketDevState::Connected;
-        debug!("Connected to tpm socket path : {:?}", socket_path);
+        debug!("Connected to tpm socket path : {socket_path_s:?}");
         Ok(())
     }
 
@@ -92,7 +96,7 @@ impl SocketDev {
             .unwrap()
             .send_with_fd(buf, write_fd)
             .map_err(|e| {
-                Error::WriteToSocket(anyhow!("Failed to write to Socket. Error: {:?}", e))
+                Error::WriteToSocket(anyhow!("Failed to write to Socket. Error: {e:?}"))
             })?;
 
         Ok(size)
@@ -129,7 +133,7 @@ impl SocketDev {
         }
         let mut socket = self.stream.as_ref().unwrap();
         let size: usize = socket.read(buf).map_err(|e| {
-            Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {:?}", e))
+            Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {e:?}"))
         })?;
         Ok(size)
     }

@@ -8,6 +8,8 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{debug, info};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
@@ -64,14 +66,13 @@ pub struct PvPanicDeviceState {
 }
 
 impl PvPanicDevice {
-    pub fn new(id: String, snapshot: Option<Snapshot>) -> Result<Self, PvPanicError> {
-        let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
-                PvPanicError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {}",
-                    e
-                ))
-            })?;
+    pub fn new(id: String, snapshot: Option<&Snapshot>) -> Result<Self, PvPanicError> {
+        let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
+            .map_err(|e| {
+            PvPanicError::RetrievePciConfigurationState(anyhow!(
+                "Failed to get PciConfigurationState from Snapshot: {e}"
+            ))
+        })?;
 
         let mut configuration = PciConfiguration::new(
             PVPANIC_VENDOR_ID,
@@ -100,8 +101,7 @@ impl PvPanicDevice {
             .transpose()
             .map_err(|e| {
                 PvPanicError::CreatePvPanicDevice(anyhow!(
-                    "Failed to get PvPanicDeviceState from Snapshot: {}",
-                    e
+                    "Failed to get PvPanicDeviceState from Snapshot: {e}"
                 ))
             })?;
         let events = if let Some(state) = state {
@@ -143,12 +143,12 @@ impl PvPanicDevice {
 
 impl BusDevice for PvPanicDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let event = self.event_to_string(data[0]);
-        info!("pvpanic got guest event {}", event);
+        info!("pvpanic got guest event {event}");
         event!("guest", "panic", "event", &event);
         None
     }
