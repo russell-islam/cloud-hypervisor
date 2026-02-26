@@ -8808,6 +8808,7 @@ mod common_parallel {
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
             .default_disks()
+            .default_net()
             .capture_output();
 
         let pltfrm_string = format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}");
