@@ -30,7 +30,7 @@ use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
-const MAX_NUM_PCI_SEGMENTS: u16 = 10;
+const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const CVM_TIMEOUT: u32 = 140;
 
 #[cfg(target_arch = "x86_64")]

@@ -1236,7 +1236,7 @@ impl DeviceManager {
         // inject ACPI tables. Currently we are assuming that each segments gets 4G
         // and we are supporting 10 segs only so we are saying that end of the device
         // area is 40G.
-        assert!(num_pci_segments <= 10);
+        assert!(num_pci_segments <= 96);
         let phys_width = crate::vm::physical_bits(
             hypervisor.as_ref(),
             config.lock().unwrap().cpus.max_phys_bits,
