@@ -660,7 +660,8 @@ impl CpusConfig {
         let nested = parser
             .convert::<Toggle>("nested")
             .map_err(Error::ParseCpus)?
-            .is_none_or(|toggle| toggle.0);
+            .map(|toggle| toggle.0)
+            .is_some_and(|toggle| toggle);
 
         // Nested virtualization is always turned on for aarch64 and riscv64
         // TODO: revisit this when nested support can be turned of on these architectures

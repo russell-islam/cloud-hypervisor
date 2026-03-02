@@ -1043,7 +1043,7 @@ impl Guest {
 
     pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
         if self.vm_type == GuestVmType::Confidential {
-            format! {"{{\"platform\":{{\"sev_snp\":true}},\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}], \"host_data\": \"{}\"}}",
+            format! {"{{\"platform\":{{\"sev_snp\":true}},\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}], \"host_data\": \"{}\"}}",
                  cpu_count,
                  cpu_count,
                  kernel_path,
@@ -1055,7 +1055,7 @@ impl Guest {
                  generate_host_data().as_str(),
             }
         } else {
-            format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+            format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                     cpu_count,
                     cpu_count,
                     kernel_path,
