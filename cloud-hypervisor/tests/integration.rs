@@ -10004,7 +10004,7 @@ mod common_parallel {
             .args(["--memory", "size=512M,hugepages=on"])
             .default_disks()
             .default_net()
-            .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
+            .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=3"])
             .capture_output();
 
         let igvm = direct_igvm_boot_path(Some("hvc0"));
