@@ -954,12 +954,17 @@ impl Guest {
         };
 
         disk_config.prepare_files(&tmp_dir, &network);
+        let vm_type = if is_guest_vm_type_cvm() {
+            GuestVmType::Confidential
+        } else {
+            GuestVmType::Regular
+        };
 
         Guest {
             tmp_dir,
             disk_config,
             network,
-            vm_type: GuestVmType::Regular,
+            vm_type,
             boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
             kernel_path: None,
             kernel_cmdline: None,
