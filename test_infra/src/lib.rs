@@ -1048,27 +1048,27 @@ impl Guest {
 
     pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
         if self.vm_type == GuestVmType::Confidential {
-            format! {"{{\"platform\":{{\"sev_snp\":true}},\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}], \"host_data\": \"{}\"}}",
-                 cpu_count,
-                 cpu_count,
-                 kernel_path,
-                 kernel_cmd,
-                 self.network.host_ip0,
-                 self.network.guest_mac0,
-                 self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
-                 generate_host_data().as_str(),
+            format! {"{{\"platform\":{{\"sev_snp\":true}},\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"igvm\":\"{}\",\"cmdline\": \"{}\", \"host_data\": \"{}\" }},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
+                cpu_count,
+                cpu_count,
+                kernel_path,
+                kernel_cmd,
+                generate_host_data().as_str(),
+                self.network.host_ip0,
+                self.network.guest_mac0,
+                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             }
         } else {
             format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
-                    cpu_count,
-                    cpu_count,
-                    kernel_path,
-                    kernel_cmd,
-                    self.network.host_ip0,
-                    self.network.guest_mac0,
-                    self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                    self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+                cpu_count,
+                cpu_count,
+                kernel_path,
+                kernel_cmd,
+                self.network.host_ip0,
+                self.network.guest_mac0,
+                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
+                self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
             }
         }
     }
