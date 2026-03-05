@@ -9886,7 +9886,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
             if is_guest_vm_type_cvm() {
-                guest.wait_vm_boot_custom_timeout(CVM_TIMEOUT).unwrap()
+                guest.wait_vm_boot_custom_timeout(CVM_TIMEOUT).unwrap();
             } else {
                 guest.wait_vm_boot().unwrap();
             }
