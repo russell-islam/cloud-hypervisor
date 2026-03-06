@@ -14656,4 +14656,13 @@ mod common_cvm {
             .create_guest(Box::new(disk_config));
         _test_multi_cpu(&guest);
     }
+
+    #[test]
+    fn test_cpu_affinity() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(2);
+        _test_cpu_affinity(&guest);
+    }
 }
