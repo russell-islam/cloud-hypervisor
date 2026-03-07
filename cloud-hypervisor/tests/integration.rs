@@ -14699,4 +14699,12 @@ mod common_cvm {
             .create_guest(Box::new(disk_config));
         _test_virtio_net_ctrl_queue(&guest);
     }
+
+    #[test]
+    fn test_pci_multiple_segments() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config));
+        _test_pci_multiple_segments(&guest);
+    }
 }
