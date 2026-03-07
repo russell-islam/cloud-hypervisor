@@ -14708,4 +14708,12 @@ mod common_cvm {
             .create_guest(Box::new(disk_config));
         _test_pci_multiple_segments(&guest);
     }
+
+    #[test]
+    fn test_direct_kernel_boot() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config));
+        _test_direct_kernel_boot(&guest);
+    }
 }
