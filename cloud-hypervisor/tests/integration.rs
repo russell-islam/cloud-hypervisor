@@ -23,6 +23,7 @@ use std::sync::{Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io, thread};
 
+use block::ImageType;
 use net_util::MacAddr;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
@@ -2799,13 +2800,118 @@ fn _test_direct_kernel_boot(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_virtio_block(
+    guest: &Guest,
+    disable_io_uring: bool,
+    disable_aio: bool,
+    verify_os_disk: bool,
+    backing_files: bool,
+    image_type: ImageType,
+) {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+
+    let mut blk_file_path = workload_path;
+    blk_file_path.push("blk.img");
+
+    let initial_backing_checksum = if verify_os_disk {
+        compute_backing_checksum(guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
+    } else {
+        None
+    };
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .args(["--memory", "size=512M,shared=on"])
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            format!(
+                "path={},backing_files={},image_type={image_type}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+                if backing_files { "on"} else {"off"},
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={},_disable_aio={}",
+                blk_file_path.to_str().unwrap(),
+                disable_io_uring,
+                disable_aio,
+            )
+            .as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check both if /dev/vdc exists and if the block size is 16M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 16M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Check both if /dev/vdc exists and if this block is RO.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | awk '{print $5}'")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Check if the number of queues is 4.
+        assert_eq!(
+            guest
+                .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            4
+        );
+    });
+
+    if verify_os_disk {
+        // Use clean shutdown to allow cloud-hypervisor to clear
+        // the dirty bit in the QCOW2 v3 image.
+        kill_child(&mut cloud_child);
+    } else {
+        let _ = cloud_child.kill();
+    }
+    let output = cloud_child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+
+    if verify_os_disk {
+        disk_check_consistency(
+            guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            initial_backing_checksum,
+        );
+    }
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
     use std::io::{self, SeekFrom};
     use std::process::Command;
 
-    use block::ImageType;
     use test_infra::GuestFactory;
 
     use crate::*;
@@ -3336,131 +3442,31 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn _test_virtio_block(
-        image_name: &str,
-        disable_io_uring: bool,
-        disable_aio: bool,
-        verify_os_disk: bool,
-        backing_files: bool,
-        image_type: ImageType,
-    ) {
-        let disk_config = UbuntuDiskConfig::new(image_name.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
-
-        let mut blk_file_path = workload_path;
-        blk_file_path.push("blk.img");
-
-        let kernel_path = direct_kernel_boot_path();
-
-        let initial_backing_checksum = if verify_os_disk {
-            compute_backing_checksum(guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
-        } else {
-            None
-        };
-
-        let mut cloud_child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M,shared=on"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={},backing_files={},image_type={image_type}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
-                    if backing_files { "on"} else {"off"},
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={},readonly=on,direct=on,num_queues=4,_disable_io_uring={},_disable_aio={}",
-                    blk_file_path.to_str().unwrap(),
-                    disable_io_uring,
-                    disable_aio,
-                )
-                .as_str(),
-            ])
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Check both if /dev/vdc exists and if the block size is 16M.
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk | grep vdc | grep -c 16M")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Check both if /dev/vdc exists and if this block is RO.
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk | grep vdc | awk '{print $5}'")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Check if the number of queues is 4.
-            assert_eq!(
-                guest
-                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                4
-            );
-        });
-
-        if verify_os_disk {
-            // Use clean shutdown to allow cloud-hypervisor to clear
-            // the dirty bit in the QCOW2 v3 image.
-            kill_child(&mut cloud_child);
-        } else {
-            let _ = cloud_child.kill();
-        }
-        let output = cloud_child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
-
-        if verify_os_disk {
-            disk_check_consistency(
-                guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
-                initial_backing_checksum,
-            );
-        }
-    }
-
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false, false, ImageType::Raw);
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false, false, ImageType::Raw);
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false, false, ImageType::Raw);
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
     }
 
     fn run_qemu_img(
@@ -3696,8 +3702,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2,
+            &guest,
             false,
             false,
             true,
@@ -3708,8 +3718,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2_ZLIB,
+            &guest,
             false,
             false,
             true,
@@ -3720,8 +3734,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZSTD.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
+            &guest,
             false,
             false,
             true,
@@ -3732,8 +3750,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_backing_zstd_file() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
+            &guest,
             false,
             false,
             true,
@@ -3744,8 +3766,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            &guest,
             false,
             false,
             true,
@@ -3756,8 +3782,12 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
+            &guest,
             false,
             false,
             true,
@@ -4645,9 +4675,12 @@ mod common_parallel {
             .arg(vhd_file_path.to_str().unwrap())
             .output()
             .expect("Expect generating VHD image from RAW image");
-
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME_VHD.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            FOCAL_IMAGE_NAME_VHD,
+            &guest,
             false,
             false,
             false,
@@ -4676,9 +4709,12 @@ mod common_parallel {
             .arg(vhdx_file_path.to_str().unwrap())
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
-
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME_VHDX.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
         _test_virtio_block(
-            FOCAL_IMAGE_NAME_VHDX,
+            &guest,
             false,
             false,
             true,
