@@ -45,6 +45,7 @@ use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
+use zerocopy::error;
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -1002,14 +1003,22 @@ impl MemoryManager {
         let user_provided_zones = config.size == 0;
 
         let mmio_address_space_size = mmio_address_space_size(phys_bits);
+        error!("MUISLAM: MMIO address space size: {mmio_address_space_size:#x}");
         debug_assert_eq!(
             (((mmio_address_space_size) >> 16) << 16),
             mmio_address_space_size
         );
         let start_of_platform_device_area =
             GuestAddress(mmio_address_space_size - PLATFORM_DEVICE_AREA_SIZE);
+        error!(
+            "MUISLAM: Start of platform device area: {:#x}",
+            start_of_platform_device_area.raw_value()
+        );
         let end_of_device_area = start_of_platform_device_area.unchecked_sub(1);
-
+        error!(
+            "MUISLAM: End of device area: {:#x}",
+            end_of_device_area.raw_value()
+        );
         let (ram_size, zones, allow_mem_hotplug) =
             Self::validate_memory_config(config, user_provided_zones)?;
 

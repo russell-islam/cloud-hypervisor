@@ -1136,10 +1136,13 @@ fn create_mmio_allocators(
     alignment: u64,
 ) -> Vec<Arc<Mutex<AddressAllocator>>> {
     let total_weight: u32 = weights.iter().sum();
-
+    error!("MUISLAM: total_weight: {total_weight}");
     // Start each PCI segment mmio range on an aligned boundary
     let pci_segment_mmio_size = (end - start + 1) / (alignment * total_weight as u64) * alignment;
-
+    let pci_segment_mmio_size_in_gb = pci_segment_mmio_size / (1 << 30);
+    error!("MUISLAM: pci_segment_mmio_size: {pci_segment_mmio_size} : in hex: {pci_segment_mmio_size:#x}");
+    error!("MUISLAM: pci_segment_mmio_size_in_gb: {pci_segment_mmio_size_in_gb}");
+    error!("MUISLAM: weights: {weights:?}");
     let mut mmio_allocators = vec![];
     let mut i = 0;
     for segment_id in 0..num_pci_segments as u64 {
@@ -1167,7 +1170,7 @@ fn calculate_mmio64_area(
     #[cfg(feature = "sev_snp")]
     let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
 
-    if sev_snp_enabled {
+    if false {
         // The idea here is to make sure that bar address space do not collide
         // with guest address. Here we conrifm the guest can have at least 1TB
         // Guest memory, and then we put the MMIO space right below the Max boundary.
@@ -1265,6 +1268,8 @@ impl DeviceManager {
 
         let (start_of_mmio64_area, end_of_mmio64_area) =
             calculate_mmio64_area(hypervisor, &config, num_pci_segments, &memory_manager)?;
+        let memory = memory_manager.lock().unwrap().guest_memory();
+        error!("MUISLAM:Guest end: {:#x}", memory.memory().last_addr().raw_value());
         let pci_mmio64_allocators = create_mmio_allocators(
             start_of_mmio64_area,
             end_of_mmio64_area,
@@ -1273,6 +1278,14 @@ impl DeviceManager {
             4 << 30,
         );
 
+        for pci_mmio_allocator_mutex in pci_mmio64_allocators.clone() {
+            let pci_mmio_allocator = pci_mmio_allocator_mutex.lock().unwrap();
+            let size = pci_mmio_allocator.end().0 - pci_mmio_allocator.base().0 + 1;
+            error!("MUISLAM: PCI MMIO 64 allocator: base = {:#x}, end = {:#x}, size = {}",
+                pci_mmio_allocator.base().0,
+                pci_mmio_allocator.end().0,
+                size);
+        }
         let address_manager = Arc::new(AddressManager {
             allocator: memory_manager.lock().unwrap().allocator(),
             io_bus,
