@@ -247,14 +247,15 @@ PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
 echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
+
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test "common_sequential::$test_filter" $test_features -target "$BUILD_TARGET" -- --test-threads=1 -- ${test_binary_args[*]}
+    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -262,7 +263,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test "aarch64_acpi::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -270,16 +271,14 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-
-    time cargo test "live_migration_parallel::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
 fi
 
 if [ $RES -eq 0 ]; then
-
-    time cargo test "live_migration_sequential::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=1 -- ${test_binary_args[*]}
+    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -289,8 +288,7 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    # integration tests now do not reply on build feature "dbus_api"
-    time cargo test "dbus_api::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 
@@ -298,14 +296,14 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "fw_cfg::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "ivshmem::$test_filter" $test_features --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "ivshmem::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 fi
 

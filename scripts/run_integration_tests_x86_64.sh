@@ -244,13 +244,13 @@ ulimit -n 4096
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
-time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" $test_features  -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]} --test-threads=$((($(nproc) * 3) / 4))
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" $test_features  -- --test-threads=1 -- ${test_binary_args[*]}
+    time cargo test --release --target "$BUILD_TARGET" $test_features "common_sequential::$test_filter" -- ${test_binary_args[*]} --test-threads=1
     RES=$?
 fi
 
@@ -258,20 +258,20 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     # integration tests now do not reply on build feature "dbus_api"
-    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" $test_features  -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]} --test-threads=$(($(nproc) / 4))
     RES=$?
 fi
 
 # Run tests on fw_cfg
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
-    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]} --test-threads=$(($(nproc) / 4))
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
-    time cargo test "ivshmem::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 4)) -- ${test_binary_args[*]}
+    time cargo test "ivshmem::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]} --test-threads=$(($(nproc) / 4))
     RES=$?
 fi
 
