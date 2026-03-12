@@ -5,12 +5,10 @@
 
 // Performance tests
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, thread};
 
-use regex::Regex;
 use test_infra::{Error as InfraError, *};
 use thiserror::Error;
 
@@ -34,7 +32,14 @@ enum Error {
 
 // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
 // as tmpfs does not support O_DIRECT
-const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+pub const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+const QCOW2_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-qcow2-backing.qcow2";
+pub const OVERLAY_WITH_QCOW2_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-qcow2.qcow2";
+const RAW_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-raw-backing.raw";
+pub const OVERLAY_WITH_RAW_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-raw.qcow2";
+pub const QCOW2_UNCOMPRESSED_IMG: &str = "/var/tmp/ch-blk-io-test-uncompressed.qcow2";
+pub const QCOW2_ZLIB_IMG: &str = "/var/tmp/ch-blk-io-test-zlib.qcow2";
+pub const QCOW2_ZSTD_IMG: &str = "/var/tmp/ch-blk-io-test-zstd.qcow2";
 
 pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
@@ -56,11 +61,61 @@ pub fn init_tests(overrides: &PerformanceTestOverrides) {
     }
 
     assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 backing file for backing file tests
+    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_BACKING_FILE} 4G");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 overlay with QCOW2 backing
+    cmd = format!(
+        "qemu-img create -f qcow2 -b {QCOW2_BACKING_FILE} -F qcow2 {OVERLAY_WITH_QCOW2_BACKING} 4G"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // RAW backing file for backing file tests
+    cmd = format!("dd if=/dev/zero of={RAW_BACKING_FILE} bs=1M count=4096");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 overlay with RAW backing
+    cmd = format!(
+        "qemu-img create -f qcow2 -b {RAW_BACKING_FILE} -F raw {OVERLAY_WITH_RAW_BACKING} 4G"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // Standalone QCOW2 image with no backing file
+    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_UNCOMPRESSED_IMG} 4G");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // Zlib compressed QCOW2 image, convert populates actual compressed clusters
+    cmd = format!(
+        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zlib {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZLIB_IMG}"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // Zstd compressed QCOW2 image, convert populates actual compressed clusters
+    cmd = format!(
+        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zstd {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZSTD_IMG}"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
     fs::remove_file(BLK_IO_TEST_IMG)
         .unwrap_or_else(|_| panic!("Failed to remove file '{BLK_IO_TEST_IMG}'."));
+    fs::remove_file(QCOW2_BACKING_FILE)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_BACKING_FILE}'."));
+    fs::remove_file(OVERLAY_WITH_QCOW2_BACKING)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_QCOW2_BACKING}'."));
+    fs::remove_file(RAW_BACKING_FILE)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{RAW_BACKING_FILE}'."));
+    fs::remove_file(OVERLAY_WITH_RAW_BACKING)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_RAW_BACKING}'."));
+    fs::remove_file(QCOW2_UNCOMPRESSED_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_UNCOMPRESSED_IMG}'."));
+    fs::remove_file(QCOW2_ZLIB_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_ZLIB_IMG}'."));
+    fs::remove_file(QCOW2_ZSTD_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_ZSTD_IMG}'."));
 }
 
 // Performance tests are expected to be executed sequentially, so we can
@@ -111,37 +166,7 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     }
 }
 
-fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
-    if is_guest_vm_type_cvm() {
-        // get the default hvc0 igvm file if console string is not passed
-        let console_str = console.unwrap_or("hvc0");
-
-        if console_str != "hvc0" && console_str != "ttyS0" {
-            panic!(
-                "{}",
-                format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
-            );
-        }
-
-        // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
-        // Please add directory as volume to docker container as /igvm_files
-        // Refer ./scripts/dev_cli.sh for this
-        let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
-        let igvm_path_exist = Path::new(&igvm_filepath);
-        if igvm_path_exist.exists() {
-            PathBuf::from(igvm_filepath)
-        } else {
-            panic!(
-                "{}",
-                format!("IGVM File not found at path: {igvm_filepath}")
-            );
-        }
-    } else {
-        PathBuf::from("")
-    }
-}
-
-pub fn performance_net_throughput(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let (rx, bandwidth) = control.net_control.unwrap();
 
@@ -151,32 +176,25 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> Vec<f64> 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let net_params = format!(
-        "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
-        guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
+        "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
+        guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
 
-    let mut cmd = GuestCommand::new(&guest);
-    cmd.args(["--cpus", &format!("boot={num_queues}")])
+    let mut child = GuestCommand::new(&guest)
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false);
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
 
-    let igvm = direct_igvm_boot_path(Some("hvc0"));
-    let kernel = direct_kernel_boot_path();
-    cmd = extend_guest_cmd(
-        cmd,
-        kernel.to_str().unwrap(),
-        Some(DIRECT_KERNEL_BOOT_CMDLINE),
-        igvm.to_str().unwrap(),
-        None,
-    );
-
-    let mut child = cmd.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
         measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
     });
 
@@ -184,7 +202,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> Vec<f64> 
     let output = child.wait_with_output().unwrap();
 
     match r {
-        Ok(r) => Vec::from([r, 0.0, 0.0, 0.0, 0.0]),
+        Ok(r) => r,
         Err(e) => {
             handle_child_output(Err(e), &output);
             panic!("test failed!");
@@ -192,40 +210,32 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> Vec<f64> 
     }
 }
 
-pub fn performance_net_latency(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let net_params = format!(
-        "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
-        guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
+        "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
+        guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
 
-    let mut cmd = GuestCommand::new(&guest);
-    cmd.args(["--cpus", &format!("boot={num_queues}")])
+    let mut child = GuestCommand::new(&guest)
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .args(["--net", net_params.as_str()])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false);
-
-    let igvm = direct_igvm_boot_path(Some("hvc0"));
-    let kernel = direct_kernel_boot_path();
-    cmd = extend_guest_cmd(
-        cmd,
-        kernel.to_str().unwrap(),
-        Some(DIRECT_KERNEL_BOOT_CMDLINE),
-        igvm.to_str().unwrap(),
-        None,
-    );
-
-    let mut child = cmd.spawn().unwrap();
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // 'ethr' tool will measure the latency multiple times with provided test time
         let latency = measure_virtio_net_latency(&guest, control.test_timeout).unwrap();
@@ -236,7 +246,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> Vec<f64> {
     let output = child.wait_with_output().unwrap();
 
     match r {
-        Ok(r) => Vec::from([r, 0.0, 0.0, 0.0, 0.0]),
+        Ok(r) => r,
         Err(e) => {
             handle_child_output(Err(e), &output);
             panic!("test failed!");
@@ -323,81 +333,48 @@ fn parse_boot_time_output(output: &[u8]) -> Result<f64, Error> {
     })
 }
 
-fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<Vec<f64>, Error> {
-    let mut child = cmd.capture_output().set_print_cmd(false).spawn().unwrap();
+fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, Error> {
+    let mut child = cmd
+        .capture_output()
+        .verbosity(VerbosityLevel::Warn)
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
 
-    if is_guest_vm_type_cvm() {
-        thread::sleep(Duration::new(60_u64, 0));
-    } else {
-        thread::sleep(Duration::new(test_timeout as u64, 0));
-    }
+    thread::sleep(Duration::new(test_timeout as u64, 0));
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();
 
-    let boot_time = std::panic::catch_unwind(|| {
-        parse_boot_time_output(&output.stderr).inspect_err(|_| {
-            eprintln!(
-                "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====",
-                String::from_utf8_lossy(&output.stdout)
-            );
-            eprintln!(
-                "\n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        })
-    });
-    #[allow(clippy::redundant_pattern_matching)]
-    if let Ok(..) = boot_time {
-        Ok(Vec::from([
-            boot_time.unwrap().unwrap(),
-            get_cvm_boot_params(
-                "address_space_time",
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ),
-            get_cvm_boot_params(
-                "hashing_page_time",
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ),
-            get_cvm_boot_params(
-                "hashing_page_count",
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ),
-            get_cvm_boot_params(
-                "launch_command_time",
-                String::from_utf8_lossy(&output.stderr).to_string(),
-            ),
-        ]))
-    } else {
-        panic!("test failed!");
-    }
+    parse_boot_time_output(&output.stderr).inspect_err(|_| {
+        eprintln!(
+            "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        eprintln!(
+            "\n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    })
 }
 
-pub fn performance_boot_time(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = performance_test_new_guest(Box::new(focal));
         let mut cmd = GuestCommand::new(&guest);
 
-        cmd.args([
-            "--cpus",
-            &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-        ])
-        .args(["--memory", "size=1G"])
-        .args(["--console", "off"])
-        .verbosity(VerbosityLevel::Warn)
-        .default_disks();
+        let c = cmd
+            .args([
+                "--cpus",
+                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+            ])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--console", "off"])
+            .default_disks();
 
-        let igvm = direct_igvm_boot_path(Some("hvc0"));
-        let kernel = direct_kernel_boot_path();
-        cmd = extend_guest_cmd(
-            cmd,
-            kernel.to_str().unwrap(),
-            Some(DIRECT_KERNEL_BOOT_CMDLINE),
-            igvm.to_str().unwrap(),
-            None,
-        );
-
-        measure_boot_time(&mut cmd, control.test_timeout).unwrap()
+        measure_boot_time(c, control.test_timeout).unwrap()
     });
 
     match r {
@@ -408,7 +385,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> Vec<f64> {
     }
 }
 
-pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = performance_test_new_guest(Box::new(focal));
@@ -429,8 +406,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> Vec<f64> 
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
                 )
                 .as_str(),
-            ])
-            .verbosity(VerbosityLevel::Warn);
+            ]);
 
         measure_boot_time(c, control.test_timeout).unwrap()
     });
@@ -443,65 +419,14 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> Vec<f64> 
     }
 }
 
-pub fn performance_boot_time_hugepage(control: &PerformanceTestControl) -> Vec<f64> {
-    let command = Command::new("free").arg("-g").output().unwrap();
-    let output = String::from_utf8_lossy(&command.stdout).to_string();
-    // Define a regex pattern to capture the total memory value
-    let re = Regex::new(r"Mem:\s+(\d+)").unwrap();
-
-    // Extract the total memory value
-    if let Some(captures) = re.captures(&output)
-        && let Some(total_mem) = captures.get(1)
-    {
-        let total_mem_value: u32 = total_mem.as_str().parse().unwrap();
-        if total_mem_value < 128 {
-            println!("SKIPPED: testcase 'boot_time_32_vcpus_hugepage_ms' required 128G to be run");
-            return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
-        }
-    }
-
-    let r = std::panic::catch_unwind(|| {
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal));
-        let mut cmd = GuestCommand::new(&guest);
-
-        cmd.args([
-            "--cpus",
-            &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
-        ])
-        .args([
-            "--memory",
-            "size=128G,prefault=on,hugepages=on,hugepage_size=2M,shared=on",
-        ])
-        .args(["--console", "off"])
-        .verbosity(VerbosityLevel::Info)
-        .default_disks();
-
-        let igvm = direct_igvm_boot_path(Some("hvc0"));
-        let kernel = direct_kernel_boot_path();
-        cmd = extend_guest_cmd(
-            cmd,
-            kernel.to_str().unwrap(),
-            Some(DIRECT_KERNEL_BOOT_CMDLINE),
-            igvm.to_str().unwrap(),
-            None,
-        );
-
-        measure_boot_time(&mut cmd, control.test_timeout).unwrap()
-    });
-
-    match r {
-        Ok(r) => r,
-        Err(_) => {
-            panic!("test failed!");
-        }
-    }
-}
-
-pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let num_queues = control.num_queues.unwrap();
-    let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
+    let queue_size = control.queue_size.unwrap();
+    let block_control = control.block_control.as_ref().unwrap();
+    let fio_ops = &block_control.fio_ops;
+    let bandwidth = block_control.bandwidth;
+    let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -513,80 +438,45 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
         .unwrap()
         .to_string();
 
-    let mut cmd = GuestCommand::new(&guest);
-    cmd.args(["--cpus", &format!("boot={num_queues}")])
+    let mut test_disk_arg =
+        format!("path={test_file},queue_size={queue_size},num_queues={num_queues}");
+    if test_file == OVERLAY_WITH_QCOW2_BACKING || test_file == OVERLAY_WITH_RAW_BACKING {
+        test_disk_arg.push_str(",image_type=qcow2,backing_files=on");
+    }
+
+    let mut child = GuestCommand::new(&guest)
+        .args(["--cpus", &format!("boot={num_queues}")])
         .args(["--memory", "size=4G"])
+        .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            test_disk_arg.as_str(),
+        ])
         .default_net()
         .args(["--api-socket", &api_socket])
         .capture_output()
         .verbosity(VerbosityLevel::Warn)
-        .set_print_cmd(false);
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
 
-    let mut disk_args = vec![
-        "--disk".to_string(),
-        format!(
-            "path={}",
-            guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-        )
-        .to_string(),
-        format!(
-            "path={}",
-            guest.disk_config.disk(DiskType::CloudInit).unwrap()
-        )
-        .to_string(),
-    ];
-
-    if run_block_io_with_datadisk() {
-        let disk = get_block_io_datadisk().unwrap_or("".to_owned());
-        // Check if disk exist on host
-        if fs::metadata(&disk).is_ok() {
-            let disk_arg = format!(
-                "path={disk}{}",
-                if run_block_io_without_cache() {
-                    ",direct=on"
-                } else {
-                    ""
-                }
-            );
-            disk_args.push(disk_arg.to_string());
-        } else {
-            println!("SKIPPED: Disk does not exist: {disk:?}");
-            return Vec::from([0.0, 0.0, 0.0, 0.0, 0.0]);
-        }
-    } else {
-        let disk_arg = format!(
-            "path={BLK_IO_TEST_IMG}{}",
-            if run_block_io_without_cache() {
-                ",direct=on"
-            } else {
-                ""
-            }
-        );
-        disk_args.push(disk_arg.to_string());
-    }
-    cmd.args(disk_args);
-
-    let igvm = direct_igvm_boot_path(Some("hvc0"));
-    let kernel = direct_kernel_boot_path();
-    cmd = extend_guest_cmd(
-        cmd,
-        kernel.to_str().unwrap(),
-        Some(DIRECT_KERNEL_BOOT_CMDLINE),
-        igvm.to_str().unwrap(),
-        None,
-    );
-
-    let mut child = cmd.spawn().unwrap();
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
-        let env_block_size_kb = get_block_size();
-        let block_size_kb = match env_block_size_kb {
-            Some(val) if val.is_empty() => "4".to_string(),
-            _ => env_block_size_kb.unwrap(),
-        };
+        guest.wait_vm_boot().unwrap();
+
         let fio_command = format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
-            --direct=1 --bs={block_size_kb}k --ioengine=io_uring --iodepth=64 \
+            --direct=1 --bs=4k --ioengine=io_uring --iodepth={queue_size} \
             --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
         );
         let output = guest
@@ -595,7 +485,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
             .unwrap();
 
         // Parse fio output
-        if *bandwidth {
+        if bandwidth {
             parse_fio_output(&output, fio_ops, num_queues).unwrap()
         } else {
             parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
@@ -606,7 +496,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> Vec<f64> {
     let output = child.wait_with_output().unwrap();
 
     match r {
-        Ok(r) => Vec::from([r, 0.0, 0.0, 0.0, 0.0]),
+        Ok(r) => r,
         Err(e) => {
             handle_child_output(Err(e), &output);
             panic!("test failed!");
@@ -664,11 +554,11 @@ fn measure_restore_time(
             \n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        )
+        );
     })
 }
 
-pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64> {
+pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = performance_test_new_guest(Box::new(focal));
@@ -722,37 +612,15 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> Vec<f64>
     });
 
     match r {
-        Ok(r) => Vec::from([r, 0.0, 0.0, 0.0, 0.0]),
+        Ok(r) => r,
         Err(_) => {
             panic!("test failed!");
         }
     }
 }
 
-pub fn get_cvm_boot_params(param: &str, output: String) -> f64 {
-    let re = match param {
-        "address_space_time" => Regex::new(r"Time it took to allocate address space (\d+\.\d+)s"),
-        "hashing_page_time" => Regex::new(r"Time it took to for hashing pages (\d+\.\d+)s.*"),
-        "hashing_page_count" => Regex::new(r"Time it took to for hashing pages .*page_count (\d+)"),
-        "launch_command_time" => {
-            Regex::new(r"Time it took to for launch complete command  (\d+\.\d+)ms")
-        }
-        _ => panic!("Invalid CVM param"),
-    };
-
-    if let Some(captured) = re.unwrap().captures(output.as_str())
-        && let Some(matched) = captured.get(1)
-    {
-        let number_str = matched.as_str();
-        if let Ok(number) = number_str.parse::<f64>() {
-            return number;
-        }
-    }
-    0.0
-}
-
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

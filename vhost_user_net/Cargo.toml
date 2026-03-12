@@ -1,6 +1,5 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-build = "../build.rs"
 edition.workspace = true
 name = "vhost_user_net"
 version = "0.1.0"
@@ -23,3 +22,6 @@ vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
 vm-memory = { workspace = true }
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true

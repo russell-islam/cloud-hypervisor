@@ -7,18 +7,18 @@
 
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io::{Read, Write};
+use std::fs::OpenOptions;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
-use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
-use rand::{Rng, rng};
+use rand::Rng;
 pub use regex::Regex;
 use serde_json::Value;
 use ssh2::Session;
@@ -59,12 +59,15 @@ pub enum Error {
 }
 
 pub struct GuestNetworkConfig {
-    pub guest_ip: String,
+    pub guest_ip0: String,
+    pub host_ip0: String,
+    pub guest_mac0: String,
+    pub guest_ip1: String,
+    pub host_ip1: String,
+    pub guest_mac1: String,
     pub l2_guest_ip1: String,
     pub l2_guest_ip2: String,
     pub l2_guest_ip3: String,
-    pub host_ip: String,
-    pub guest_mac: String,
     pub l2_guest_mac1: String,
     pub l2_guest_mac2: String,
     pub l2_guest_mac3: String,
@@ -73,7 +76,8 @@ pub struct GuestNetworkConfig {
 
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
-pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
+pub const DEFAULT_TCP_LISTENER_TIMEOUT: u32 = 120;
+pub const DEFAULT_CVM_TCP_LISTENER_TIMEOUT: u32 = 120;
 
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
@@ -90,16 +94,12 @@ pub enum WaitForBootError {
 }
 
 impl GuestNetworkConfig {
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), WaitForBootError> {
+    pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
         let start = std::time::Instant::now();
         // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
         let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
-        let expected_guest_addr = self.guest_ip.as_str();
+        let expected_guest_addr = self.guest_ip0.as_str();
         let mut s = String::new();
-        let timeout = match custom_timeout {
-            Some(t) => t,
-            None => DEFAULT_TCP_LISTENER_TIMEOUT,
-        };
 
         let mut closure = || -> Result<(), WaitForBootError> {
             let listener =
@@ -121,7 +121,11 @@ impl GuestNetworkConfig {
             .expect("Cannot add 'tcp_listener' event to epoll");
             let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
             loop {
-                let num_events = match epoll::wait(epoll_fd, timeout * 1000_i32, &mut events[..]) {
+                let num_events = match epoll::wait(
+                    epoll_fd,
+                    (custom_timeout * 1000).try_into().unwrap(),
+                    &mut events[..],
+                ) {
                     Ok(num_events) => Ok(num_events),
                     Err(e) => match e.raw_os_error() {
                         Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
@@ -161,7 +165,7 @@ impl GuestNetworkConfig {
                 let duration = start.elapsed();
                 eprintln!(
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
-                    \n\nduration =\"{duration:?}, timeout = {timeout}s\" \
+                    \n\nduration =\"{duration:?}, timeout = {custom_timeout}s\" \
                     \nlisten_addr=\"{listen_addr}\" \
                     \nexpected_guest_addr=\"{expected_guest_addr}\" \
                     \nmessage=\"{s}\" \
@@ -248,6 +252,39 @@ impl Drop for WindowsDiskConfig {
     }
 }
 
+/// Returns the workspace root directory.
+///
+/// As we don't have packages in the workspace root,
+/// we walk up until we found the main Cargo.toml file.
+fn workspace_root() -> PathBuf {
+    // The directory of the current crate (integration test).
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Currently we have one level of nesting and we probably never change it.
+    let max_levels = 2;
+
+    eprintln!(
+        "Looking for workspace root: starting with dir={}",
+        dir.to_str().unwrap()
+    );
+
+    // walk up
+    for _ in 0..max_levels {
+        dir = dir.parent().unwrap().to_path_buf();
+        eprintln!("Checking parent dir: {}", dir.to_str().unwrap());
+        let maybe_manifest_file = dir.join("Cargo.toml");
+        if maybe_manifest_file.exists() {
+            let content = fs::read_to_string(&maybe_manifest_file).unwrap();
+            if content.contains("[workspace]") && content.contains("Cloud Hypervisor Workspace") {
+                eprintln!("INFO: Found workspace root: {}", dir.to_str().unwrap());
+                return dir;
+            }
+        }
+    }
+
+    panic!("Could not find workspace root");
+}
+
 impl DiskConfig for UbuntuDiskConfig {
     fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
         let cloudinit_file_path =
@@ -258,15 +295,16 @@ impl DiskConfig for UbuntuDiskConfig {
         fs::create_dir_all(&cloud_init_directory)
             .expect("Expect creating cloud-init directory to succeed");
 
-        let source_file_dir = std::env::current_dir()
-            .unwrap()
+        let source_file_dir = workspace_root()
             .join("test_data")
             .join("cloud-init")
             .join("ubuntu")
             .join("ci");
 
         ["meta-data"].iter().for_each(|x| {
-            rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
+            let source_file = source_file_dir.join(x);
+            let cloud_init = cloud_init_directory.join(x);
+            rate_limited_copy(source_file, cloud_init)
                 .expect("Expect copying cloud-init meta-data to succeed");
         });
 
@@ -279,7 +317,7 @@ impl DiskConfig for UbuntuDiskConfig {
             "@DEFAULT_TCP_LISTENER_MESSAGE",
             DEFAULT_TCP_LISTENER_MESSAGE,
         );
-        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip);
+        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip0);
         user_data_string =
             user_data_string.replace("@TCP_LISTENER_PORT", &network.tcp_listener_port.to_string());
 
@@ -295,13 +333,17 @@ impl DiskConfig for UbuntuDiskConfig {
             .read_to_string(&mut network_config_string)
             .expect("Expected reading network-config file to succeed");
 
-        network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip);
-        network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip);
+        network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip0);
+        network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip0);
+        network_config_string = network_config_string.replace("192.168.2.129", &network.host_ip1);
+        network_config_string = network_config_string.replace("192.168.2.130", &network.guest_ip1);
         network_config_string = network_config_string.replace("192.168.2.3", &network.l2_guest_ip1);
         network_config_string = network_config_string.replace("192.168.2.4", &network.l2_guest_ip2);
         network_config_string = network_config_string.replace("192.168.2.5", &network.l2_guest_ip3);
         network_config_string =
-            network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+            network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac0);
+        network_config_string =
+            network_config_string.replace("de:ad:be:ef:78:90", &network.guest_mac1);
         network_config_string =
             network_config_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
         network_config_string =
@@ -499,6 +541,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
     Err(io::Error::last_os_error())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn handle_child_output(
     r: Result<(), std::boxed::Box<dyn std::any::Any + std::marker::Send>>,
     output: &std::process::Output,
@@ -639,7 +682,7 @@ fn scp_to_guest_with_auth(
                     return Err(e);
                 }
             }
-        };
+        }
         thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
     }
     Ok(())
@@ -725,7 +768,7 @@ pub fn ssh_command_ip_with_auth(
                     return Err(e);
                 }
             }
-        };
+        }
         thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
     }
     Ok(s)
@@ -752,12 +795,11 @@ pub fn ssh_command_ip(
 pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Duration) -> bool {
     for _ in 0..retries {
         let s = exec_host_command_output(command).status;
-        if !s.success() {
-            eprintln!("\n\n==== retrying in {interval:?} ===\n\n");
-            thread::sleep(interval);
-        } else {
+        if s.success() {
             return true;
         }
+        eprintln!("\n\n==== retrying in {interval:?} ===\n\n");
+        thread::sleep(interval);
     }
 
     false
@@ -800,7 +842,7 @@ pub fn check_lines_count(input: &str, line_count: usize) -> bool {
     }
 }
 
-pub fn check_matched_lines_count(input: &str, keywords: Vec<&str>, line_count: usize) -> bool {
+pub fn check_matched_lines_count(input: &str, keywords: &[&str], line_count: usize) -> bool {
     let mut matches = String::new();
     for line in input.lines() {
         if keywords.iter().all(|k| line.contains(k)) {
@@ -844,12 +886,48 @@ pub fn kill_child(child: &mut Child) {
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
-static NEXT_VM_ID: LazyLock<Mutex<u8>> = LazyLock::new(|| Mutex::new(1));
-
 pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+    pub vm_type: GuestVmType,
+    pub boot_timeout: u32,
+    pub kernel_path: Option<String>,
+    pub kernel_cmdline: Option<String>,
+    pub console_type: Option<String>,
+}
+
+// Return the next id that can be used for this guest. This is stored in a
+// file in the filesystem and is protected by a filesystem lock allowing
+// multiple test processes to safely access it with the process blocking
+// until the lock is released.
+fn next_guest_id() -> u8 {
+    let mut id_file_path = dirs::home_dir().unwrap();
+    id_file_path.push("workloads");
+    id_file_path.push("id.counter");
+
+    let mut id_file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .read(true)
+        .open(id_file_path)
+        .unwrap();
+
+    id_file.lock().unwrap();
+
+    // Use a string in the file for (human) readability
+    let mut buf = String::default();
+    id_file.read_to_string(&mut buf).unwrap();
+    let id = buf.trim().parse::<u8>().unwrap_or(1);
+    let next_id = u8::max(1, id.overflowing_add(1).0);
+    id_file.set_len(0).unwrap();
+    id_file.seek(SeekFrom::Start(0)).unwrap();
+    id_file.write_all(next_id.to_string().as_bytes()).unwrap();
+
+    id_file.unlock().unwrap();
+
+    id
 }
 
 // Safe to implement as we know we have no interior mutability
@@ -860,12 +938,15 @@ impl Guest {
         let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
 
         let network = GuestNetworkConfig {
-            guest_ip: format!("{class}.{id}.2"),
+            guest_ip0: format!("{class}.{id}.2"),
+            host_ip0: format!("{class}.{id}.1"),
+            guest_mac0: format!("12:34:56:78:90:{id:02x}"),
+            guest_ip1: format!("{class}.{id}.130"),
+            host_ip1: format!("{class}.{id}.129"),
+            guest_mac1: format!("de:ad:be:ef:78:{id:02x}"),
             l2_guest_ip1: format!("{class}.{id}.3"),
             l2_guest_ip2: format!("{class}.{id}.4"),
             l2_guest_ip3: format!("{class}.{id}.5"),
-            host_ip: format!("{class}.{id}.1"),
-            guest_mac: format!("12:34:56:78:90:{id:02x}"),
             l2_guest_mac1: format!("de:ad:be:ef:12:{id:02x}"),
             l2_guest_mac2: format!("de:ad:be:ef:34:{id:02x}"),
             l2_guest_mac3: format!("de:ad:be:ef:56:{id:02x}"),
@@ -873,47 +954,53 @@ impl Guest {
         };
 
         disk_config.prepare_files(&tmp_dir, &network);
+        let vm_type = if is_guest_vm_type_cvm() {
+            GuestVmType::Confidential
+        } else {
+            GuestVmType::Regular
+        };
 
         Guest {
             tmp_dir,
             disk_config,
             network,
+            vm_type,
+            boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
+            kernel_path: None,
+            kernel_cmdline: None,
+            console_type: None,
         }
     }
 
     pub fn new(disk_config: Box<dyn DiskConfig>) -> Self {
-        let mut guard = NEXT_VM_ID.lock().unwrap();
-        let id = *guard;
-        *guard = id + 1;
-
-        Self::new_from_ip_range(disk_config, "192.168", id)
+        Self::new_from_ip_range(disk_config, "192.168", next_guest_id())
     }
 
     pub fn default_net_string(&self) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0",
-            self.network.guest_mac, self.network.host_ip
+            "tap=,mac={},ip={},mask=255.255.255.128",
+            self.network.guest_mac0, self.network.host_ip0
         )
     }
 
     pub fn default_net_string_w_iommu(&self) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0,iommu=on",
-            self.network.guest_mac, self.network.host_ip
+            "tap=,mac={},ip={},mask=255.255.255.128,iommu=on",
+            self.network.guest_mac0, self.network.host_ip0
         )
     }
 
     pub fn default_net_string_w_mtu(&self, mtu: u16) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0,mtu={}",
-            self.network.guest_mac, self.network.host_ip, mtu
+            "tap=,mac={},ip={},mask=255.255.255.128,mtu={}",
+            self.network.guest_mac0, self.network.host_ip0, mtu
         )
     }
 
     pub fn ssh_command(&self, command: &str) -> Result<String, SshCommandError> {
         ssh_command_ip(
             command,
-            &self.network.guest_ip,
+            &self.network.guest_ip0,
             DEFAULT_SSH_RETRIES,
             DEFAULT_SSH_TIMEOUT,
         )
@@ -923,7 +1010,7 @@ impl Guest {
     pub fn ssh_command_l1(&self, command: &str) -> Result<String, SshCommandError> {
         ssh_command_ip(
             command,
-            &self.network.guest_ip,
+            &self.network.guest_ip0,
             DEFAULT_SSH_RETRIES,
             DEFAULT_SSH_TIMEOUT,
         )
@@ -959,58 +1046,30 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(
-        &self,
-        cpu_count: u8,
-        kernel_path: &str,
-        kernel_cmd: &str,
-        is_cvm: bool,
-        host_data: &str,
-    ) -> String {
-        if is_cvm {
-            format!(
-                // Add sev_snp flag under platform element
-                // Add host-data under payload element
-                r#"{{
-                    "platform":{{"sev_snp":true}},
-                    "cpus":{{"boot_vcpus":{},"max_vcpus":{}}},
-                    "payload":{{"igvm":"{}","cmdline": "{}","host_data": "{}"}},
-                    "net":[{{"ip":"{}", "mask":"255.255.255.0", "mac":"{}"}}],
-                    "disks":[{{"path":"{}"}}, {{"path":"{}"}}]
-                }}"#,
+    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
+        if self.vm_type == GuestVmType::Confidential {
+            format! {"{{\"platform\":{{\"sev_snp\":true}},\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"igvm\":\"{}\",\"cmdline\": \"{}\", \"host_data\": \"{}\" }},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                 cpu_count,
                 cpu_count,
                 kernel_path,
                 kernel_cmd,
-                host_data,
-                self.network.host_ip,
-                self.network.guest_mac,
-                self.disk_config
-                    .disk(DiskType::OperatingSystem)
-                    .unwrap()
-                    .as_str(),
+                generate_host_data().as_str(),
+                self.network.host_ip0,
+                self.network.guest_mac0,
+                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
-            )
+            }
         } else {
-            format!(
-                r#"{{
-                    "cpus":{{"boot_vcpus":{},"max_vcpus":{}}},
-                    "payload":{{"kernel":"{}","cmdline": "{}"}},
-                    "net":[{{"ip":"{}", "mask":"255.255.255.0", "mac":"{}"}}],
-                    "disks":[{{"path":"{}"}}, {{"path":"{}"}}]
-                }}"#,
+            format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}, \"nested\": false}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
                 cpu_count,
                 cpu_count,
                 kernel_path,
                 kernel_cmd,
-                self.network.host_ip,
-                self.network.guest_mac,
-                self.disk_config
-                    .disk(DiskType::OperatingSystem)
-                    .unwrap()
-                    .as_str(),
+                self.network.host_ip0,
+                self.network.guest_mac0,
+                self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
-            )
+            }
         }
     }
 
@@ -1049,13 +1108,23 @@ impl Guest {
         .map_err(Error::Parsing)
     }
 
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), Error> {
+    fn default_boot_timeout(&self) -> u32 {
+        self.boot_timeout
+    }
+
+    pub fn wait_vm_boot(&self) -> Result<(), Error> {
+        self.network
+            .wait_vm_boot(self.default_boot_timeout())
+            .map_err(Error::WaitForBoot)
+    }
+
+    pub fn wait_vm_boot_custom_timeout(&self, custom_timeout: u32) -> Result<(), Error> {
         self.network
             .wait_vm_boot(custom_timeout)
             .map_err(Error::WaitForBoot)
     }
 
-    pub fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<(), Error> {
+    pub fn check_numa_node_cpus(&self, node_id: usize, cpus: &[usize]) -> Result<(), Error> {
         for cpu in cpus.iter() {
             let cmd = format!("[ -d \"/sys/devices/system/node/node{node_id}/cpu{cpu}\" ]");
             self.ssh_command(cmd.as_str())?;
@@ -1080,7 +1149,7 @@ impl Guest {
     pub fn check_numa_common(
         &self,
         mem_ref: Option<&[u32]>,
-        node_ref: Option<&[Vec<usize>]>,
+        node_ref: Option<&[&[usize]]>,
         distance_ref: Option<&[&str]>,
     ) {
         if let Some(mem_ref) = mem_ref {
@@ -1094,7 +1163,7 @@ impl Guest {
         if let Some(node_ref) = node_ref {
             // Check each NUMA node has been assigned the right CPUs set.
             for (i, n) in node_ref.iter().enumerate() {
-                self.check_numa_node_cpus(i, n.clone()).unwrap();
+                self.check_numa_node_cpus(i, n).unwrap();
             }
         }
 
@@ -1153,7 +1222,7 @@ impl Guest {
     pub fn check_vsock(&self, socket: &str) {
         // Listen from guest on vsock CID=3 PORT=16
         // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
-        let guest_ip = self.network.guest_ip.clone();
+        let guest_ip = self.network.guest_ip0.clone();
         let listen_socat = thread::spawn(move || {
             ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
         });
@@ -1187,7 +1256,7 @@ impl Guest {
         );
     }
 
-    pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
+    pub fn reboot_linux(&self, current_reboot_count: u32) {
         let list_boots_cmd = "sudo last | grep -c reboot";
         let boot_count = self
             .ssh_command(list_boots_cmd)
@@ -1199,7 +1268,7 @@ impl Guest {
         assert_eq!(boot_count, current_reboot_count + 1);
         self.ssh_command("sudo reboot").unwrap();
 
-        self.wait_vm_boot(custom_timeout).unwrap();
+        self.wait_vm_boot().unwrap();
         let boot_count = self
             .ssh_command(list_boots_cmd)
             .unwrap()
@@ -1341,7 +1410,7 @@ impl<'a> GuestCommand<'a> {
             Debug => {
                 self.command.args(["-vv"]);
             }
-        };
+        }
 
         if self.print_cmd {
             println!(
@@ -1434,13 +1503,44 @@ impl<'a> GuestCommand<'a> {
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
     }
+
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        if self.guest.vm_type == GuestVmType::Confidential {
+            let console_str = if let Some(c) = &self.guest.console_type {
+                c.as_str()
+            } else {
+                "hvc0"
+            };
+            let igvm = direct_igvm_boot_path(Some(console_str))
+                .expect("IGVM boot file not found for console type: {console_str}");
+            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command
+                .args(["--host-data", generate_host_data().as_str()]);
+            self.command.args(["--platform", "sev_snp=on"]);
+        } else if let Some(kernel) = &self.guest.kernel_path {
+            self.command.args(["--kernel", kernel.as_str()]);
+            if let Some(cmdline) = &self.guest.kernel_cmdline {
+                self.command.args(["--cmdline", cmdline]);
+            }
+        }
+
+        self
+    }
 }
 
+/// Returns the absolute path into the workspaces target directory to locate the desired
+/// executable.
+///
+/// # Arguments
+/// - `cmd`: workspace binary, e.g. `ch-remote` or `cloud-hypervisor`
 pub fn clh_command(cmd: &str) -> String {
-    env::var("BUILD_TARGET").map_or(
-        format!("target/x86_64-unknown-linux-gnu/release/{cmd}"),
-        |target| format!("target/{target}/release/{cmd}"),
-    )
+    let workspace_root = workspace_root();
+    let rustc_target = env::var("BUILD_TARGET").unwrap_or("x86_64-unknown-linux-gnu".to_string());
+    let target_artifact_dir = format!("target/{rustc_target}/release");
+    let target_cmd_path = format!("{target_artifact_dir}/{cmd}");
+
+    let full_path = workspace_root.join(&target_cmd_path);
+    String::from(full_path.to_str().unwrap())
 }
 
 pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {
@@ -1656,7 +1756,7 @@ pub fn measure_virtio_net_throughput(
         cmd.args([
             "-J", // Output in JSON format
             "-c",
-            &guest.network.guest_ip,
+            &guest.network.guest_ip0,
             "-p",
             &format!("{}", default_port + n),
             "-t",
@@ -1693,17 +1793,17 @@ pub fn measure_virtio_net_throughput(
             failed = true;
         }
 
-        if !failed {
-            // Safe to unwrap as we know the child has terminated successfully
-            let output = c.wait_with_output().unwrap();
-            results.push(parse_iperf3_output(&output.stdout, receive, bandwidth)?);
-        } else {
+        if failed {
             let _ = c.kill();
             let output = c.wait_with_output().unwrap();
             println!(
                 "=============== Client output [Error] ===============\n\n{}\n\n===========end============\n\n",
                 String::from_utf8_lossy(&output.stdout)
             );
+        } else {
+            // Safe to unwrap as we know the child has terminated successfully
+            let output = c.wait_with_output().unwrap();
+            results.push(parse_iperf3_output(&output.stdout, receive, bandwidth)?);
         }
     }
 
@@ -1764,7 +1864,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     scp_to_guest(
         Path::new(ethr_path),
         Path::new(ethr_remote_path),
-        &guest.network.guest_ip,
+        &guest.network.guest_ip0,
         //DEFAULT_SSH_RETRIES,
         1,
         DEFAULT_SSH_TIMEOUT,
@@ -1786,7 +1886,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     let mut c = Command::new(ethr_path)
         .args([
             "-c",
-            &guest.network.guest_ip,
+            &guest.network.guest_ip0,
             "-t",
             "l",
             "-o",
@@ -1832,17 +1932,6 @@ pub fn get_block_size() -> Option<String> {
 
 pub fn run_block_io_without_cache() -> bool {
     get_env_var("DISABLE_DATADISK_CACHING") == Some("1".to_string())
-}
-
-pub fn generate_host_data() -> String {
-    let mut rng = rng();
-    #[allow(clippy::format_collect)]
-    let hex_string: String = (0..64)
-        .map(|_| rng.random_range(0..=15))
-        .map(|num| format!("{num:x}"))
-        .collect();
-
-    hex_string
 }
 
 pub fn extend_guest_cmd<'a>(
@@ -1897,4 +1986,34 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
         }
     }
     None
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum GuestVmType {
+    Regular,
+    Confidential,
+}
+
+// Get the direct igvm boot file path based on the console type
+fn direct_igvm_boot_path(console: Option<&str>) -> Option<PathBuf> {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!("IGVM console should be hvc0 or ttyS0, got: {console_str}");
+    }
+
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    if Path::new(&igvm_filepath).exists() {
+        Some(PathBuf::from(igvm_filepath))
+    } else {
+        None
+    }
+}
+
+// Generate a random 64-character hex string for host data
+fn generate_host_data() -> String {
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

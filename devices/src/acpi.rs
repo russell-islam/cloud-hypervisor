@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 use acpi_tables::{Aml, AmlSink, aml};
+use log::{error, info, warn};
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::GuestAddress;
@@ -44,14 +45,14 @@ impl AcpiShutdownDevice {
 impl BusDevice for AcpiShutdownDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
-        data.fill(0)
+        data.fill(0);
     }
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         if data[0] == 1 {
             info!("ACPI Reboot signalled");
             if let Err(e) = self.reset_evt.write(1) {
-                error!("Error triggering ACPI reset event: {}", e);
+                error!("Error triggering ACPI reset event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.
@@ -68,7 +69,7 @@ impl BusDevice for AcpiShutdownDevice {
         if data[0] == (S5_SLEEP_VALUE << SLEEP_VALUE_BIT) | (1 << SLEEP_STATUS_EN_BIT) {
             info!("ACPI Shutdown signalled");
             if let Err(e) = self.exit_evt.write(1) {
-                error!("Error triggering ACPI shutdown event: {}", e);
+                error!("Error triggering ACPI shutdown event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.
@@ -213,7 +214,7 @@ impl Aml for AcpiGedDevice {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 

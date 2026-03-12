@@ -14,15 +14,16 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use libc::EFD_NONBLOCK;
+use log::{error, info, warn};
 use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
+use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
+    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
@@ -46,10 +47,9 @@ pub struct VirtioSharedMemory {
 
 #[derive(Clone)]
 pub struct VirtioSharedMemoryList {
-    pub host_addr: u64,
     pub mem_slot: u32,
     pub addr: GuestAddress,
-    pub len: GuestUsize,
+    pub mapping: Arc<MmapRegion>,
     pub region_list: Vec<VirtioSharedMemory>,
 }
 
@@ -221,7 +221,7 @@ impl VirtioCommon {
     pub fn activate(
         &mut self,
         queues: &[(usize, Queue, EventFd)],
-        interrupt_cb: &Arc<dyn VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
         if queues.len() < self.min_queues.into() {
             error!(
@@ -233,20 +233,20 @@ impl VirtioCommon {
         }
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating kill EventFd: {}", e);
+            error!("failed creating kill EventFd: {e}");
             ActivateError::BadActivate
         })?;
         self.kill_evt = Some(kill_evt);
 
         let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating pause EventFd: {}", e);
+            error!("failed creating pause EventFd: {e}");
             ActivateError::BadActivate
         })?;
         self.pause_evt = Some(pause_evt);
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        self.interrupt_cb = Some(interrupt_cb);
 
         Ok(())
     }
@@ -265,7 +265,7 @@ impl VirtioCommon {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
                 if let Err(e) = t.join() {
-                    error!("Error joining thread: {:?}", e);
+                    error!("Error joining thread: {e:?}");
                 }
             }
         }
@@ -279,7 +279,7 @@ impl VirtioCommon {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
                 if let Err(e) = t.join() {
-                    error!("Error joining thread: {:?}", e);
+                    error!("Error joining thread: {e:?}");
                 }
             }
         }

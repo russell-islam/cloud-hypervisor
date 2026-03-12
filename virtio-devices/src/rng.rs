@@ -11,6 +11,8 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -76,7 +78,7 @@ impl RngEpollHandler {
                 .memory()
                 .read_volatile_from(
                     desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                     &mut self.random_file,
                     desc.len() as usize,
                 )
@@ -95,15 +97,15 @@ impl RngEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(0))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -123,24 +125,20 @@ impl EpollHelperHandler for RngEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -176,7 +174,7 @@ impl Rng {
         let random_file = File::open(path)?;
 
         let (avail_features, acked_features, paused) = if let Some(state) = state {
-            info!("Restoring virtio-rng {}", id);
+            info!("Restoring virtio-rng {id}");
             (state.avail_features, state.acked_features, true)
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -243,7 +241,7 @@ impl VirtioDevice for Rng {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn activate(
@@ -252,12 +250,12 @@ impl VirtioDevice for Rng {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         if let Some(file) = self.random_file.as_ref() {
             let random_file = file.try_clone().map_err(|e| {
-                error!("failed cloning rng source: {}", e);
+                error!("failed cloning rng source: {e}");
                 ActivateError::BadActivate
             })?;
 
@@ -283,7 +281,7 @@ impl VirtioDevice for Rng {
                 Thread::VirtioRng,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || handler.run(paused, paused_sync.unwrap()),
+                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
 
             self.common.epoll_threads = Some(epoll_threads);
@@ -301,7 +299,7 @@ impl VirtioDevice for Rng {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

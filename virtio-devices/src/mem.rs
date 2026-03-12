@@ -22,6 +22,8 @@ use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::{io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -235,8 +237,7 @@ impl VirtioMemConfig {
     fn resize(&mut self, size: u64) -> result::Result<(), Error> {
         if self.requested_size == size {
             return Err(Error::ResizeError(anyhow!(
-                "new size 0x{:x} and requested_size are identical",
-                size
+                "new size 0x{size:x} and requested_size are identical"
             )));
         } else if size > self.region_size {
             return Err(Error::ResizeError(anyhow!(
@@ -392,13 +393,15 @@ impl BlocksState {
             }
         }
 
-        MemoryRangeTable::from_bitmap(bitmap, start_addr, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)
+        // TODO We can avoid creating a new bitmap here, if we switch the code
+        // to use Vec<u64> to keep dirty bits and just pass it as is.
+        MemoryRangeTable::from_dirty_bitmap(bitmap, start_addr, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)
     }
 }
 
 struct MemEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    host_addr: u64,
+    region: Arc<GuestRegionMmap>,
     host_fd: Option<RawFd>,
     blocks_state: Arc<Mutex<BlocksState>>,
     config: Arc<Mutex<VirtioMemConfig>>,
@@ -411,8 +414,45 @@ struct MemEpollHandler {
     dma_mapping_handlers: Arc<Mutex<BTreeMap<VirtioMemMappingSource, Arc<dyn ExternalDmaMapping>>>>,
 }
 
+fn usize_to_u64(i: usize) -> u64 {
+    const _: () = assert!(size_of::<usize>() <= size_of::<u64>());
+    i as _
+}
+
 impl MemEpollHandler {
+    /// # Panics
+    ///
+    /// Panics if any of the following hold:
+    /// - region size exceeds [`libc::off64_t::MAX`], [`libc::size_t::MAX`],
+    ///   or [`isize::MAX`]
+    /// - `size + offset` exceeds the size of the region (including overflow).
     fn discard_memory_range(&self, offset: u64, size: u64) -> Result<(), Error> {
+        let max_size = usize_to_u64(self.region.size());
+
+        // Validate the region size to ensure the below casts
+        // are lossless.
+        libc::size_t::try_from(max_size).unwrap();
+        libc::off64_t::try_from(max_size).unwrap();
+        isize::try_from(max_size).unwrap();
+
+        // Check that offset is in bounds.
+        assert!(max_size >= offset);
+
+        if size == 0 {
+            // Do not try to deallocate a zero size.
+            return Ok(());
+        }
+
+        // Check that offset + size is in bounds and does not overflow.
+        // Since size is checked to be nonzero above, this also means that
+        // offset is not past the end.
+        assert!(max_size - offset >= size);
+
+        // Since offset and size are each bounded above by max_size,
+        // and max_size came from usize and was checked to be able to be
+        // losslessly cast to size_t and off64_t, this also checks that offset
+        // and size can each be losslessly cast to all of these types.
+
         // Use fallocate if the memory region is backed by a file.
         if let Some(fd) = self.host_fd {
             // SAFETY: FFI call with valid arguments
@@ -426,7 +466,7 @@ impl MemEpollHandler {
             };
             if res != 0 {
                 let err = io::Error::last_os_error();
-                error!("Deallocating file space failed: {}", err);
+                error!("Deallocating file space failed: {err}");
                 return Err(Error::DiscardMemoryRange(err));
             }
         }
@@ -434,17 +474,20 @@ impl MemEpollHandler {
         // Only use madvise if the memory region is not allocated with
         // hugepages.
         if !self.hugepages {
-            // SAFETY: FFI call with valid arguments
+            // SAFETY: FFI call with valid arguments.
+            // offset + madvize_size was checked in bounds above,
+            // and madvise_size is checked to not be zero so ptr_offset
+            // alone is not past the end.
             let res = unsafe {
                 libc::madvise(
-                    (self.host_addr + offset) as *mut libc::c_void,
+                    self.region.as_ptr().offset(offset as isize) as *mut libc::c_void,
                     size as libc::size_t,
                     libc::MADV_DONTNEED,
                 )
             };
             if res != 0 {
                 let err = io::Error::last_os_error();
-                error!("Advising kernel about pages range failed: {}", err);
+                error!("Advising kernel about pages range failed: {err}");
                 return Err(Error::DiscardMemoryRange(err));
             }
         }
@@ -476,7 +519,7 @@ impl MemEpollHandler {
         }
 
         if !plug && let Err(e) = self.discard_memory_range(offset, size) {
-            error!("failed discarding memory range: {:?}", e);
+            error!("failed discarding memory range: {e:?}");
             return VIRTIO_MEM_RESP_ERROR;
         }
 
@@ -506,10 +549,7 @@ impl MemEpollHandler {
         } else {
             for (_, handler) in handlers.iter() {
                 if let Err(e) = handler.unmap(addr, size) {
-                    error!(
-                        "failed DMA unmapping addr 0x{:x} size 0x{:x}: {}",
-                        addr, size, e
-                    );
+                    error!("failed DMA unmapping addr 0x{addr:x} size 0x{size:x}: {e}");
                     return VIRTIO_MEM_RESP_ERROR;
                 }
             }
@@ -523,7 +563,7 @@ impl MemEpollHandler {
     fn unplug_all(&mut self) -> u16 {
         let mut config = self.config.lock().unwrap();
         if let Err(e) = self.discard_memory_range(0, config.region_size) {
-            error!("failed discarding memory range: {:?}", e);
+            error!("failed discarding memory range: {e:?}");
             return VIRTIO_MEM_RESP_ERROR;
         }
 
@@ -592,7 +632,7 @@ impl MemEpollHandler {
 
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), DeviceError> {
         self.interrupt_cb.trigger(int_type).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
+            error!("Failed to signal used queue: {e:?}");
             DeviceError::FailedSignalingUsedQueue(e)
         })
     }
@@ -629,8 +669,8 @@ impl MemEpollHandler {
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -650,25 +690,21 @@ impl EpollHelperHandler for MemEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal(VirtioInterruptType::Queue(0)).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -693,7 +729,7 @@ pub struct MemState {
 pub struct Mem {
     common: VirtioCommon,
     id: String,
-    host_addr: u64,
+    region: Arc<GuestRegionMmap>,
     host_fd: Option<RawFd>,
     config: Arc<Mutex<VirtioMemConfig>>,
     seccomp_action: SeccompAction,
@@ -727,7 +763,7 @@ impl Mem {
         }
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-mem {}", id);
+            info!("Restoring virtio-mem {id}");
             *(blocks_state.lock().unwrap()) = state.blocks_state.clone();
             (
                 state.avail_features,
@@ -786,7 +822,7 @@ impl Mem {
                 ..Default::default()
             },
             id,
-            host_addr: region.as_ptr() as u64,
+            region: region.clone(),
             host_fd,
             config: Arc::new(Mutex::new(config)),
             seccomp_action,
@@ -801,14 +837,14 @@ impl Mem {
     pub fn resize(&mut self, size: u64) -> result::Result<(), Error> {
         let mut config = self.config.lock().unwrap();
         config.resize(size).map_err(|e| {
-            Error::ResizeError(anyhow!("Failed to update virtio configuration: {:?}", e))
+            Error::ResizeError(anyhow!("Failed to update virtio configuration: {e:?}"))
         })?;
 
         if let Some(interrupt_cb) = self.interrupt_cb.as_ref() {
             interrupt_cb
                 .trigger(VirtioInterruptType::Config)
                 .map_err(|e| {
-                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {:?}", e))
+                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {e:?}"))
                 })
         } else {
             Ok(())
@@ -843,13 +879,13 @@ impl Mem {
 
     pub fn remove_dma_mapping_handler(
         &mut self,
-        source: VirtioMemMappingSource,
+        source: &VirtioMemMappingSource,
     ) -> result::Result<(), Error> {
         let handler = self
             .dma_mapping_handlers
             .lock()
             .unwrap()
-            .remove(&source)
+            .remove(source)
             .ok_or(Error::InvalidDmaMappingHandler)?;
 
         let config = self.config.lock().unwrap();
@@ -907,7 +943,7 @@ impl VirtioDevice for Mem {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -920,7 +956,7 @@ impl VirtioDevice for Mem {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let (_, queue, queue_evt) = queues.remove(0);
@@ -929,7 +965,7 @@ impl VirtioDevice for Mem {
 
         let mut handler = MemEpollHandler {
             mem,
-            host_addr: self.host_addr,
+            region: self.region.clone(),
             host_fd: self.host_fd,
             blocks_state: Arc::clone(&self.blocks_state),
             config: self.config.clone(),
@@ -967,7 +1003,7 @@ impl VirtioDevice for Mem {
             Thread::VirtioMem,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 

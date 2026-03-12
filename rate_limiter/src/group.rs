@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Mutex};
 use std::{io, result, thread};
 
+use log::{error, info, warn};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -72,7 +73,7 @@ impl RateLimiterGroupHandle {
     /// Can be used to *manually* add tokens to a bucket. Useful for reverting a
     /// `consume()` if needed.
     pub fn manual_replenish(&self, tokens: u64, token_type: TokenType) {
-        self.inner.rate_limiter.manual_replenish(tokens, token_type)
+        self.inner.rate_limiter.manual_replenish(tokens, token_type);
     }
 
     /// This function needs to be called every time there is an event on the
@@ -233,9 +234,8 @@ impl RateLimiterGroup {
                             Err(e) => {
                                 if e.kind() == io::ErrorKind::Interrupted {
                                     continue;
-                                } else {
-                                    return Err(Error::Epoll(e));
                                 }
+                                return Err(Error::Epoll(e));
                             }
                         };
 
@@ -244,13 +244,13 @@ impl RateLimiterGroup {
                             match dispatch_event {
                                 EpollDispatch::Unknown => {
                                     let event = event.data;
-                                    warn!("Unknown rate-limiter loop event: {}", event);
+                                    warn!("Unknown rate-limiter loop event: {event}");
                                 }
                                 EpollDispatch::Unblocked => {
                                     inner.rate_limiter.event_handler().unwrap();
                                     let handles = inner.handles.lock().unwrap();
                                     for handle in handles.iter() {
-                                        handle.write(1).map_err(Error::EventFdWrite)?
+                                        handle.write(1).map_err(Error::EventFdWrite)?;
                                     }
                                 }
                                 EpollDispatch::Kill => {
@@ -267,7 +267,7 @@ impl RateLimiterGroup {
                 match res {
                     Ok(res) => {
                         if let Err(e) = res {
-                            error!("Error running rate-limit-group worker: {:?}", e);
+                            error!("Error running rate-limit-group worker: {e:?}");
                             exit_evt.write(1).unwrap();
                         }
                     }
@@ -275,7 +275,7 @@ impl RateLimiterGroup {
                         error!("rate-limit-group worker panicked");
                         exit_evt.write(1).unwrap();
                     }
-                };
+                }
             })
             .map(|thread| self.epoll_thread.insert(thread))
             .map_err(Error::ThreadSpawn)?;
@@ -291,13 +291,13 @@ impl Drop for RateLimiterGroup {
         if let Some(t) = self.epoll_thread.take()
             && let Err(e) = t.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) mod unit_tests {
     use std::os::fd::AsRawFd;
     use std::thread;
     use std::time::Duration;

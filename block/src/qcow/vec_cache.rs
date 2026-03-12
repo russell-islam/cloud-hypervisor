@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::IterMut;
 use std::io;
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, Index, IndexMut};
 use std::slice::SliceIndex;
 
 /// Trait that allows for checking if an implementor is dirty. Useful for types that are cached so
@@ -62,6 +62,21 @@ impl<T: 'static + Copy + Default> VecCache<T> {
     pub fn len(&self) -> usize {
         self.vec.len()
     }
+
+    /// Extends the cache capacity to `new_len` elements.
+    ///
+    /// No-op if `new_len <= self.len()`. Allocates a new buffer, copies
+    /// existing data, and fills new elements with default values.
+    /// Marks the cache as dirty.
+    pub fn extend(&mut self, new_len: usize) {
+        if new_len <= self.vec.len() {
+            return;
+        }
+        let mut new_vec = vec![Default::default(); new_len];
+        new_vec[..self.vec.len()].copy_from_slice(&self.vec);
+        self.vec = new_vec.into_boxed_slice();
+        self.dirty = true;
+    }
 }
 
 impl<T: 'static + Copy + Default> Cacheable for VecCache<T> {
@@ -82,6 +97,14 @@ impl<T: 'static + Copy + Default> IndexMut<usize> for VecCache<T> {
     fn index_mut(&mut self, index: usize) -> &mut T {
         self.dirty = true;
         self.vec.index_mut(index)
+    }
+}
+
+impl<T: 'static + Copy + Default> Deref for VecCache<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.vec
     }
 }
 
@@ -135,7 +158,7 @@ impl<T: Cacheable> CacheMap<T> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     struct NumCache(());

@@ -13,7 +13,7 @@ build_virtiofsd() {
     VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
     VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
 
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.8.0 "97ea7908fe7f9bc59916671a771bdcfaf4044b45"
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.13.3 "bbf82173682a3e48083771a0a23331e5c23b4924"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd "$VIRTIOFSD_DIR" || exit
@@ -229,7 +229,9 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
 
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
@@ -244,6 +246,7 @@ HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
 PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
 echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
+
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
 time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}

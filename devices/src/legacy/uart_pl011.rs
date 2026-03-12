@@ -11,6 +11,7 @@ use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
 
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;
@@ -322,7 +323,7 @@ impl Pl011 {
                 self.handle_debug();
             }
             off => {
-                debug!("PL011: Bad write offset, offset: {}", off);
+                debug!("PL011: Bad write offset, offset: {off}");
                 return Err(Error::BadWriteOffset(off));
             }
         }
@@ -424,12 +425,11 @@ impl BusDevice for Pl011 {
         if data.len() <= 4 {
             let v = read_le_u32(data);
             if let Err(e) = self.handle_write(offset, v) {
-                warn!("Failed to write to PL011 device: {}", e);
+                warn!("Failed to write to PL011 device: {e}");
             }
         } else {
             warn!(
-                "Invalid PL011 write: offset {}, data length {}",
-                offset,
+                "Invalid PL011 write: offset {offset}, data length {}",
                 data.len()
             );
         }
@@ -453,7 +453,7 @@ impl Transportable for Pl011 {}
 impl Migratable for Pl011 {}
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::sync::Mutex;
 
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};

@@ -19,6 +19,7 @@ use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
+use log::{error, info, warn};
 use serial_buffer::SerialBuffer;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -288,9 +289,8 @@ impl SerialManager {
                                     // be considered as a regular error. Instead it is more
                                     // appropriate to retry, by calling into epoll_wait().
                                     continue;
-                                } else {
-                                    return Err(Error::Epoll(e));
                                 }
+                                return Err(Error::Epoll(e));
                             }
                         };
 
@@ -308,7 +308,7 @@ impl SerialManager {
                             match dispatch_event {
                                 EpollDispatch::Unknown => {
                                     let event = event.data;
-                                    warn!("Unknown serial manager loop event: {}", event);
+                                    warn!("Unknown serial manager loop event: {event}");
                                 }
                                 EpollDispatch::Socket => {
                                     // New connection request arrived.

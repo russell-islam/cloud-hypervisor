@@ -36,6 +36,7 @@ pub mod http;
 use std::io;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
+use log::info;
 use micro_http::Body;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -117,8 +118,8 @@ pub enum ApiError {
     #[error("The VM could not be snapshotted")]
     VmSnapshot(#[source] VmError),
 
-    /// The VM could not restored.
-    #[error("The VM could not restored")]
+    /// The VM could not be restored.
+    #[error("The VM could not be restored")]
     VmRestore(#[source] VmError),
 
     /// The VM could not be coredumped.
@@ -132,6 +133,10 @@ pub enum ApiError {
     /// The VM could not be resized
     #[error("The VM could not be resized")]
     VmResize(#[source] VmError),
+
+    /// The disk could not be resized.
+    #[error("The disk could not be resized")]
+    VmResizeDisk(#[source] VmError),
 
     /// The memory zone could not be resized.
     #[error("The memory zone could not be resized")]
@@ -220,6 +225,12 @@ pub struct VmResizeData {
     pub desired_vcpus: Option<u32>,
     pub desired_ram: Option<u64>,
     pub desired_balloon: Option<u64>,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+pub struct VmResizeDiskData {
+    pub id: String,
+    pub desired_size: u64,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
@@ -314,6 +325,8 @@ pub trait RequestHandler {
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> Result<(), VmError>;
 
+    fn vm_resize_disk(&mut self, id: String, desired_size: u64) -> Result<(), VmError>;
+
     fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> Result<Option<Vec<u8>>, VmError>;
 
     fn vm_add_user_device(
@@ -368,6 +381,7 @@ pub trait RequestHandler {
 pub type ApiRequest =
     Box<dyn FnOnce(&mut dyn RequestHandler) -> Result<bool, VmmError> + Send + 'static>;
 
+#[allow(clippy::needless_pass_by_value)]
 fn get_response<Action: ApiAction>(
     action: &Action,
     api_evt: EventFd,
@@ -426,7 +440,7 @@ impl ApiAction for VmAddDevice {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddDevice {:?}", config);
+            info!("API request event: VmAddDevice {config:?}");
 
             let response = vmm
                 .vm_add_device(config)
@@ -463,7 +477,7 @@ impl ApiAction for AddDisk {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: AddDisk {:?}", config);
+            info!("API request event: AddDisk {config:?}");
 
             let response = vmm
                 .vm_add_disk(config)
@@ -500,7 +514,7 @@ impl ApiAction for VmAddFs {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddFs {:?}", config);
+            info!("API request event: VmAddFs {config:?}");
 
             let response = vmm
                 .vm_add_fs(config)
@@ -537,7 +551,7 @@ impl ApiAction for VmAddPmem {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddPmem {:?}", config);
+            info!("API request event: VmAddPmem {config:?}");
 
             let response = vmm
                 .vm_add_pmem(config)
@@ -574,7 +588,7 @@ impl ApiAction for VmAddNet {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddNet {:?}", config);
+            info!("API request event: VmAddNet {config:?}");
 
             let response = vmm
                 .vm_add_net(config)
@@ -611,7 +625,7 @@ impl ApiAction for VmAddVdpa {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddVdpa {:?}", config);
+            info!("API request event: VmAddVdpa {config:?}");
 
             let response = vmm
                 .vm_add_vdpa(config)
@@ -648,7 +662,7 @@ impl ApiAction for VmAddVsock {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddVsock {:?}", config);
+            info!("API request event: VmAddVsock {config:?}");
 
             let response = vmm
                 .vm_add_vsock(config)
@@ -685,7 +699,7 @@ impl ApiAction for VmAddUserDevice {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmAddUserDevice {:?}", config);
+            info!("API request event: VmAddUserDevice {config:?}");
 
             let response = vmm
                 .vm_add_user_device(config)
@@ -757,7 +771,7 @@ impl ApiAction for VmCoredump {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmCoredump {:?}", coredump_data);
+            info!("API request event: VmCoredump {coredump_data:?}");
 
             let response = vmm
                 .vm_coredump(&coredump_data.destination_url)
@@ -827,7 +841,7 @@ impl ApiAction for VmCreate {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmCreate {:?}", config);
+            info!("API request event: VmCreate {config:?}");
 
             let response = vmm
                 .vm_create(config)
@@ -1032,7 +1046,7 @@ impl ApiAction for VmReceiveMigration {
 
     fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmReceiveMigration {:?}", data);
+            info!("API request event: VmReceiveMigration {data:?}");
 
             let response = vmm
                 .vm_receive_migration(data)
@@ -1069,7 +1083,7 @@ impl ApiAction for VmRemoveDevice {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmRemoveDevice {:?}", remove_device_data);
+            info!("API request event: VmRemoveDevice {remove_device_data:?}");
 
             let response = vmm
                 .vm_remove_device(remove_device_data.id)
@@ -1106,7 +1120,7 @@ impl ApiAction for VmResize {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmResize {:?}", resize_data);
+            info!("API request event: VmResize {resize_data:?}");
 
             let response = vmm
                 .vm_resize(
@@ -1115,6 +1129,41 @@ impl ApiAction for VmResize {
                     resize_data.desired_balloon,
                 )
                 .map_err(ApiError::VmResize)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmResizeDisk;
+
+impl ApiAction for VmResizeDisk {
+    type RequestBody = VmResizeDiskData;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        resize_disk_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            let response = vmm
+                .vm_resize_disk(resize_disk_data.id, resize_disk_data.desired_size)
+                .map_err(ApiError::VmResizeDisk)
                 .map(|_| ApiResponsePayload::Empty);
 
             response_sender
@@ -1147,7 +1196,7 @@ impl ApiAction for VmResizeZone {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmResizeZone {:?}", resize_zone_data);
+            info!("API request event: VmResizeZone {resize_zone_data:?}");
 
             let response = vmm
                 .vm_resize_zone(resize_zone_data.id, resize_zone_data.desired_ram)
@@ -1184,7 +1233,7 @@ impl ApiAction for VmRestore {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmRestore {:?}", config);
+            info!("API request event: VmRestore {config:?}");
 
             let response = vmm
                 .vm_restore(config)
@@ -1250,7 +1299,7 @@ impl ApiAction for VmSendMigration {
 
     fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmSendMigration {:?}", data);
+            info!("API request event: VmSendMigration {data:?}");
 
             let response = vmm
                 .vm_send_migration(data)
@@ -1287,7 +1336,7 @@ impl ApiAction for VmShutdown {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmShutdown {:?}", config);
+            info!("API request event: VmShutdown {config:?}");
 
             let response = vmm
                 .vm_shutdown()
@@ -1324,7 +1373,7 @@ impl ApiAction for VmSnapshot {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmSnapshot {:?}", config);
+            info!("API request event: VmSnapshot {config:?}");
 
             let response = vmm
                 .vm_snapshot(&config.destination_url)

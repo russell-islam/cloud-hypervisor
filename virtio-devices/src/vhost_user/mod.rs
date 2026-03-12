@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
+use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::Error as VhostError;
@@ -182,8 +183,8 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
     pub fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> std::result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
@@ -220,15 +221,17 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             )))
         })?;
 
+        let queues = self
+            .queues
+            .iter()
+            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+            .collect::<Vec<_>>();
         // Initialize the backend
         vhost_user
             .reinitialize_vhost_user(
                 self.mem.memory().deref(),
-                self.queues
-                    .iter()
-                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
-                    .collect(),
-                &self.virtio_interrupt,
+                &queues,
+                self.virtio_interrupt.as_ref(),
                 self.acked_features,
                 self.acked_protocol_features,
                 &self.backend_req_handler,
@@ -265,8 +268,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
             HUP_CONNECTION_EVENT => {
                 self.reconnect(helper).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "failed to reconnect vhost-user backend: {:?}",
-                        e
+                        "failed to reconnect vhost-user backend: {e:?}"
                     ))
                 })?;
             }
@@ -274,8 +276,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                 if let Some(backend_req_handler) = self.backend_req_handler.as_mut() {
                     backend_req_handler.handle_request().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to handle request from vhost-user backend: {:?}",
-                            e
+                            "Failed to handle request from vhost-user backend: {e:?}"
                         ))
                     })?;
                 }
@@ -306,7 +307,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         backend_req_handler: Option<FrontendReqHandler<T>>,
@@ -326,15 +327,16 @@ impl VhostUserCommon {
             return Err(ActivateError::BadActivate);
         }
         let vu = self.vu.as_ref().unwrap();
+        let queues = queues
+            .iter()
+            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+            .collect::<Vec<_>>();
         vu.lock()
             .unwrap()
             .setup_vhost_user(
                 &mem.memory(),
-                queues
-                    .iter()
-                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
-                    .collect(),
-                &interrupt_cb,
+                &queues,
+                interrupt_cb.as_ref(),
                 acked_features,
                 &backend_req_handler,
                 inflight.as_mut(),
@@ -373,15 +375,13 @@ impl VhostUserCommon {
     }
 
     pub fn shutdown(&mut self) {
-        if let Some(vu) = &self.vu {
-            // SAFETY: trivially safe
-            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
-        }
-
         // Remove socket path if needed
         if self.server {
             let _ = std::fs::remove_file(&self.socket_path);
         }
+
+        // Drop the vhost-user handle
+        self.vu = None;
     }
 
     pub fn add_memory_region(
@@ -412,7 +412,7 @@ impl VhostUserCommon {
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().pause_vhost_user().map_err(|e| {
-                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {:?}", e))
+                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {e:?}"))
             })
         } else {
             Ok(())
@@ -422,7 +422,7 @@ impl VhostUserCommon {
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
-                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {:?}", e))
+                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
             })
         } else {
             Ok(())
@@ -454,8 +454,7 @@ impl VhostUserCommon {
                     .start_dirty_log(last_ram_addr)
                     .map_err(|e| {
                         MigratableError::StartDirtyLog(anyhow!(
-                            "Error starting migration for vhost-user backend: {:?}",
-                            e
+                            "Error starting migration for vhost-user backend: {e:?}"
                         ))
                     })
             } else {
@@ -472,8 +471,7 @@ impl VhostUserCommon {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
-                    "Error stopping migration for vhost-user backend: {:?}",
-                    e
+                    "Error stopping migration for vhost-user backend: {e:?}"
                 ))
             })
         } else {
@@ -490,8 +488,7 @@ impl VhostUserCommon {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
                     MigratableError::DirtyLog(anyhow!(
-                        "Error retrieving dirty ranges from vhost-user backend: {:?}",
-                        e
+                        "Error retrieving dirty ranges from vhost-user backend: {e:?}"
                     ))
                 })
             } else {
@@ -518,8 +515,7 @@ impl VhostUserCommon {
         if let Some(kill_evt) = kill_evt {
             kill_evt.write(1).map_err(|e| {
                 MigratableError::CompleteMigration(anyhow!(
-                    "Error killing vhost-user thread: {:?}",
-                    e
+                    "Error killing vhost-user thread: {e:?}"
                 ))
             })?;
         }

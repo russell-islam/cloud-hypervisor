@@ -39,7 +39,7 @@ anyhow = { workspace = true }
 arch = { path = "../arch" }
 bitflags = { workspace = true }
 block = { path = "../block" }
-blocking = { version = "1.6.1", optional = true }
+blocking = { version = "1.6.2", optional = true }
 cfg-if = { workspace = true }
 clap = { workspace = true }
 devices = { path = "../devices" }
@@ -47,14 +47,14 @@ dhat = { workspace = true, optional = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 flume = { workspace = true }
-futures = { version = "0.3.31", optional = true }
-gdbstub = { version = "0.7.6", optional = true }
+futures = { version = "0.3.32", optional = true }
+gdbstub = { version = "0.7.9", optional = true }
 gdbstub_arch = { version = "0.3.2", optional = true }
 hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
-landlock = "0.4.2"
+landlock = "0.4.4"
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = { workspace = true }
@@ -91,5 +91,8 @@ vm-memory = { workspace = true, features = [
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
-zbus = { version = "5.7.1", optional = true }
+zbus = { version = "5.13.2", optional = true }
 zerocopy = { workspace = true, features = ["alloc", "derive"] }
+
+[lints]
+workspace = true

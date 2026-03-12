@@ -3,8 +3,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::interrupt_controller::{Error, InterruptController};
-extern crate arch;
 use std::result;
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +16,8 @@ use vm_device::interrupt::{
 use vm_memory::address::Address;
 use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::interrupt_controller::{Error, InterruptController};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -39,6 +39,7 @@ pub struct Aia {
 }
 
 impl Aia {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -51,9 +52,8 @@ impl Aia {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        let vaia = vm
-            .create_vaia(Aia::create_default_config(vcpu_count as u64))
-            .map_err(Error::CreateAia)?;
+        let config = Aia::create_default_config(vcpu_count as u64);
+        let vaia = vm.create_vaia(&config).map_err(Error::CreateAia)?;
 
         let aia = Aia {
             interrupt_source_group,

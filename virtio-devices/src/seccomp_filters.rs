@@ -11,6 +11,7 @@ use seccompiler::{
     SeccompFilter, SeccompRule,
 };
 
+#[derive(Clone, Copy)]
 pub enum Thread {
     VirtioBalloon,
     VirtioBlock,
@@ -99,6 +100,7 @@ fn virtio_balloon_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_fallocate, vec![]),
+        (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
@@ -292,6 +294,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),

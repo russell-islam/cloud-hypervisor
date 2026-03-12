@@ -16,6 +16,8 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
+use event_monitor::event;
+use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
@@ -108,7 +110,7 @@ where
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -124,11 +126,20 @@ where
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
-                self.access_platform.as_ref(),
+                self.access_platform.as_deref(),
             ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
-                        pkt.hdr().len() as u32 + pkt.len()
+                        match pkt.commit_hdr(&*self.mem.memory()) {
+                            Ok(()) => pkt.hdr().len() as u32 + pkt.len(),
+                            Err(err) => {
+                                warn!(
+                                    "vsock: Error writing packet header to guest memory: \
+                                     {err:?}. Discarding the package."
+                                );
+                                0
+                            }
+                        }
                     } else {
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
                         // fill in this buffer, we'll need to undo the last iterator step.
@@ -137,7 +148,7 @@ where
                     }
                 }
                 Err(e) => {
-                    warn!("vsock: RX queue error: {:?}", e);
+                    warn!("vsock: RX queue error: {e:?}");
                     0
                 }
             };
@@ -166,11 +177,11 @@ where
         while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
-                self.access_platform.as_ref(),
+                self.access_platform.as_deref(),
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
-                    error!("vsock: error reading TX packet: {:?}", e);
+                    error!("vsock: error reading TX packet: {e:?}");
                     self.queues[1]
                         .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                         .map_err(DeviceError::QueueAddUsed)?;
@@ -199,8 +210,8 @@ where
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evts[0].as_raw_fd(), RX_QUEUE_EVENT)?;
@@ -226,7 +237,7 @@ where
             Some(evset) => evset,
             None => {
                 let evbits = event.events;
-                warn!("epoll: ignoring unknown event set: 0x{:x}", evbits);
+                warn!("epoll: ignoring unknown event set: 0x{evbits:x}");
                 return Ok(());
             }
         };
@@ -236,25 +247,22 @@ where
             RX_QUEUE_EVENT => {
                 debug!("vsock: RX queue event");
                 self.queue_evts[0].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {e:?}"))
                 })?;
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
             TX_QUEUE_EVENT => {
                 debug!("vsock: TX queue event");
                 self.queue_evts[1].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {e:?}"))
                 })?;
 
                 self.process_tx().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
 
                 // The backend may have queued up responses to the packets we sent during TX queue
@@ -262,17 +270,14 @@ where
                 // into RX buffers.
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
             EVT_QUEUE_EVENT => {
                 debug!("vsock: EVT queue event");
                 self.queue_evts[2].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get EVT queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get EVT queue event: {e:?}"))
                 })?;
             }
             BACKEND_EVENT => {
@@ -284,14 +289,11 @@ where
                 // returning an error) at some point in the past, now is the time to try walking the
                 // TX queue again.
                 self.process_tx().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
@@ -341,7 +343,7 @@ where
         state: Option<VsockState>,
     ) -> io::Result<Vsock<B>> {
         let (avail_features, acked_features, paused) = if let Some(state) = state {
-            info!("Restoring virtio-vsock {}", id);
+            info!("Restoring virtio-vsock {id}");
             (state.avail_features, state.acked_features, true)
         } else {
             let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
@@ -415,7 +417,7 @@ where
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -423,7 +425,7 @@ where
             0 if data.len() == 8 => LittleEndian::write_u64(data, self.cid),
             0 if data.len() == 4 => LittleEndian::write_u32(data, (self.cid & 0xffff_ffff) as u32),
             4 if data.len() == 4 => {
-                LittleEndian::write_u32(data, ((self.cid >> 32) & 0xffff_ffff) as u32)
+                LittleEndian::write_u32(data, ((self.cid >> 32) & 0xffff_ffff) as u32);
             }
             _ => warn!(
                 "vsock: virtio-vsock received invalid read request of {} bytes at offset {}",
@@ -439,7 +441,7 @@ where
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut virtqueues = Vec::new();
@@ -470,7 +472,7 @@ where
             Thread::VirtioVsock,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 
         self.common.epoll_threads = Some(epoll_threads);
@@ -490,7 +492,7 @@ where
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 
@@ -527,7 +529,7 @@ impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 mod tests {
     use libc::EFD_NONBLOCK;
 
-    use super::super::tests::{NoopVirtioInterrupt, TestContext};
+    use super::super::unit_tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
     use crate::ActivateError;

@@ -21,12 +21,6 @@
 //! - riscv64 (experimental)
 //!
 
-#[macro_use]
-extern crate anyhow;
-#[allow(unused_imports)]
-#[macro_use]
-extern crate log;
-
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;
@@ -53,6 +47,7 @@ mod device;
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use concat_idents::concat_idents;
 #[cfg(target_arch = "x86_64")]
 pub use cpu::CpuVendor;
@@ -123,27 +118,6 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
     vec_with_size_in_bytes(vec_size_bytes)
 }
 
-///
-/// User memory region structure
-///
-#[derive(Debug, Default, Eq, PartialEq)]
-pub struct UserMemoryRegion {
-    pub slot: u32,
-    pub guest_phys_addr: u64,
-    pub memory_size: u64,
-    pub userspace_addr: u64,
-    pub flags: u32,
-}
-
-///
-/// Flags for user memory region
-///
-pub const USER_MEMORY_REGION_READ: u32 = 1;
-pub const USER_MEMORY_REGION_WRITE: u32 = 1 << 1;
-pub const USER_MEMORY_REGION_EXECUTE: u32 = 1 << 2;
-pub const USER_MEMORY_REGION_LOG_DIRTY: u32 = 1 << 3;
-pub const USER_MEMORY_REGION_ADJUSTABLE: u32 = 1 << 4;
-
 #[derive(Debug)]
 pub enum MpState {
     #[cfg(feature = "kvm")]
@@ -196,7 +170,7 @@ pub struct HypervisorVmConfig {
     pub sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
     pub mem_size: u64,
-    pub nested_enabled: bool,
+    pub nested: bool,
     pub smt_enabled: bool,
 }
 
@@ -251,6 +225,8 @@ macro_rules! set_x86_64_reg {
                         StandardRegisters::Kvm(s) => s.$reg_name = val,
                         #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
                         StandardRegisters::Mshv(s) => s.$reg_name = val,
+                        #[allow(unreachable_patterns)]
+                        _ => { let _ = val; unreachable!("no x86_64 register backend available") },
                     }
                 }
             }
@@ -269,6 +245,8 @@ macro_rules! get_x86_64_reg {
                         StandardRegisters::Kvm(s) => s.$reg_name,
                         #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
                         StandardRegisters::Mshv(s) => s.$reg_name,
+                        #[allow(unreachable_patterns)]
+                        _ => unreachable!("no x86_64 register backend available"),
                     }
                 }
             }

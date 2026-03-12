@@ -9,7 +9,7 @@ CLI_NAME="Cloud Hypervisor"
 CTR_IMAGE_TAG="ghcr.io/cloud-hypervisor/cloud-hypervisor"
 
 # Needs to match explicit version in docker-image.yaml workflow
-CTR_IMAGE_VERSION="20250815-0"
+CTR_IMAGE_VERSION="20251114-0"
 : "${CTR_IMAGE:=${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}}"
 
 DOCKER_RUNTIME="docker"
@@ -48,6 +48,8 @@ CTR_CLH_ROOT_DIR="/cloud-hypervisor"
 CTR_CLH_CARGO_BUILT_DIR="${CTR_CLH_ROOT_DIR}/build"
 CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
+SRC_IGVM_FILES_PATH="/usr/share/cloud-hypervisor/cvm"
+DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
 CTR_IGVM_FILES_PATH="/igvm_files"
 
 # Container networking option
@@ -67,6 +69,9 @@ CARGO_GIT_REGISTRY_DIR="${CLH_BUILD_DIR}/cargo_git_registry"
 
 # Full path to the cargo target dir on the host.
 CARGO_TARGET_DIR="${CLH_BUILD_DIR}/cargo_target"
+
+# Let tests know that the special environment is set up.
+RUSTFLAGS="${RUSTFLAGS} --cfg devcli_testenv"
 
 # Send a decorated message to stdout, followed by a new line
 #
@@ -165,7 +170,7 @@ fix_dir_perms() {
         --rm \
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-        ${exported_volumes:+"$exported_volumes"} \
+        ${exported_volumes:+$exported_volumes} \
         "$CTR_IMAGE" \
         chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
 
@@ -182,27 +187,30 @@ process_volumes_args() {
     exported_volumes=""
     arr_vols=("${arg_vols//#/ }")
     for var in "${arr_vols[@]}"; do
-        parts=("${var//:/ }")
-        if [[ ! -e "${parts[0]}" ]]; then
-            echo "The volume ${parts[0]} does not exist."
+        dev=$(echo "$var" | cut -d ':' -f 1)
+        if [[ ! -e "$dev" ]]; then
+            echo "The volume $dev does not exist."
             exit 1
         fi
         exported_volumes="$exported_volumes --volume $var"
     done
 }
 
-process_igvm_files() {
+# Copy IGVM files to the workloads directory
+# This is needed for the IGVM integration tests to run
+#   $1 - source path
+#   $2 - destination path
+copy_igvm_files() {
     src=$1
     dest=$2
 
-    if [ -d $src ]; then
-        say "Moving IGVM files from $src to $dest"
-        cp $src/* $dest
+    if [ -d "$src" ]; then
+        say "Copying IGVM files from $src to $dest"
+        cp "$src"/* "$dest"
     else
         say_err "IGVM File path '$src' not found on host"
         exit 1
     fi
-
 }
 
 cmd_help() {
@@ -232,6 +240,7 @@ cmd_help() {
     echo "        --integration-windows        Run the Windows guest integration tests."
     echo "        --integration-live-migration Run the live-migration integration tests."
     echo "        --integration-rate-limiter   Run the rate-limiter integration tests."
+    echo "        --integration-cvm            Run the Confidential VM integration tests."
     echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --metrics                    Generate performance metrics"
     echo "        --coverage                   Generate code coverage information"
@@ -331,7 +340,7 @@ cmd_build() {
         --rm \
         --volume $exported_device \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-        ${exported_volumes:+"$exported_volumes"} \
+        ${exported_volumes:+$exported_volumes} \
         --env RUSTFLAGS="$rustflags" \
         --env TARGET_CC="$target_cc" \
         "$CTR_IMAGE" \
@@ -351,7 +360,7 @@ cmd_clean() {
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-        ${exported_volumes:+"$exported_volumes"} \
+        ${exported_volumes:+$exported_volumes} \
         "$CTR_IMAGE" \
         cargo clean \
         --target-dir "$CTR_CLH_CARGO_TARGET" \
@@ -365,6 +374,7 @@ cmd_tests() {
     integration_windows=false
     integration_live_migration=false
     integration_rate_limiter=false
+    integration_cvm=false
     metrics=false
     coverage=false
     libc="gnu"
@@ -383,6 +393,7 @@ cmd_tests() {
         "--integration-windows") { integration_windows=true; } ;;
         "--integration-live-migration") { integration_live_migration=true; } ;;
         "--integration-rate-limiter") { integration_rate_limiter=true; } ;;
+        "--integration-cvm") { integration_cvm=true; } ;;
         "--metrics") { metrics=true; } ;;
         "--coverage") { coverage=true; } ;;
         "--libc")
@@ -448,7 +459,7 @@ cmd_tests() {
             --device /dev/net/tun \
             --cap-add net_admin \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
@@ -507,7 +518,7 @@ cmd_tests() {
 
         # for cvm guest run please do, export GUEST_VM_TYPE=CVM
         if [ "$GUEST_VM_TYPE" = "CVM" ]; then
-            process_igvm_files $SRC_IGVM_FILES_PATH $DEST_IGVM_FILES_PATH
+            copy_igvm_files $SRC_IGVM_FILES_PATH $DEST_IGVM_FILES_PATH
         fi
 
         say "Running integration tests for $target..."
@@ -521,7 +532,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
             --env USER="root" \
@@ -533,6 +544,33 @@ cmd_tests() {
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$integration_cvm" = true ]; then
+        mkdir -p "$DEST_IGVM_FILES_PATH"
+        copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
+        say "Running CVM integration tests for $target..."
+        $DOCKER_RUNTIME run \
+            --workdir "$CTR_CLH_ROOT_DIR" \
+            --rm \
+            --privileged \
+            --security-opt seccomp=unconfined \
+            --ipc=host \
+            --net="$CTR_CLH_NET" \
+            --mount type=tmpfs,destination=/tmp \
+            --volume /dev:/dev \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
+            ${exported_volumes:+"$exported_volumes"} \
+            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            --env USER="root" \
+            --env BUILD_TARGET="$target" \
+            --env RUSTFLAGS="$rustflags" \
+            --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
+            "$CTR_IMAGE" \
+            ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_vfio" = true ]; then
@@ -547,7 +585,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -570,7 +608,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -593,7 +631,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -618,7 +656,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -634,7 +672,7 @@ cmd_tests() {
 
         # for cvm guest run please do, export GUEST_VM_TYPE=CVM
         if [ "$GUEST_VM_TYPE" = "CVM" ]; then
-            process_igvm_files $SRC_IGVM_FILES_PATH $DEST_IGVM_FILES_PATH
+            copy_igvm_files $SRC_IGVM_FILES_PATH $DEST_IGVM_FILES_PATH
         fi
 
         say "Generating performance metrics for $target..."
@@ -648,7 +686,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
             --env USER="root" \
@@ -678,7 +716,7 @@ cmd_tests() {
             --mount type=tmpfs,destination=/tmp \
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
+            ${exported_volumes:+$exported_volumes} \
             --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
@@ -768,7 +806,7 @@ cmd_shell() {
         --tmpfs /tmp:exec \
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-        ${exported_volumes:+"$exported_volumes"} \
+        ${exported_volumes:+$exported_volumes} \
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
         --env USER="root" \
         --entrypoint bash \

@@ -3,9 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate log;
-
 pub mod emulator;
 pub mod socket;
 
@@ -209,7 +206,7 @@ impl Ptm for PtmEst {
     fn set_member_type(&mut self, _mem: MemberType) {}
 
     fn set_result_code(&mut self, res: u32) {
-        self.result_code = res
+        self.result_code = res;
     }
 
     fn get_result_code(&self) -> u32 {
@@ -269,11 +266,11 @@ impl Ptm for PtmInit {
     }
 
     fn set_member_type(&mut self, mem: MemberType) {
-        self.member = mem
+        self.member = mem;
     }
 
     fn set_result_code(&mut self, res: u32) {
-        self.result_code = res
+        self.result_code = res;
     }
 
     fn get_result_code(&self) -> u32 {
@@ -368,11 +365,11 @@ impl Ptm for PtmSetBufferSize {
     }
 
     fn set_member_type(&mut self, mem: MemberType) {
-        self.mem = mem
+        self.mem = mem;
     }
 
     fn set_result_code(&mut self, res: u32) {
-        self.result_code = res
+        self.result_code = res;
     }
 
     fn get_result_code(&self) -> u32 {
@@ -381,7 +378,7 @@ impl Ptm for PtmSetBufferSize {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     #[test]
     fn test_ptmresult() -> Result<()> {

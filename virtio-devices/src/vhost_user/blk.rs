@@ -6,11 +6,12 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{mem, result, thread};
 
 use block::VirtioBlockConfig;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
-    VHOST_USER_CONFIG_OFFSET, VhostUserConfigFlags, VhostUserProtocolFeatures,
-    VhostUserVirtioFeatures,
+    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_blk::{
@@ -81,7 +82,7 @@ impl Blk {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-block {}", id);
+            info!("Restoring vhost-user-block {id}");
 
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
@@ -135,8 +136,7 @@ impl Blk {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-blk requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -146,7 +146,7 @@ impl Blk {
             let (_, config_space) = vu
                 .socket_handle()
                 .get_config(
-                    VHOST_USER_CONFIG_OFFSET,
+                    0,
                     config_len as u32,
                     VhostUserConfigFlags::WRITABLE,
                     config_space.as_slice(),
@@ -216,13 +216,13 @@ impl Drop for Blk {
         if let Some(kill_evt) = self.common.kill_evt.take()
             && let Err(e) = kill_evt.write(1)
         {
-            error!("failed to kill vhost-user-blk: {:?}", e);
+            error!("failed to kill vhost-user-blk: {e:?}");
         }
         self.common.wait_for_epoll_threads();
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -245,7 +245,7 @@ impl VirtioDevice for Blk {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -275,7 +275,7 @@ impl VirtioDevice for Blk {
                 .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
                 .map_err(Error::VhostUserSetConfig)
         {
-            error!("Failed setting vhost-user-blk configuration: {:?}", e);
+            error!("Failed setting vhost-user-blk configuration: {e:?}");
         }
     }
 
@@ -285,7 +285,7 @@ impl VirtioDevice for Blk {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
@@ -296,7 +296,7 @@ impl VirtioDevice for Blk {
 
         let mut handler = self.vu_common.activate(
             mem,
-            queues,
+            &queues,
             interrupt_cb,
             self.common.acked_features,
             backend_req_handler,
@@ -315,7 +315,7 @@ impl VirtioDevice for Blk {
             Thread::VirtioVhostBlock,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 
@@ -331,7 +331,7 @@ impl VirtioDevice for Blk {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 
@@ -347,7 +347,7 @@ impl VirtioDevice for Blk {
     }
 
     fn shutdown(&mut self) {
-        self.vu_common.shutdown()
+        self.vu_common.shutdown();
     }
 
     fn add_memory_region(

@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::str::FromStr;
 
+use log::{debug, info};
 use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
@@ -108,7 +109,7 @@ fn tdvf_descriptor_offset(file: &mut File) -> Result<(SeekFrom, bool), TdvfError
                 u16::from_le_bytes(table[offset - 18..offset - 16].try_into().unwrap()) as usize;
             debug!(
                 "Entry GUID = {}, size = {}",
-                entry_uuid.hyphenated().to_string(),
+                entry_uuid.hyphenated(),
                 entry_size
             );
 
@@ -304,7 +305,7 @@ fn align_hob(v: u64) -> u64 {
 
 impl TdHob {
     fn update_offset<T>(&mut self) {
-        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64)
+        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64);
     }
 
     pub fn start(offset: u64) -> TdHob {
@@ -519,7 +520,7 @@ impl TdHob {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]
@@ -528,7 +529,7 @@ mod tests {
         let mut f = std::fs::File::open("tdvf.fd").unwrap();
         let (sections, _) = parse_tdvf_sections(&mut f).unwrap();
         for section in sections {
-            eprintln!("{section:x?}")
+            eprintln!("{section:x?}");
         }
     }
 }

@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::interrupt_controller::{Error, InterruptController};
-extern crate arch;
 use std::result;
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +16,8 @@ use vm_device::interrupt::{
 use vm_memory::address::Address;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::interrupt_controller::{Error, InterruptController};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -38,6 +38,7 @@ pub struct Gic {
 }
 
 impl Gic {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -50,12 +51,8 @@ impl Gic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        let vgic = vm
-            .create_vgic(Gic::create_vgic_config(
-                vcpu_count as u64,
-                vm.static_vgic_locations(),
-            ))
-            .map_err(Error::CreateGic)?;
+        let config = Gic::create_default_config(vcpu_count as u64);
+        let vgic = vm.create_vgic(&config).map_err(Error::CreateGic)?;
 
         let gic = Gic {
             interrupt_source_group,
@@ -191,10 +188,7 @@ impl Pausable for Gic {
         // Flush tables to guest RAM
         let vgic = self.vgic.as_ref().unwrap().clone();
         vgic.lock().unwrap().save_data_tables().map_err(|e| {
-            MigratableError::Pause(anyhow!(
-                "Could not save GICv3ITS GIC pending tables {:?}",
-                e
-            ))
+            MigratableError::Pause(anyhow!("Could not save GICv3ITS GIC pending tables {e:?}",))
         })?;
         Ok(())
     }

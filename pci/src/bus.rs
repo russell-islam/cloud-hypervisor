@@ -10,6 +10,7 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::error;
 use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
 
@@ -132,6 +133,7 @@ impl PciBus {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn register_mapping(
         &self,
         dev: Arc<dyn BusDeviceSync>,
@@ -179,11 +181,11 @@ impl PciBus {
 
     pub fn get_device_id(&mut self, id: usize) -> Result<()> {
         if id < NUM_DEVICE_IDS {
-            if !self.device_ids[id] {
+            if self.device_ids[id] {
+                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
+            } else {
                 self.device_ids[id] = true;
                 Ok(())
-            } else {
-                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
             }
         } else {
             Err(PciRootError::InvalidPciDeviceSlot(id))

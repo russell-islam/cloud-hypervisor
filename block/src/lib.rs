@@ -8,9 +8,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-#[macro_use]
-extern crate log;
-
 pub mod async_io;
 pub mod fcntl;
 pub mod fixed_vhd;
@@ -33,19 +30,20 @@ pub mod vhdx_sync;
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::sync::Arc;
+use std::str::FromStr;
 use std::time::Instant;
 use std::{cmp, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{S_IFBLK, S_IFMT, ioctl};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
@@ -53,7 +51,7 @@ use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -83,8 +81,8 @@ pub enum Error {
     DetectImageType(#[source] std::io::Error),
     #[error("Failure in fixed vhd")]
     FixedVhdError(#[source] std::io::Error),
-    #[error("Getting a block's metadata fails for any reason")]
-    GetFileMetadata,
+    #[error("Getting a block's metadata failed")]
+    GetFileMetadata(#[source] std::io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
     #[error("Failure in qcow")]
@@ -99,7 +97,7 @@ pub enum Error {
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     let blk_metadata = match disk_path.metadata() {
-        Err(_) => return Err(Error::GetFileMetadata),
+        Err(e) => return Err(Error::GetFileMetadata(e)),
         Ok(m) => m,
     };
     // This is how kvmtool does it.
@@ -123,7 +121,7 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
             // This will also zero out any leftover bytes.
             let disk_id = m.as_bytes();
             let bytes_to_copy = cmp::min(disk_id.len(), VIRTIO_BLK_ID_BYTES as usize);
-            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
+            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy]);
         }
     }
     default_serial
@@ -139,7 +137,7 @@ pub enum ExecuteError {
     Read(#[source] GuestMemoryError),
     #[error("Failed to read_exact")]
     ReadExact(#[source] io::Error),
-    #[error("Can't execute an operation other than `read` on a read-only device")]
+    #[error("Can't execute an operation other than `read` or `get_id` on a read-only device")]
     ReadOnly,
     #[error("Failed to seek")]
     Seek(#[source] io::Error),
@@ -159,6 +157,10 @@ pub enum ExecuteError {
     AsyncWrite(#[source] AsyncIoError),
     #[error("failed to async flush")]
     AsyncFlush(#[source] AsyncIoError),
+    #[error("Failed to async punch hole")]
+    AsyncPunchHole(#[source] AsyncIoError),
+    #[error("Failed to async write zeroes")]
+    AsyncWriteZeroes(#[source] AsyncIoError),
     #[error("Failed allocating a temporary buffer")]
     TemporaryBufferAllocation(#[source] io::Error),
 }
@@ -180,6 +182,8 @@ impl ExecuteError {
             ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncPunchHole(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncWriteZeroes(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::TemporaryBufferAllocation(_) => VIRTIO_BLK_S_IOERR,
         };
         status as u8
@@ -192,6 +196,8 @@ pub enum RequestType {
     Out,
     Flush,
     GetDeviceId,
+    Discard,
+    WriteZeroes,
     Unsupported(u32),
 }
 
@@ -205,6 +211,8 @@ pub fn request_type<B: Bitmap + 'static>(
         VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
         VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
         VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
+        VIRTIO_BLK_T_DISCARD => Ok(RequestType::Discard),
+        VIRTIO_BLK_T_WRITE_ZEROES => Ok(RequestType::WriteZeroes),
         t => Ok(RequestType::Unsupported(t)),
     }
 }
@@ -260,7 +268,7 @@ pub struct Request {
 impl Request {
     pub fn parse<B: Bitmap + 'static>(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
             .next()
@@ -293,20 +301,19 @@ impl Request {
             .next()
             .ok_or(Error::DescriptorChainTooShort)
             .inspect_err(|_| {
-                error!("Only head descriptor present: request = {:?}", req);
+                error!("Only head descriptor present: request = {req:?}");
             })?;
 
-        if !desc.has_next() {
-            status_desc = desc;
-            // Only flush requests are allowed to skip the data descriptor.
-            if req.request_type != RequestType::Flush {
-                error!("Need a data descriptor: request = {:?}", req);
-                return Err(Error::DescriptorChainTooShort);
-            }
-        } else {
+        if desc.has_next() {
             req.data_descriptors.reserve_exact(1);
             while desc.has_next() {
                 if desc.is_write_only() && req.request_type == RequestType::Out {
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if desc.is_write_only() && req.request_type == RequestType::Discard {
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if desc.is_write_only() && req.request_type == RequestType::WriteZeroes {
                     return Err(Error::UnexpectedWriteOnlyDescriptor);
                 }
                 if !desc.is_write_only() && req.request_type == RequestType::In {
@@ -325,10 +332,17 @@ impl Request {
                     .next()
                     .ok_or(Error::DescriptorChainTooShort)
                     .inspect_err(|_| {
-                        error!("DescriptorChain corrupted: request = {:?}", req);
+                        error!("DescriptorChain corrupted: request = {req:?}");
                     })?;
             }
             status_desc = desc;
+        } else {
+            status_desc = desc;
+            // Only flush requests are allowed to skip the data descriptor.
+            if req.request_type != RequestType::Flush {
+                error!("Need a data descriptor: request = {req:?}");
+                return Err(Error::DescriptorChainTooShort);
+            }
         }
 
         // The status MUST always be writable.
@@ -398,8 +412,14 @@ impl Request {
                     mem.write_slice(serial, *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
+                RequestType::Discard => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                }
+                RequestType::WriteZeroes => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES));
+                }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
-            };
+            }
         }
         Ok(len)
     }
@@ -410,6 +430,7 @@ impl Request {
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
+        disable_sector0_writes: bool,
         user_data: u64,
     ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
@@ -441,14 +462,17 @@ impl Request {
 
             let origin_ptr = mem
                 .get_slice(data_addr, data_len)
-                .map_err(ExecuteError::GetHostAddress)?
-                .ptr_guard();
+                .map_err(ExecuteError::GetHostAddress)?;
+            assert!(origin_ptr.len() >= data_len);
+            let origin_ptr = origin_ptr.ptr_guard();
 
             // Verify the buffer alignment.
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if !(origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+                origin_ptr.as_ptr() as *mut libc::c_void
+            } else {
                 let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
@@ -476,8 +500,6 @@ impl Request {
                 });
 
                 aligned_ptr as *mut libc::c_void
-            } else {
-                origin_ptr.as_ptr() as *mut libc::c_void
             };
 
             let iovec = libc::iovec {
@@ -546,6 +568,71 @@ impl Request {
                 ret.async_complete = false;
                 return Ok(ret);
             }
+            RequestType::Discard => {
+                let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
+                    (self.data_descriptors[0].0, self.data_descriptors[0].1)
+                } else {
+                    return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
+                };
+
+                if data_len < 16 {
+                    return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+
+                let mut discard_sector = [0u8; 8];
+                let mut discard_num_sectors = [0u8; 4];
+                mem.read_slice(&mut discard_sector, data_addr)
+                    .map_err(ExecuteError::Read)?;
+                mem.read_slice(&mut discard_num_sectors, data_addr.checked_add(8).unwrap())
+                    .map_err(ExecuteError::Read)?;
+
+                let discard_sector = u64::from_le_bytes(discard_sector);
+
+                if discard_sector == 0 && disable_sector0_writes {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+
+                let discard_num_sectors = u32::from_le_bytes(discard_num_sectors);
+
+                let discard_offset = discard_sector * SECTOR_SIZE;
+                let discard_length = (discard_num_sectors as u64) * SECTOR_SIZE;
+
+                disk_image
+                    .punch_hole(discard_offset, discard_length, user_data)
+                    .map_err(ExecuteError::AsyncPunchHole)?;
+            }
+            RequestType::WriteZeroes => {
+                let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
+                    (self.data_descriptors[0].0, self.data_descriptors[0].1)
+                } else {
+                    return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
+                };
+
+                if data_len < 16 {
+                    return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+
+                let mut wz_sector = [0u8; 8];
+
+                let mut wz_num_sectors = [0u8; 4];
+                mem.read_slice(&mut wz_sector, data_addr)
+                    .map_err(ExecuteError::Read)?;
+                mem.read_slice(&mut wz_num_sectors, data_addr.checked_add(8).unwrap())
+                    .map_err(ExecuteError::Read)?;
+
+                let wz_sector = u64::from_le_bytes(wz_sector);
+                let wz_num_sectors = u32::from_le_bytes(wz_num_sectors);
+
+                let wz_offset = wz_sector * SECTOR_SIZE;
+                if wz_offset == 0 && disable_sector0_writes {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+                let wz_length = (wz_num_sectors as u64) * SECTOR_SIZE;
+
+                disk_image
+                    .write_zeroes(wz_offset, wz_length, user_data)
+                    .map_err(ExecuteError::AsyncWriteZeroes)?;
+            }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
 
@@ -564,7 +651,7 @@ impl Request {
                         aligned_operation.aligned_ptr as *const u8,
                         aligned_operation.origin_ptr as *mut u8,
                         aligned_operation.size,
-                    )
+                    );
                 };
             }
 
@@ -575,7 +662,7 @@ impl Request {
                 dealloc(
                     aligned_operation.aligned_ptr as *mut u8,
                     aligned_operation.layout,
-                )
+                );
             };
         }
 
@@ -583,7 +670,7 @@ impl Request {
     }
 
     pub fn set_writeback(&mut self, writeback: bool) {
-        self.writeback = writeback
+        self.writeback = writeback;
     }
 }
 
@@ -646,7 +733,7 @@ pub fn block_io_uring_is_supported() -> bool {
         let io_uring = match IoUring::new(1) {
             Ok(io_uring) => io_uring,
             Err(e) => {
-                info!("{} failed to create io_uring instance: {}", error_msg, e);
+                info!("{error_msg} failed to create io_uring instance: {e}");
                 return false;
             }
         };
@@ -659,30 +746,169 @@ pub fn block_io_uring_is_supported() -> bool {
         match submitter.register_probe(&mut probe) {
             Ok(_) => {}
             Err(e) => {
-                info!("{} failed to register a probe: {}", error_msg, e);
+                info!("{error_msg} failed to register a probe: {e}");
                 return false;
             }
         }
 
         // Check IORING_OP_FSYNC is supported
         if !probe.is_supported(opcode::Fsync::CODE) {
-            info!("{} IORING_OP_FSYNC operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_FSYNC operation not supported");
             return false;
         }
 
         // Check IORING_OP_READV is supported
         if !probe.is_supported(opcode::Readv::CODE) {
-            info!("{} IORING_OP_READV operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_READV operation not supported");
             return false;
         }
 
         // Check IORING_OP_WRITEV is supported
         if !probe.is_supported(opcode::Writev::CODE) {
-            info!("{} IORING_OP_WRITEV operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_WRITEV operation not supported");
             return false;
         }
 
         true
+    }
+}
+
+/// Probe whether the file/device supports punch hole and zero range
+pub fn probe_sparse_support(file: &File) -> bool {
+    let fd = file.as_raw_fd();
+
+    let is_block_device = {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: FFI call with valid fd and buffer
+        let ret = unsafe { libc::fstat(fd, stat.as_mut_ptr()) };
+        if ret != 0 {
+            warn!(
+                "Failed to stat file descriptor for sparse probe: {}",
+                io::Error::last_os_error()
+            );
+            return false;
+        }
+        // SAFETY: stat result is valid at this point
+        unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK }
+    };
+
+    if is_block_device {
+        probe_block_device_sparse_support(fd)
+    } else {
+        probe_file_sparse_support(fd)
+    }
+}
+
+/// Probe sparse support for a regular file using fallocate().
+fn probe_file_sparse_support(fd: libc::c_int) -> bool {
+    const FALLOC_FL_KEEP_SIZE: libc::c_int = 0x01;
+    const FALLOC_FL_PUNCH_HOLE: libc::c_int = 0x02;
+    const FALLOC_FL_ZERO_RANGE: libc::c_int = 0x10;
+
+    // SAFETY: FFI call with valid fd
+    let file_size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
+    if file_size < 0 {
+        let err = io::Error::last_os_error();
+        warn!("Failed to get file size for sparse probe: {err}");
+        return false;
+    }
+
+    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
+    let punch_hole =
+        unsafe { libc::fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
+            == 0;
+
+    if !punch_hole {
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+            debug!("File does not support FALLOC_FL_PUNCH_HOLE: {err}");
+        } else {
+            debug!("PUNCH_HOLE probe returned unexpected error: {err}");
+        }
+    }
+
+    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
+    let zero_range =
+        unsafe { libc::fallocate(fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
+            == 0;
+
+    if !zero_range {
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+            debug!("File does not support FALLOC_FL_ZERO_RANGE: {err}");
+        }
+    }
+
+    let supported = punch_hole || zero_range;
+    info!(
+        "Probed file sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
+    );
+    supported
+}
+
+/// Probe sparse support for a block device using ioctls.
+fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
+    ioctl_io_nr!(BLKDISCARD, 0x12, 119);
+    ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
+
+    let range: [u64; 2] = [0, 0];
+
+    // SAFETY: FFI call with valid fd and valid range buffer
+    let punch_hole = unsafe { ioctl(fd, BLKDISCARD() as _, &range) } == 0;
+
+    if !punch_hole {
+        let err = io::Error::last_os_error();
+        debug!("Block device BLKDISCARD probe returned: {err}");
+    }
+
+    // SAFETY: FFI call with valid fd and valid range buffer
+    let zero_range = unsafe { ioctl(fd, BLKZEROOUT() as _, &range) } == 0;
+
+    if !zero_range {
+        let err = io::Error::last_os_error();
+        debug!("Block device BLKZEROOUT probe returned: {err}");
+    }
+
+    let supported = punch_hole || zero_range;
+    info!(
+        "Probed block device sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
+    );
+    supported
+}
+
+/// Preallocate disk space for a disk image file.
+///
+/// Uses `fallocate()` to allocate all disk space upfront, ensuring storage
+/// availability and reducing fragmentation. Allocating all blocks upfront is
+/// more likely to place them contiguously than allocating on demand during
+/// random writes.
+pub fn preallocate_disk<P: AsRef<Path>>(file: &File, path: P) {
+    let size = match file.metadata() {
+        Ok(m) => m.len(),
+        Err(e) => {
+            warn!("Failed to get metadata for {:?}: {}", path.as_ref(), e);
+            return;
+        }
+    };
+
+    if size == 0 {
+        return;
+    }
+
+    // SAFETY: FFI call with valid file descriptor and size
+    let ret = unsafe { libc::fallocate(file.as_raw_fd(), 0, 0, size as libc::off_t) };
+
+    if ret != 0 {
+        warn!(
+            "Failed to preallocate disk space for {:?}: {}",
+            path.as_ref(),
+            io::Error::last_os_error()
+        );
+    } else {
+        debug!(
+            "Preallocated {size} bytes for disk image {:?}",
+            path.as_ref()
+        );
     }
 }
 
@@ -790,12 +1016,44 @@ pub trait AsyncAdaptor {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
     FixedVhd,
     Qcow2,
     Raw,
     Vhdx,
+    #[default]
+    Unknown,
+}
+
+impl fmt::Display for ImageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImageType::FixedVhd => write!(f, "vhd"),
+            ImageType::Qcow2 => write!(f, "qcow2"),
+            ImageType::Raw => write!(f, "raw"),
+            ImageType::Vhdx => write!(f, "vhdx"),
+            ImageType::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+pub enum ImageTypeParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for ImageType {
+    type Err = ImageTypeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "vhd" => Ok(ImageType::FixedVhd),
+            "qcow2" => Ok(ImageType::Qcow2),
+            "raw" => Ok(ImageType::Raw),
+            "vhdx" => Ok(ImageType::Vhdx),
+            _ => Err(ImageTypeParseError::InvalidValue(s.to_string())),
+        }
+    }
 }
 
 const QCOW_MAGIC: u32 = 0x5146_49fb;
@@ -837,7 +1095,14 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 }
 
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
-    fn size(&self) -> Result<u64, Error>;
+    /// Returns the logical disk size a guest will see.
+    ///
+    /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
+    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
+    /// effective size that the guest will see.
+    fn logical_size(&self) -> Result<u64, Error>;
+    /// Returns the physical size of the underlying file.
+    fn physical_size(&self) -> Result<u64, Error>;
 }
 
 #[derive(Debug)]
@@ -864,6 +1129,7 @@ ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
 ioctl_io_nr!(BLKIOMIN, 0x12, 120);
 ioctl_io_nr!(BLKIOOPT, 0x12, 121);
 
+#[derive(Copy, Clone)]
 enum BlockSize {
     LogicalBlock,
     PhysicalBlock,
@@ -903,7 +1169,7 @@ impl DiskTopology {
         };
         if ret != 0 {
             return Err(std::io::Error::last_os_error());
-        };
+        }
 
         Ok(block_size)
     }

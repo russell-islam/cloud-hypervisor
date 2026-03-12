@@ -6,6 +6,7 @@
 use std::fmt;
 use std::time::Instant;
 
+use log::{error, warn};
 use vm_device::BusDevice;
 
 /// Debug I/O port, see:
@@ -62,7 +63,7 @@ impl DebugPort {
 
 impl BusDevice for DebugPort {
     fn read(&mut self, _base: u64, _offset: u64, _data: &mut [u8]) {
-        error!("Invalid read to debug port")
+        error!("Invalid read to debug port");
     }
 
     fn write(

@@ -13,6 +13,7 @@ use std::result;
 use std::sync::{Arc, Barrier};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, trace, warn};
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_device::interrupt::{
@@ -151,13 +152,13 @@ impl BusDevice for Ioapic {
             return;
         }
 
-        debug!("IOAPIC_R @ offset 0x{:x}", offset);
+        debug!("IOAPIC_R @ offset 0x{offset:x}");
 
         let value: u32 = match offset as u8 {
             IOREGSEL_OFF => self.reg_sel,
             IOWIN_OFF => self.ioapic_read(),
             _ => {
-                error!("IOAPIC: failed reading at offset {}", offset);
+                error!("IOAPIC: failed reading at offset {offset}");
                 return;
             }
         };
@@ -171,7 +172,7 @@ impl BusDevice for Ioapic {
             return None;
         }
 
-        debug!("IOAPIC_W @ offset 0x{:x}", offset);
+        debug!("IOAPIC_W @ offset 0x{offset:x}");
 
         let value = LittleEndian::read_u32(data);
 
@@ -179,7 +180,7 @@ impl BusDevice for Ioapic {
             IOREGSEL_OFF => self.reg_sel = value,
             IOWIN_OFF => self.ioapic_write(value),
             _ => {
-                error!("IOAPIC: failed writing at offset {}", offset);
+                error!("IOAPIC: failed writing at offset {offset}");
             }
         }
         None
@@ -190,8 +191,8 @@ impl Ioapic {
     pub fn new(
         id: String,
         apic_address: GuestAddress,
-        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
-        state: Option<IoapicState>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
+        state: Option<&IoapicState>,
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -266,7 +267,7 @@ impl Ioapic {
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if index > NUM_IOAPIC_PINS {
-                    warn!("IOAPIC index out of range: {}", index);
+                    warn!("IOAPIC index out of range: {index}");
                     return;
                 }
                 if is_high_bits {
@@ -282,7 +283,7 @@ impl Ioapic {
                 // The entry must be updated through the interrupt source
                 // group.
                 if let Err(e) = self.update_entry(index, true) {
-                    error!("Failed updating IOAPIC entry: {:?}", e);
+                    error!("Failed updating IOAPIC entry: {e:?}");
                 }
                 // Store the information this IRQ is now being used.
                 self.used_entries[index] = true;
@@ -303,7 +304,7 @@ impl Ioapic {
             IOWIN_OFF..=REG_MAX_OFFSET => {
                 let (index, is_high_bits) = decode_irq_from_selector(self.reg_sel as u8);
                 if index > NUM_IOAPIC_PINS {
-                    warn!("IOAPIC index out of range: {}", index);
+                    warn!("IOAPIC index out of range: {index}");
                     return 0;
                 }
                 if is_high_bits {

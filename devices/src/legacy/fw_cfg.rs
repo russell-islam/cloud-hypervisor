@@ -35,6 +35,7 @@ use bitfield_struct::bitfield;
 use linux_loader::bootparam::boot_params;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::arm64_image_header as boot_params;
+use log::{debug, error};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
@@ -442,7 +443,7 @@ impl FwCfg {
         fw_cfg_item_list: Option<Vec<FwCfgItem>>,
     ) -> Result<()> {
         if let Some(mem_size) = mem_size {
-            self.add_e820(mem_size)?
+            self.add_e820(mem_size)?;
         }
         if let Some(kernel) = kernel {
             self.add_kernel_data(&kernel)?;
@@ -451,7 +452,7 @@ impl FwCfg {
             self.add_kernel_cmdline(cmdline);
         }
         if let Some(initramfs) = initramfs {
-            self.add_initramfs_data(&initramfs)?
+            self.add_initramfs_data(&initramfs)?;
         }
         if let Some(fw_cfg_item_list) = fw_cfg_item_list {
             for item in fw_cfg_item_list {
@@ -626,7 +627,7 @@ impl FwCfg {
             &access_resp.0.to_be_bytes(),
             GuestAddress(dma_address + core::mem::offset_of!(FwCfgDmaAccess, control_be) as u64),
         ) {
-            error!("fw_cfg: finishing dma: {e:?}")
+            error!("fw_cfg: finishing dma: {e:?}");
         }
     }
 
@@ -710,7 +711,7 @@ impl FwCfg {
                 let bytes = n.to_le_bytes();
                 data.copy_from_slice(&bytes[start..end]);
             }
-        };
+        }
         Some(size as u8)
     }
 
@@ -756,7 +757,7 @@ impl BusDevice for FwCfg {
                     "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
                 );
             }
-        };
+        }
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -792,13 +793,13 @@ impl BusDevice for FwCfg {
             _ => debug!(
                 "fw_cfg: write to unknown port {port:#x}: {size:#x} bytes and offset {offset:#x} ."
             ),
-        };
+        }
         None
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::ffi::CString;
     use std::io::Write;
 

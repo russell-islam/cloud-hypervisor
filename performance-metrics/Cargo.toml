@@ -1,6 +1,5 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-build = "../build.rs"
 edition.workspace = true
 name = "performance-metrics"
 version = "0.1.0"
@@ -13,3 +12,6 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

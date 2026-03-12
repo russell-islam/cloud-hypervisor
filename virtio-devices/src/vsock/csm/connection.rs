@@ -85,6 +85,8 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::{Duration, Instant};
 
+use log::{debug, error, info, warn};
+
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
@@ -252,7 +254,7 @@ where
                     self.last_fwd_cnt_to_peer = self.fwd_cnt;
                     return Ok(());
                 }
-            };
+            }
         }
 
         // A credit update is basically a no-op, so we should only waste a perfectly fine RX
@@ -380,7 +382,7 @@ where
                     pkt.hdr()
                 );
             }
-        };
+        }
 
         Ok(())
     }
@@ -459,7 +461,7 @@ where
                             // it does, so let's absorb it.
                         }
                         _ => self.kill(),
-                    };
+                    }
                     0
                 });
             self.fwd_cnt += Wrapping(flushed as u32);
@@ -678,7 +680,7 @@ mod tests {
     use virtio_queue::QueueOwnedT;
     use vmm_sys_util::eventfd::EventFd;
 
-    use super::super::super::tests::TestContext;
+    use super::super::super::unit_tests::TestContext;
     use super::super::defs as csm_defs;
     use super::*;
 

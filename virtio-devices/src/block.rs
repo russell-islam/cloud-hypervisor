@@ -18,11 +18,13 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use anyhow::anyhow;
-use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
-use block::fcntl::{LockError, LockType, get_lock_state};
+use block::async_io::{AsyncIo, AsyncIoError, DiskFile, DiskFileError};
+use block::fcntl::{LockError, LockGranularity, LockType, get_lock_state};
 use block::{
     ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
 };
+use event_monitor::event;
+use log::{debug, error, info, warn};
 use rate_limiter::TokenType;
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use seccompiler::SeccompAction;
@@ -93,6 +95,16 @@ pub enum Error {
         /// The path of the disk image.
         path: PathBuf,
     },
+    #[error("Disk image size is not a multiple of {}", SECTOR_SIZE)]
+    InvalidSize,
+    #[error("Failed to pause vcpus")]
+    PauseVcpus(#[source] MigratableError),
+    #[error("Failed to resume vcpus")]
+    ResumeVcpus(#[source] MigratableError),
+    #[error("Failed signal config interrupt")]
+    ConfigChange(#[source] io::Error),
+    #[error("Disk resize failed")]
+    DiskResize(#[source] DiskFileError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -135,7 +147,7 @@ struct BlockEpollHandler {
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
-    disk_nsectors: u64,
+    disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     serial: Vec<u8>,
     kill_evt: EventFd,
@@ -148,6 +160,7 @@ struct BlockEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
+    disable_sector0_writes: bool,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -155,13 +168,27 @@ fn has_feature(features: u64, feature_flag: u64) -> bool {
 }
 
 impl BlockEpollHandler {
-    fn check_request(features: u64, request_type: RequestType) -> result::Result<(), ExecuteError> {
-        if has_feature(features, VIRTIO_BLK_F_RO.into()) && request_type != RequestType::In {
+    fn check_request(
+        features: u64,
+        request: &Request,
+        disable_sector0_writes: bool,
+    ) -> result::Result<(), ExecuteError> {
+        let request_type = request.request_type;
+        if (has_feature(features, VIRTIO_BLK_F_RO.into()))
+            && !(request_type == RequestType::In
+                || request_type == RequestType::GetDeviceId
+                || request_type == RequestType::Flush)
+        {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
             return Err(ExecuteError::ReadOnly);
         }
+
+        if request_type == RequestType::Out && disable_sector0_writes && request.sector == 0 {
+            return Err(ExecuteError::ReadOnly);
+        }
+
         Ok(())
     }
 
@@ -171,14 +198,17 @@ impl BlockEpollHandler {
         let mut batch_inflight_requests = Vec::new();
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
+            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
-            if let Err(e) = Self::check_request(self.acked_features, request.request_type) {
-                warn!("Request check failed: {:x?} {:?}", request, e);
+            // Also, if sector 0 writes are disabled, treat writes to sector 0 as read-only as well.
+            if let Err(e) =
+                Self::check_request(self.acked_features, &request, self.disable_sector0_writes)
+            {
+                warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
                     .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
@@ -223,16 +253,17 @@ impl BlockEpollHandler {
                         queue.go_to_previous_position();
                         break;
                     }
-                };
+                }
             }
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
             let result = request.execute_async(
                 desc_chain.memory(),
-                self.disk_nsectors,
+                self.disk_nsectors.load(Ordering::SeqCst),
                 self.disk_image.as_mut(),
                 &self.serial,
+                self.disable_sector0_writes,
                 desc_chain.head_index() as u64,
             );
 
@@ -257,7 +288,7 @@ impl BlockEpollHandler {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
                     Err(e) => {
-                        warn!("Request failed: {:x?} {:?}", request, e);
+                        warn!("Request failed: {request:x?} {e:?}");
                         VIRTIO_BLK_S_IOERR
                     }
                 };
@@ -285,10 +316,7 @@ impl BlockEpollHandler {
             Err(e) => {
                 // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
                 for (user_data, request) in batch_inflight_requests {
-                    warn!(
-                        "Request failed with batch submission: {:x?} {:?}",
-                        request, e
-                    );
+                    warn!("Request failed with batch submission: {request:x?} {e:?}");
                     let desc_index = user_data;
                     let mem = self.mem.memory();
                     mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr)
@@ -311,14 +339,11 @@ impl BlockEpollHandler {
             .queue
             .needs_notification(self.mem.memory().deref())
             .map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!(
-                    "Failed to check needs_notification: {:?}",
-                    e
-                ))
+                EpollHelperError::HandleEvent(anyhow!("Failed to check needs_notification: {e:?}"))
             })?
         {
             self.signal_used_queue().map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
             })?;
         }
 
@@ -327,7 +352,7 @@ impl BlockEpollHandler {
 
     fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
         self.process_queue_submit().map_err(|e| {
-            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {e:?}"))
         })?;
 
         self.try_signal_used_queue()
@@ -493,7 +518,7 @@ impl BlockEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(self.queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -528,15 +553,15 @@ impl BlockEpollHandler {
                     "Failed scheduling the virtqueue thread {} on the expected CPU set: {}",
                     self.queue_index,
                     io::Error::last_os_error()
-                )
+                );
             }
         }
     }
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -561,25 +586,24 @@ impl EpollHelperHandler for BlockEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit_and_signal()?;
                 }
             }
             COMPLETION_EVENT => {
                 self.disk_image.notifier().read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 self.process_queue_complete().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process queue (complete): {:?}",
-                        e
+                        "Failed to process queue (complete): {e:?}"
                     ))
                 })?;
 
@@ -589,8 +613,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                 if !rate_limit_reached {
                     self.process_queue_submit().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process queue (submit): {:?}",
-                            e
+                            "Failed to process queue (submit): {e:?}"
                         ))
                     })?;
                 }
@@ -602,12 +625,11 @@ impl EpollHelperHandler for BlockEpollHandler {
                     // and restart processing the queue.
                     rate_limiter.event_handler().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process rate limiter event: {:?}",
-                            e
+                            "Failed to process rate limiter event: {e:?}"
                         ))
                     })?;
 
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit_and_signal()?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled."
@@ -616,8 +638,7 @@ impl EpollHelperHandler for BlockEpollHandler {
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -631,7 +652,7 @@ pub struct Block {
     id: String,
     disk_image: Box<dyn DiskFile>,
     disk_path: PathBuf,
-    disk_nsectors: u64,
+    disk_nsectors: Arc<AtomicU64>,
     config: VirtioBlockConfig,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
@@ -640,6 +661,7 @@ pub struct Block {
     exit_evt: EventFd,
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
+    disable_sector0_writes: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -668,10 +690,12 @@ impl Block {
         exit_evt: EventFd,
         state: Option<BlockState>,
         queue_affinity: BTreeMap<u16, Vec<usize>>,
+        sparse: bool,
+        disable_sector0_writes: bool,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
-                info!("Restoring virtio-block {}", id);
+                info!("Restoring virtio-block {id}");
                 (
                     state.disk_nsectors,
                     state.avail_features,
@@ -681,13 +705,12 @@ impl Block {
                 )
             } else {
                 let disk_size = disk_image
-                    .size()
+                    .logical_size()
                     .map_err(|e| io::Error::other(format!("Failed getting disk size: {e}")))?;
                 if disk_size % SECTOR_SIZE != 0 {
                     warn!(
-                        "Disk size {} is not a multiple of sector size {}; \
-                 the remainder will not be visible to the guest.",
-                        disk_size, SECTOR_SIZE
+                        "Disk size {disk_size} is not a multiple of sector size {SECTOR_SIZE}; \
+                 the remainder will not be visible to the guest."
                     );
                 }
 
@@ -699,6 +722,20 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX)
                     | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
+
+                // When backend supports sparse operations:
+                // - Always advertise WRITE_ZEROES
+                // - Advertise DISCARD only if sparse=true OR format supports marking
+                //   clusters as zero without deallocating
+                if disk_image.supports_sparse_operations() {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_WRITE_ZEROES;
+                    if sparse || disk_image.supports_zero_flag() {
+                        avail_features |= 1u64 << VIRTIO_BLK_F_DISCARD;
+                    }
+                } else if sparse {
+                    warn!("sparse=on requested but backend does not support sparse operations");
+                }
+
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }
@@ -708,7 +745,7 @@ impl Block {
                 }
 
                 let topology = disk_image.topology();
-                info!("Disk topology: {:?}", topology);
+                info!("Disk topology: {topology:?}");
 
                 let logical_block_size = if topology.logical_block_size > 512 {
                     topology.logical_block_size
@@ -744,9 +781,7 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = serial
-            .map(Vec::from)
-            .unwrap_or_else(|| build_serial(&disk_path));
+        let serial = serial.map_or_else(|| build_serial(&disk_path), Vec::from);
 
         Ok(Block {
             common: VirtioCommon {
@@ -762,7 +797,7 @@ impl Block {
             id,
             disk_image,
             disk_path,
-            disk_nsectors,
+            disk_nsectors: Arc::new(AtomicU64::new(disk_nsectors)),
             config,
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
@@ -771,11 +806,32 @@ impl Block {
             exit_evt,
             serial,
             queue_affinity,
+            disable_sector0_writes,
         })
     }
 
     fn read_only(&self) -> bool {
         has_feature(self.features(), VIRTIO_BLK_F_RO.into())
+    }
+
+    /// Returns the granularity for the advisory lock for this disk.
+    // TODO In future, we could add a `lock_granularity=` configuration to the CLI.
+    // For now, we stick to QEMU behavior.
+    fn lock_granularity(&mut self) -> LockGranularity {
+        self.disk_image.physical_size().map_or_else(
+            // use a safe fallback
+            |e| {
+                let fallback = LockGranularity::WholeFile;
+                warn!(
+                    "Can't get disk size for id={},path={}, falling back to {:?}: error: {e}",
+                    self.id,
+                    self.disk_path.display(),
+                    fallback
+                );
+                fallback
+            },
+            |size| LockGranularity::ByteRange(0, size),
+        )
     }
 
     /// Tries to set an advisory lock for the corresponding disk image.
@@ -784,20 +840,21 @@ impl Block {
             true => LockType::Read,
             false => LockType::Write,
         };
-        log::debug!(
-            "Attempting to acquire {lock_type:?} lock for disk image id={},path={}",
+        let granularity = self.lock_granularity();
+        debug!(
+            "Attempting to acquire {lock_type:?} lock for disk image: id={},path={},granularity={granularity:?}",
             self.id,
             self.disk_path.display()
         );
         let fd = self.disk_image.fd();
-        fcntl::try_acquire_lock(fd, lock_type).map_err(|error| {
-            let current_lock = get_lock_state(fd);
+        fcntl::try_acquire_lock(&fd, lock_type, granularity).map_err(|error| {
+            let current_lock = get_lock_state(&fd, granularity);
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
             // we try to log additional help to the user.
             if let Ok(current_lock) = current_lock {
-                log::error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
+                error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
             } else {
-                log::error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
+                error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
             }
             Error::LockDiskImage {
                 path: self.disk_path.clone(),
@@ -805,7 +862,7 @@ impl Block {
                 lock_type,
             }
         })?;
-        log::info!(
+        info!(
             "Acquired {lock_type:?} lock for disk image id={},path={}",
             self.id,
             self.disk_path.display()
@@ -815,10 +872,13 @@ impl Block {
 
     /// Releases the advisory lock held for the corresponding disk image.
     pub fn unlock_image(&mut self) -> Result<()> {
+        let granularity = self.lock_granularity();
+
         // It is very unlikely that this fails;
         // Should we remove the Result to simplify the error propagation on
         // higher levels?
-        fcntl::clear_lock(self.disk_image.fd()).map_err(|error| Error::LockDiskImage {
+        let fd = self.disk_image.fd();
+        fcntl::clear_lock(&fd, granularity).map_err(|error| Error::LockDiskImage {
             path: self.disk_path.clone(),
             error,
             lock_type: LockType::Unlock,
@@ -828,7 +888,7 @@ impl Block {
     fn state(&self) -> BlockState {
         BlockState {
             disk_path: self.disk_path.to_str().unwrap().to_owned(),
-            disk_nsectors: self.disk_nsectors,
+            disk_nsectors: self.disk_nsectors.load(Ordering::SeqCst),
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
@@ -853,6 +913,34 @@ impl Block {
             }
         );
         self.writeback.store(writeback, Ordering::Release);
+    }
+
+    pub fn resize(&mut self, new_size: u64) -> Result<()> {
+        if !new_size.is_multiple_of(SECTOR_SIZE) {
+            return Err(Error::InvalidSize);
+        }
+
+        self.disk_image
+            .resize(new_size)
+            .map_err(Error::DiskResize)?;
+
+        let nsectors = new_size / SECTOR_SIZE;
+
+        self.common.pause().map_err(Error::PauseVcpus)?;
+
+        self.disk_nsectors.store(nsectors, Ordering::SeqCst);
+        self.config.capacity = nsectors;
+        self.state().disk_nsectors = nsectors;
+
+        self.common.resume().map_err(Error::ResumeVcpus)?;
+
+        if let Some(interrupt_cb) = self.common.interrupt_cb.as_ref() {
+            interrupt_cb
+                .trigger(VirtioInterruptType::Config)
+                .map_err(Error::ConfigChange)
+        } else {
+            Ok(())
+        }
     }
 
     #[cfg(fuzzing)]
@@ -885,7 +973,7 @@ impl VirtioDevice for Block {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -916,7 +1004,14 @@ impl VirtioDevice for Block {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        // See if the guest didn't ack the device being read-only.
+        // If so, warn and pretend it did.
+        let original_acked_features = self.common.acked_features;
+        self.common.acked_features |= self.common.avail_features & (1u64 << VIRTIO_BLK_F_RO);
+        if original_acked_features != self.common.acked_features {
+            warn!("Guest did not acknowledge that device is read-only, acting as if it did!");
+        }
+        self.common.activate(&queues, interrupt_cb.clone())?;
 
         self.update_writeback();
 
@@ -939,10 +1034,10 @@ impl VirtioDevice for Block {
                     .disk_image
                     .new_async_io(queue_size as u32)
                     .map_err(|e| {
-                        error!("failed to create new AsyncIo: {}", e);
+                        error!("failed to create new AsyncIo: {e}");
                         ActivateError::BadActivate
                     })?,
-                disk_nsectors: self.disk_nsectors,
+                disk_nsectors: self.disk_nsectors.clone(),
                 interrupt_cb: interrupt_cb.clone(),
                 serial: self.serial.clone(),
                 kill_evt,
@@ -963,6 +1058,7 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform.clone(),
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
+                disable_sector0_writes: self.disable_sector0_writes,
             };
 
             let paused = self.common.paused.clone();
@@ -974,7 +1070,7 @@ impl VirtioDevice for Block {
                 Thread::VirtioBlock,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || handler.run(paused, paused_sync.unwrap()),
+                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
 
@@ -1038,7 +1134,7 @@ impl VirtioDevice for Block {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

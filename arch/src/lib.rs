@@ -8,9 +8,6 @@
 //! Implements platform specific functionality.
 //! Supported platforms: x86_64, aarch64, riscv64.
 
-#[macro_use]
-extern crate log;
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::{fmt, result};
@@ -123,6 +120,7 @@ pub struct NumaNode {
     pub pci_segments: Vec<u16>,
     pub distances: BTreeMap<u32, u8>,
     pub memory_zones: Vec<String>,
+    pub device_id: Option<String>,
 }
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;

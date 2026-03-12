@@ -15,6 +15,7 @@ use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
+use log::{error, info};
 use pci::{
     BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
     PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
@@ -382,23 +383,20 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         access_platform: Option<Arc<dyn AccessPlatform>>,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
         for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK).map_err(|e| {
-                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed creating eventfd: {}",
-                    e
-                ))
-            })?)
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!("Failed creating eventfd: {e}"))
+            })?);
         }
         let num_queues = locked_device.queue_max_sizes().len();
 
@@ -421,16 +419,14 @@ impl VirtioPciDevice {
             })
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed creating MSI interrupt group: {}",
-                    e
+                    "Failed creating MSI interrupt group: {e}"
                 ))
             })?;
 
-        let msix_state = vm_migration::state_from_id(snapshot.as_ref(), pci::MSIX_CONFIG_ID)
-            .map_err(|e| {
+        let msix_state =
+            vm_migration::state_from_id(snapshot, pci::MSIX_CONFIG_ID).map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed to get MsixConfigState from Snapshot: {}",
-                    e
+                    "Failed to get MsixConfigState from Snapshot: {e}"
                 ))
             })?;
 
@@ -466,14 +462,11 @@ impl VirtioPciDevice {
         };
 
         let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), pci::PCI_CONFIGURATION_ID).map_err(
-                |e| {
-                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get PciConfigurationState from Snapshot: {}",
-                        e
-                    ))
-                },
-            )?;
+            vm_migration::state_from_id(snapshot, pci::PCI_CONFIGURATION_ID).map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get PciConfigurationState from Snapshot: {e}"
+                ))
+            })?;
 
         let configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
@@ -490,14 +483,11 @@ impl VirtioPciDevice {
         );
 
         let common_config_state =
-            vm_migration::state_from_id(snapshot.as_ref(), VIRTIO_PCI_COMMON_CONFIG_ID).map_err(
-                |e| {
-                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get VirtioPciCommonConfigState from Snapshot: {}",
-                        e
-                    ))
-                },
-            )?;
+            vm_migration::state_from_id(snapshot, VIRTIO_PCI_COMMON_CONFIG_ID).map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get VirtioPciCommonConfigState from Snapshot: {e}"
+                ))
+            })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
             VirtioPciCommonConfig::new(common_config_state, access_platform)
@@ -522,8 +512,7 @@ impl VirtioPciDevice {
             .transpose()
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed to get VirtioPciDeviceState from Snapshot: {}",
-                    e
+                    "Failed to get VirtioPciDeviceState from Snapshot: {e}"
                 ))
             })?;
 
@@ -613,8 +602,7 @@ impl VirtioPciDevice {
         {
             virtio_pci_device.activate().map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed activating the device: {}",
-                    e
+                    "Failed activating the device: {e}"
                 ))
             })?;
         }
@@ -757,7 +745,7 @@ impl VirtioPciDevice {
             let bar_offset: u32 =
                 // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
                 unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
-            self.read_bar(0, bar_offset as u64, data)
+            self.read_bar(0, bar_offset as u64, data);
         }
     }
 
@@ -795,7 +783,7 @@ impl VirtioPciDevice {
             }
 
             if !queue.is_valid(self.memory.memory().deref()) {
-                error!("Queue {} is not valid", queue_index);
+                error!("Queue {queue_index} is not valid");
             }
 
             queues.push((
@@ -824,8 +812,8 @@ impl VirtioPciDevice {
         !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
     }
 
-    pub fn dma_handler(&self) -> Option<&Arc<dyn ExternalDmaMapping>> {
-        self.dma_handler.as_ref()
+    pub fn dma_handler(&self) -> Option<&dyn ExternalDmaMapping> {
+        self.dma_handler.as_deref()
     }
 }
 
@@ -1037,7 +1025,7 @@ impl PciDevice for VirtioPciDevice {
             let bar = PciBarConfiguration::default()
                 .set_index(VIRTIO_SHM_BAR_INDEX)
                 .set_address(shm_list.addr.raw_value())
-                .set_size(shm_list.len);
+                .set_size(shm_list.mapping.size() as _);
 
             // The creation of the PCI BAR and its associated capabilities must
             // happen only during the creation of a brand new VM. When a VM is
@@ -1182,7 +1170,7 @@ impl PciDevice for VirtioPciDevice {
                 }
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
-                error!("Unexpected write to notification BAR: offset = 0x{:x}", o);
+                error!("Unexpected write to notification BAR: offset = 0x{o:x}");
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
@@ -1201,7 +1189,7 @@ impl PciDevice for VirtioPciDevice {
                 }
             }
             _ => (),
-        };
+        }
 
         // Try and activate the device if the driver status has changed
         if self.needs_activation() {
@@ -1249,7 +1237,7 @@ impl PciDevice for VirtioPciDevice {
 
 impl BusDevice for VirtioPciDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

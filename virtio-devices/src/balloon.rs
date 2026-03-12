@@ -22,6 +22,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -163,7 +165,7 @@ struct BalloonEpollHandler {
 impl BalloonEpollHandler {
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), Error> {
         self.interrupt_cb.trigger(int_type).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
+            error!("Failed to signal used queue: {e:?}");
             Error::FailedSignal(e)
         })
     }
@@ -174,12 +176,15 @@ impl BalloonEpollHandler {
         range_len: usize,
         advice: libc::c_int,
     ) -> result::Result<(), Error> {
-        let hva = memory
-            .get_host_address(range_base)
+        let slice = memory
+            .get_slice(range_base, range_len)
             .map_err(Error::GuestMemory)?;
+        assert!(slice.len() >= range_len);
         let res =
-            // SAFETY: Need unsafe to do syscall madvise
-            unsafe { libc::madvise(hva as *mut libc::c_void, range_len as libc::size_t, advice) };
+            // SAFETY: FFI call with valid arguments, guaranteed by VolatileSlice
+            unsafe {
+                libc::madvise(slice.ptr_guard_mut().as_ptr() as *mut libc::c_void,
+                range_len as libc::size_t, advice) };
         if res != 0 {
             return Err(Error::MadviseFail(io::Error::last_os_error()));
         }
@@ -337,8 +342,8 @@ impl BalloonEpollHandler {
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
@@ -363,28 +368,24 @@ impl EpollHelperHandler for BalloonEpollHandler {
             INFLATE_QUEUE_EVENT => {
                 self.inflate_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get inflate queue event: {:?}",
-                        e
+                        "Failed to get inflate queue event: {e:?}"
                     ))
                 })?;
                 self.process_queue(0).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used inflate queue: {:?}",
-                        e
+                        "Failed to signal used inflate queue: {e:?}"
                     ))
                 })?;
             }
             DEFLATE_QUEUE_EVENT => {
                 self.deflate_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get deflate queue event: {:?}",
-                        e
+                        "Failed to get deflate queue event: {e:?}"
                     ))
                 })?;
                 self.process_queue(1).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used deflate queue: {:?}",
-                        e
+                        "Failed to signal used deflate queue: {e:?}"
                     ))
                 })?;
             }
@@ -392,14 +393,12 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
                     reporting_queue_evt.read().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to get reporting queue event: {:?}",
-                            e
+                            "Failed to get reporting queue event: {e:?}"
                         ))
                     })?;
                     self.process_reporting_queue(2).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used inflate queue: {:?}",
-                            e
+                            "Failed to signal used inflate queue: {e:?}"
                         ))
                     })?;
                 } else {
@@ -450,7 +449,7 @@ impl Balloon {
         let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-balloon {}", id);
+            info!("Restoring virtio-balloon {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -552,7 +551,7 @@ impl VirtioDevice for Balloon {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -597,7 +596,7 @@ impl VirtioDevice for Balloon {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut virtqueues = Vec::new();
@@ -640,7 +639,7 @@ impl VirtioDevice for Balloon {
             Thread::VirtioBalloon,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 

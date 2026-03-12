@@ -18,6 +18,12 @@ pub enum DiskFileError {
     /// Failed creating a new AsyncIo.
     #[error("Failed creating a new AsyncIo")]
     NewAsyncIo(#[source] std::io::Error),
+    /// Unsupported operation.
+    #[error("Unsupported operation")]
+    Unsupported,
+    /// Resize failed
+    #[error("Resize failed")]
+    ResizeError(#[source] std::io::Error),
 }
 
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
@@ -56,11 +62,34 @@ impl AsRawFd for BorrowedDiskFd<'_> {
 /// This allows abstracting over raw image formats as well as structured
 /// image formats.
 pub trait DiskFile: Send {
-    fn size(&mut self) -> DiskFileResult<u64>;
+    /// Returns the logical disk size a guest will see.
+    ///
+    /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
+    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
+    /// effective size that the guest will see.
+    fn logical_size(&mut self) -> DiskFileResult<u64>;
+    /// Returns the physical size of the underlying file.
+    fn physical_size(&mut self) -> DiskFileResult<u64>;
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
     fn topology(&mut self) -> DiskTopology {
         DiskTopology::default()
     }
+    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
+        Err(DiskFileError::Unsupported)
+    }
+
+    /// Indicates support for sparse operations (punch hole, write zeroes, discard).
+    /// Override to return true when supported.
+    fn supports_sparse_operations(&self) -> bool {
+        false
+    }
+
+    /// Indicates support for zero flag optimization in WRITE_ZEROES. Override
+    /// to return true when supported.
+    fn supports_zero_flag(&self) -> bool {
+        false
+    }
+
     /// Returns the file descriptor of the underlying disk image file.
     ///
     /// The file descriptor is supposed to be used for `fcntl()` calls but no
@@ -79,8 +108,14 @@ pub enum AsyncIoError {
     /// Failed synchronizing file.
     #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
+    /// Failed punching hole.
+    #[error("Failed punching hole")]
+    PunchHole(#[source] std::io::Error),
+    /// Failed writing zeroes.
+    #[error("Failed writing zeroes")]
+    WriteZeroes(#[source] std::io::Error),
     /// Failed submitting batch requests.
-    #[error("Failed submitting batch requests: {0}")]
+    #[error("Failed submitting batch requests")]
     SubmitBatchRequests(#[source] std::io::Error),
 }
 
@@ -101,6 +136,8 @@ pub trait AsyncIo: Send {
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
     fn next_completed_request(&mut self) -> Option<(u64, i32)>;
     fn batch_requests_enabled(&self) -> bool {
         false

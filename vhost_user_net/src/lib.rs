@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{io, process};
 
 use libc::EFD_NONBLOCK;
-use log::*;
+use log::error;
 use net_util::{
     MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, open_tap,
 };
@@ -228,7 +228,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
                 {
                     vring
                         .signal_used_queue()
-                        .map_err(Error::FailedSignalingUsedQueue)?
+                        .map_err(Error::FailedSignalingUsedQueue)?;
                 }
             }
             3 => {
@@ -240,7 +240,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
                 {
                     vring
                         .signal_used_queue()
-                        .map_err(Error::FailedSignalingUsedQueue)?
+                        .map_err(Error::FailedSignalingUsedQueue)?;
                 }
             }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
@@ -396,20 +396,17 @@ pub fn start_net_backend(backend_command: &str) {
     } else {
         net_daemon.start(Listener::new(&backend_config.socket, true).unwrap())
     } {
-        error!(
-            "failed to start daemon for vhost-user-net with error: {:?}",
-            e
-        );
+        error!("failed to start daemon for vhost-user-net with error: {e:?}");
         process::exit(1);
     }
 
     if let Err(e) = net_daemon.wait() {
-        error!("Error from the main thread: {:?}", e);
+        error!("Error from the main thread: {e:?}");
     }
 
     for thread in net_backend.read().unwrap().threads.iter() {
         if let Err(e) = thread.lock().unwrap().kill_evt.write(1) {
-            error!("Error shutting down worker thread: {:?}", e)
+            error!("Error shutting down worker thread: {e:?}");
         }
     }
 }

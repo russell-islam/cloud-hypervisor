@@ -1,9 +1,33 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1009,SC2048,SC2086,SC1073,SC1040,SC1072
+# shellcheck source=/dev/null
 set -x
 
 hypervisor="kvm"
 test_filter=""
 build_kernel=false
+
+# Download from a url with retries
+# Args:
+#   $1: URL
+#   $2: Maximum number of retries (optional), default 3
+#   $3: Delays between retries in seconds (optional), default 5
+download_with_retries() {
+    local URL="$1"
+    local MAX_RETRIES="${2:-3}"
+    local RETRY_DELAY="${3:-5}"
+    local i
+
+    for i in $(seq 1 "$MAX_RETRIES"); do
+        echo "Attempt $i/$MAX_RETRIES: downloading $url"
+        time wget -N --quiet "$URL" && return 0
+        echo "Warning: wget failed on attempt $i. Retrying in ${RETRY_DELAY}s..." >&2
+        sleep "$RETRY_DELAY"
+    done
+
+    echo "ERROR: Failed to download $url after $MAX_RETRIES attempts." >&2
+    return 1
+}
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
@@ -49,7 +73,7 @@ checkout_repo() {
 build_custom_linux() {
     ARCH=$(uname -m)
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-6.12.8"
+    LINUX_CUSTOM_BRANCH="ch-6.16.9"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
@@ -133,26 +157,14 @@ download_hypervisor_fw() {
             grep "browser_download_url" | grep -oP '"https://[^"]*hypervisor-fw"' | sed -e 's/^"//' -e 's/"$//')
     fi
     FW="$WORKLOADS_DIR/hypervisor-fw"
-    if [ ! -f $FW ]; then
-        if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
-            echo "Using authenticated download from GitHub"
-            FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
-                    --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
-                    --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
-        else
-            echo "Using anonymous download from GitHub"
-            FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
-        fi
-        pushd $WORKLOADS_DIR
-        time wget --quiet $FW_URL || exit 1
-        popd
-    else
-        echo "File already exist: $FW"
-    fi
+    pushd "$WORKLOADS_DIR" || exit
+    rm -f "$FW"
+    download_with_retries "$FW_URL" || exit 1
+    popd || exit
 }
 
 download_linux() {
-    KERNEL_TAG="ch-release-v6.12.8-20250613"
+    KERNEL_TAG="ch-release-v6.16.9-20251112"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
@@ -164,7 +176,7 @@ download_linux() {
     fi
     pushd "$WORKLOADS_DIR" || exit
     for url in $KERNEL_URLS; do
-        wget -N --quiet "$url" || exit 1
+        download_with_retries "$url" || exit 1
     done
 
     popd || exit
@@ -183,17 +195,13 @@ prepare_linux() {
 }
 
 download_ovmf() {
+    OVMF_FW_TAG="ch-a54f262b09"
+    OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
-    if [ ! -f $OVMF_FW ]; then
-        OVMF_FW_TAG="ch-6624aa331f"
-        OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
-        pushd $WORKLOADS_DIR
-        rm -f $OVMF_FW
-        time wget --quiet $OVMF_FW_URL || exit 1
-        popd
-    else
-        echo "File already exist: $OVMF_FW"
-    fi
+    pushd "$WORKLOADS_DIR" || exit
+    rm -f "$OVMF_FW"
+    download_with_retries $OVMF_FW_URL || exit 1
+    popd || exit
 }
 
 # Function to mount image partition, execute commands, and cleanup.
@@ -206,7 +214,7 @@ mount_and_exec() {
     local COMMAND_STATUS=0
 
     # Cleanup function to unmount and detach loop device
-    # shellcheck disable=SC2317
+    # shellcheck disable=SC2317,SC2329
     cleanup() {
         if [ -n "$MOUNT_DIR" ]; then
             echo "Cleanup: Unmounting $MOUNT_DIR..." >&2
@@ -294,4 +302,41 @@ copy_to_image() {
 
     mount_and_exec "$IMG" "$MOUNT_DIR" /bin/bash -c "$COPY_COMMAND"
     return $?
+}
+
+# Download x86 guest images (Focal and Jammy)
+download_x86_guest_images() {
+    FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
+    FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
+    FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
+    if [ ! -f "$FOCAL_OS_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
+        popd || exit
+    fi
+
+    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
+    FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
+    if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
+        popd || exit
+    fi
+
+    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+    JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
+    JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
+        popd || exit
+    fi
+
+    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+        popd || exit
+    fi
 }

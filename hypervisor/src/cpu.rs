@@ -10,12 +10,9 @@
 //
 //
 
-#[cfg(target_arch = "aarch64")]
-use std::sync::Arc;
-
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
-use vm_memory::GuestAddress;
+use {anyhow::anyhow, vm_memory::GuestAddress};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
@@ -334,6 +331,10 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to inject NMI")]
     Nmi(#[source] anyhow::Error),
+    #[error("Failed to get nested guest state")]
+    GetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set nested guest state")]
+    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -469,7 +470,7 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_set_processor_features(
         &self,
-        vm: &Arc<dyn crate::Vm>,
+        vm: &dyn crate::Vm,
         kvi: &mut VcpuInit,
         id: u32,
     ) -> Result<()>;
@@ -522,7 +523,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError>;
+    fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Translate guest virtual address to guest physical address
@@ -538,7 +539,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Set the "immediate_exit" state
     ///
-    fn set_immediate_exit(&self, _exit: bool) {}
+    fn set_immediate_exit(&mut self, _exit: bool) {}
     #[cfg(feature = "tdx")]
     ///
     /// Returns the details about TDX exit reason
@@ -557,7 +558,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> Vec<MsrEntry>;
+    fn boot_msr_entries(&self) -> &'static [MsrEntry];
 
     #[cfg(target_arch = "x86_64")]
     ///

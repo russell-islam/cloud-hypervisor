@@ -10,7 +10,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::SerialBuffer;
@@ -217,7 +219,7 @@ impl ConsoleEpollHandler {
                 .write_slice(
                     &source_slice[..],
                     desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                 )
                 .map_err(Error::GuestMemoryWrite)?;
 
@@ -253,7 +255,7 @@ impl ConsoleEpollHandler {
                     .memory()
                     .write_volatile_to(
                         desc.addr()
-                            .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                            .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                         &mut buf,
                         desc.len() as usize,
                     )
@@ -275,15 +277,15 @@ impl ConsoleEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.input_queue_evt.as_raw_fd(), INPUT_QUEUE_EVENT)?;
@@ -328,7 +330,7 @@ impl ConsoleEpollHandler {
             }
             pty_write_out.store(true, Ordering::Release);
             out.flush()
-                .map_err(|e| anyhow!("Failed to flush PTY: {:?}", e))
+                .map_err(|e| anyhow!("Failed to flush PTY: {e:?}"))
         } else {
             Ok(())
         }
@@ -365,52 +367,39 @@ impl EpollHelperHandler for ConsoleEpollHandler {
         match ev_type {
             INPUT_QUEUE_EVENT => {
                 self.input_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
                 let needs_notification = self.process_input_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process input queue : {:?}",
-                        e
-                    ))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process input queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             OUTPUT_QUEUE_EVENT => {
                 self.output_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
                 let needs_notification = self.process_output_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process output queue : {:?}",
-                        e
-                    ))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process output queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue(1).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             CONFIG_EVENT => {
                 self.config_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get config event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get config event: {e:?}"))
                 })?;
                 self.interrupt_cb
                     .trigger(VirtioInterruptType::Config)
                     .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal console driver: {:?}",
-                            e
+                            "Failed to signal console driver: {e:?}"
                         ))
                     })?;
             }
@@ -420,10 +409,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     .unwrap()
                     .read_exact(&mut [0])
                     .map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to get resize event: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {e:?}"))
                     })?;
                 self.resizer.update_console_size();
             }
@@ -438,15 +424,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
 
                         let needs_notification = self.process_input_queue().map_err(|e| {
                             EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to process input queue : {:?}",
-                                e
+                                "Failed to process input queue : {e:?}"
                             ))
                         })?;
                         if needs_notification {
                             self.signal_used_queue(0).map_err(|e| {
                                 EpollHelperError::HandleEvent(anyhow!(
-                                    "Failed to signal used queue: {:?}",
-                                    e
+                                    "Failed to signal used queue: {e:?}"
                                 ))
                             })?;
                         }
@@ -614,7 +598,7 @@ impl Console {
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
         let (avail_features, acked_features, config, in_buffer, paused) = if let Some(state) = state
         {
-            info!("Restoring virtio-console {}", id);
+            info!("Restoring virtio-console {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -712,7 +696,7 @@ impl VirtioDevice for Console {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -725,7 +709,7 @@ impl VirtioDevice for Console {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.resizer
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
@@ -733,7 +717,7 @@ impl VirtioDevice for Console {
         if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE)
             && let Err(e) = interrupt_cb.trigger(VirtioInterruptType::Config)
         {
-            error!("Failed to signal console driver: {:?}", e);
+            error!("Failed to signal console driver: {e:?}");
         }
 
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
@@ -768,7 +752,7 @@ impl VirtioDevice for Console {
             Thread::VirtioConsole,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
 
         self.common.epoll_threads = Some(epoll_threads);
@@ -784,7 +768,7 @@ impl VirtioDevice for Console {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

@@ -29,6 +29,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+use log::{error, info};
 use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 
@@ -223,11 +224,11 @@ impl MultiThreadBase for GdbStub {
                 Ok(())
             }
             Ok(s) => {
-                error!("Unexpected response for ReadRegs: {:?}", s);
+                error!("Unexpected response for ReadRegs: {s:?}");
                 Err(TargetError::NonFatal)
             }
             Err(e) => {
-                error!("Failed to request ReadRegs: {:?}", e);
+                error!("Failed to request ReadRegs: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -244,7 +245,7 @@ impl MultiThreadBase for GdbStub {
         ) {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("Failed to request WriteRegs: {:?}", e);
+                error!("Failed to request WriteRegs: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -267,11 +268,11 @@ impl MultiThreadBase for GdbStub {
                 Ok(std::cmp::min(data.len(), r.len()))
             }
             Ok(s) => {
-                error!("Unexpected response for ReadMem: {:?}", s);
+                error!("Unexpected response for ReadMem: {s:?}");
                 Err(TargetError::NonFatal)
             }
             Err(e) => {
-                error!("Failed to request ReadMem: {:?}", e);
+                error!("Failed to request ReadMem: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -289,7 +290,7 @@ impl MultiThreadBase for GdbStub {
         ) {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("Failed to request WriteMem: {:?}", e);
+                error!("Failed to request WriteMem: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -414,7 +415,7 @@ impl HwBreakpoint for GdbStub {
         match self.vm_request(payload, 0) {
             Ok(_) => Ok(true),
             Err(e) => {
-                error!("Failed to request SetHwBreakPoint: {:?}", e);
+                error!("Failed to request SetHwBreakPoint: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -433,7 +434,7 @@ impl HwBreakpoint for GdbStub {
         match self.vm_request(payload, 0) {
             Ok(_) => Ok(true),
             Err(e) => {
-                error!("Failed to request SetHwBreakPoint: {:?}", e);
+                error!("Failed to request SetHwBreakPoint: {e:?}");
                 Err(TargetError::NonFatal)
             }
         }
@@ -498,7 +499,7 @@ impl run_blocking::BlockingEventLoop for GdbEventLoop {
         target
             .vm_request(GdbRequestPayload::Pause, 0)
             .map_err(|e| {
-                error!("Failed to pause the target: {:?}", e);
+                error!("Failed to pause the target: {e:?}");
                 "Failed to pause the target"
             })?;
         Ok(Some(MultiThreadStopReason::Signal(Signal::SIGINT)))
@@ -509,7 +510,7 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
     let listener = match UnixListener::bind(path) {
         Ok(s) => s,
         Err(e) => {
-            error!("Failed to create a Unix domain socket listener: {}", e);
+            error!("Failed to create a Unix domain socket listener: {e}");
             return;
         }
     };
@@ -518,11 +519,11 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
     let (stream, addr) = match listener.accept() {
         Ok(v) => v,
         Err(e) => {
-            error!("Failed to accept a connection from GDB: {}", e);
+            error!("Failed to accept a connection from GDB: {e}");
             return;
         }
     };
-    info!("GDB connected from {:?}", addr);
+    info!("GDB connected from {addr:?}");
 
     let connection: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(stream);
     let gdb = gdbstub::stub::GdbStub::new(connection);
@@ -533,17 +534,17 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
                 info!("GDB client has disconnected. Running...");
 
                 if let Err(e) = gdbstub.vm_request(GdbRequestPayload::SetSingleStep(false), 0) {
-                    error!("Failed to disable single step: {:?}", e);
+                    error!("Failed to disable single step: {e:?}");
                 }
 
                 if let Err(e) =
                     gdbstub.vm_request(GdbRequestPayload::SetHwBreakPoint(Vec::new()), 0)
                 {
-                    error!("Failed to remove breakpoints: {:?}", e);
+                    error!("Failed to remove breakpoints: {e:?}");
                 }
 
                 if let Err(e) = gdbstub.vm_request(GdbRequestPayload::Resume, 0) {
-                    error!("Failed to resume the VM: {:?}", e);
+                    error!("Failed to resume the VM: {e:?}");
                 }
             }
             _ => {
@@ -551,7 +552,7 @@ pub fn gdb_thread(mut gdbstub: GdbStub, path: &std::path::Path) {
             }
         },
         Err(e) => {
-            error!("error occurred in GDB session: {}", e);
+            error!("error occurred in GDB session: {e}");
         }
     }
 }

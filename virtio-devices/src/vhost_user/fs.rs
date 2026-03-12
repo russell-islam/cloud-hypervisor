@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, thread};
 
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serde_with::{Bytes, serde_as};
@@ -109,7 +111,7 @@ impl Fs {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-fs {}", id);
+            info!("Restoring vhost-user-fs {id}");
 
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
@@ -148,8 +150,7 @@ impl Fs {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-fs requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -230,7 +231,7 @@ impl Drop for Fs {
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -253,7 +254,7 @@ impl VirtioDevice for Fs {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -266,7 +267,7 @@ impl VirtioDevice for Fs {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
@@ -276,7 +277,7 @@ impl VirtioDevice for Fs {
 
         let mut handler = self.vu_common.activate(
             mem,
-            queues,
+            &queues,
             interrupt_cb,
             self.common.acked_features,
             backend_req_handler,
@@ -294,7 +295,7 @@ impl VirtioDevice for Fs {
             Thread::VirtioVhostFs,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 
@@ -311,7 +312,7 @@ impl VirtioDevice for Fs {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 
@@ -327,7 +328,7 @@ impl VirtioDevice for Fs {
     }
 
     fn shutdown(&mut self) {
-        self.vu_common.shutdown()
+        self.vu_common.shutdown();
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
@@ -357,12 +358,11 @@ impl VirtioDevice for Fs {
         let mut mappings = Vec::new();
         if let Some(cache) = self.cache.as_ref() {
             mappings.push(UserspaceMapping {
-                host_addr: cache.0.host_addr,
                 mem_slot: cache.0.mem_slot,
                 addr: cache.0.addr,
-                len: cache.0.len,
+                mapping: cache.0.mapping.clone(),
                 mergeable: false,
-            })
+            });
         }
 
         mappings

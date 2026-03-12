@@ -108,6 +108,10 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
+    fn vm_resize_disk(&mut self, _: String, _: u64) -> Result<(), VmError> {
+        Ok(())
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn vm_coredump(&mut self, _: &str) -> Result<(), VmError> {
         Ok(())
@@ -132,7 +136,7 @@ impl RequestHandler for StubApiRequestHandler {
                     max_phys_bits: 46,
                     affinity: None,
                     features: CpuFeatures::default(),
-                    nested: Some(false),
+                    nested: true,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,

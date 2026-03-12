@@ -7,6 +7,7 @@ use std::io;
 use std::sync::Arc;
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
@@ -142,8 +143,9 @@ impl MsiCap {
                 let value = LittleEndian::read_u16(data);
                 match offset {
                     MSI_MSG_CTL_OFFSET => {
-                        self.msg_ctl = (self.msg_ctl & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
-                            | (value & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
+                        self.msg_ctl = (self.msg_ctl
+                            & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
+                            | (value & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE));
                     }
                     x if x == msg_data_offset => self.msg_data = value,
                     _ => error!("invalid offset"),
@@ -153,16 +155,17 @@ impl MsiCap {
                 let value = LittleEndian::read_u32(data);
                 match offset {
                     0x0 => {
-                        self.msg_ctl = (self.msg_ctl & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
-                            | ((value >> 16) as u16 & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
+                        self.msg_ctl = (self.msg_ctl
+                            & !(MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE))
+                            | ((value >> 16) as u16 & (MSI_CTL_ENABLE | MSI_CTL_MULTI_MSG_ENABLE));
                     }
                     MSI_MSG_ADDR_LO_OFFSET => self.msg_addr_lo = value & MSI_MSG_ADDR_LO_MASK,
                     x if x == msg_data_offset => self.msg_data = value as u16,
                     x if addr_hi_offset.is_some() && x == addr_hi_offset.unwrap() => {
-                        self.msg_addr_hi = value
+                        self.msg_addr_hi = value;
                     }
                     x if mask_bits_offset.is_some() && x == mask_bits_offset.unwrap() => {
-                        self.mask_bits = value
+                        self.mask_bits = value;
                     }
                     _ => error!("invalid offset"),
                 }
@@ -267,15 +270,15 @@ impl MsiConfig {
                     self.cap.vector_masked(idx),
                     true,
                 ) {
-                    error!("Failed updating vector: {:?}", e);
+                    error!("Failed updating vector: {e:?}");
                 }
             }
 
             if !old_enabled && let Err(e) = self.interrupt_source_group.enable() {
-                error!("Failed enabling irq_fd: {:?}", e);
+                error!("Failed enabling irq_fd: {e:?}");
             }
         } else if old_enabled && let Err(e) = self.interrupt_source_group.disable() {
-            error!("Failed disabling irq_fd: {:?}", e);
+            error!("Failed disabling irq_fd: {e:?}");
         }
     }
 }

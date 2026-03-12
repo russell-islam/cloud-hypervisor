@@ -1,6 +1,6 @@
 # GDB Support
 
-This feature allows remote guest debugging using GDB. Note that this feature is only supported on x86_64/KVM.
+This feature allows remote guest debugging using GDB. Note that this feature is supported on x86_64 and aarch64 with KVM.
 
 To enable debugging with GDB, build with the `guest_debug` feature enabled:
 
@@ -8,7 +8,7 @@ To enable debugging with GDB, build with the `guest_debug` feature enabled:
 cargo build --features guest_debug
 ```
 
-To use the `--gdb` option, specify the Unix Domain Socket with `--path` that Cloud Hypervisor will use to communicate with the host's GDB:
+To use the `--gdb` option, specify the Unix Domain Socket with `path` that Cloud Hypervisor will use to communicate with the host's GDB:
 
 ```bash
 ./cloud-hypervisor \

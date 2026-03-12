@@ -65,6 +65,8 @@ enum Error {
     ReadingStdin(#[source] std::io::Error),
     #[error("Error reading from file")]
     ReadingFile(#[source] std::io::Error),
+    #[error("Invalid disk size")]
+    InvalidDiskSize(#[source] ByteSizedParseError),
 }
 
 enum TargetApi<'a> {
@@ -320,6 +322,22 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
             )?;
             simple_api_command(socket, "PUT", "resize", Some(&resize)).map_err(Error::HttpApiClient)
         }
+        Some("resize-disk") => {
+            let resize_disk = resize_disk_config(
+                matches
+                    .subcommand_matches("resize-disk")
+                    .unwrap()
+                    .get_one::<String>("disk")
+                    .unwrap(),
+                matches
+                    .subcommand_matches("resize-disk")
+                    .unwrap()
+                    .get_one::<String>("size")
+                    .unwrap(),
+            )?;
+            simple_api_command(socket, "PUT", "resize-disk", Some(&resize_disk))
+                .map_err(Error::HttpApiClient)
+        }
         Some("resize-zone") => {
             let resize_zone = resize_zone_config(
                 matches
@@ -399,7 +417,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("net_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("add-user-device") => {
@@ -454,7 +472,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("restore_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("coredump") => {
@@ -762,6 +780,15 @@ fn resize_config(
     Ok(serde_json::to_string(&resize).unwrap())
 }
 
+fn resize_disk_config(id: &str, size: &str) -> Result<String, Error> {
+    let resize_disk = vmm::api::VmResizeDiskData {
+        id: id.to_owned(),
+        desired_size: size.parse::<ByteSized>().map_err(Error::InvalidDiskSize)?.0,
+    };
+
+    Ok(serde_json::to_string(&resize_disk).unwrap())
+}
+
 fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     let resize_zone = vmm::api::VmResizeZoneData {
         id: id.to_owned(),
@@ -1022,6 +1049,20 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .help("New memory size in bytes (supports K/M/G suffix)")
                     .num_args(1),
             ),
+        Command::new("resize-disk")
+            .about("Resize an attached disk")
+            .arg(
+                Arg::new("disk")
+                    .long("disk")
+                    .help("Disk identifier")
+                    .num_args(1),
+            )
+            .arg(
+                Arg::new("size")
+                    .long("size")
+                    .help("New disk size")
+                    .num_args(1),
+            ),
         Command::new("resize-zone")
             .about("Resize a memory zone")
             .arg(
@@ -1137,6 +1178,7 @@ fn main() {
 
     if let Err(top_error) = target_api.do_command(&matches) {
         // Helper to join strings with a newline.
+        #[allow(clippy::needless_pass_by_value)]
         fn join_strs(mut acc: String, next: String) -> String {
             if !acc.is_empty() {
                 acc.push('\n');
@@ -1161,7 +1203,7 @@ fn main() {
             if let Some(api_client::Error::ServerResponse(status_code, body)) =
                 error.downcast_ref::<api_client::Error>()
             {
-                let body = body.as_ref().map(|body| body.as_str()).unwrap_or("");
+                let body = body.as_ref().map_or("", |body| body.as_str());
 
                 // Retrieve the list of error messages back.
                 let lines: Vec<&str> = match serde_json::from_str(body) {
@@ -1201,11 +1243,11 @@ fn main() {
             server_api_error_display_modifier,
         );
         process::exit(1)
-    };
+    }
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::cmp::Ordering;
 
     use super::*;

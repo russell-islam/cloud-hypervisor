@@ -47,7 +47,6 @@ use crate::mshv::aarch64::gic::{
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{HypervisorType, HypervisorVmConfig, cpu, hypervisor, vec_with_array_field};
-
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
@@ -90,34 +89,9 @@ use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, USER_MEMORY_REGION_ADJUSTABLE,
-    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-    UserMemoryRegion,
-};
+use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState};
 
 pub const PAGE_SHIFT: usize = 12;
-
-impl From<mshv_user_mem_region> for UserMemoryRegion {
-    fn from(region: mshv_user_mem_region) -> Self {
-        let mut flags: u32 = USER_MEMORY_REGION_READ | USER_MEMORY_REGION_ADJUSTABLE;
-        if region.flags & (1 << MSHV_SET_MEM_BIT_WRITABLE) != 0 {
-            flags |= USER_MEMORY_REGION_WRITE;
-        }
-        if region.flags & (1 << MSHV_SET_MEM_BIT_EXECUTABLE) != 0 {
-            flags |= USER_MEMORY_REGION_EXECUTE;
-        }
-
-        UserMemoryRegion {
-            guest_phys_addr: (region.guest_pfn << PAGE_SHIFT as u64)
-                + (region.userspace_addr & ((1 << PAGE_SHIFT) - 1)),
-            memory_size: region.size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            ..Default::default()
-        }
-    }
-}
 
 #[cfg(target_arch = "x86_64")]
 impl From<MshvClockData> for ClockData {
@@ -134,26 +108,6 @@ impl From<ClockData> for MshvClockData {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => unreachable!("MSHV clock data is not valid"),
-        }
-    }
-}
-
-impl From<UserMemoryRegion> for mshv_user_mem_region {
-    fn from(region: UserMemoryRegion) -> Self {
-        let mut flags: u8 = 0;
-        if region.flags & USER_MEMORY_REGION_WRITE != 0 {
-            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
-        }
-        if region.flags & USER_MEMORY_REGION_EXECUTE != 0 {
-            flags |= 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
-        }
-
-        mshv_user_mem_region {
-            guest_pfn: region.guest_phys_addr >> PAGE_SHIFT,
-            size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            ..Default::default()
         }
     }
 }
@@ -301,7 +255,7 @@ impl MshvHypervisor {
 ///
 /// ```
 /// use hypervisor::mshv::MshvHypervisor;
-/// use hypervisor::HypervisorVmConfig;
+/// # use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
@@ -318,7 +272,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// # Examples
     ///
     /// ```
-    /// # extern crate hypervisor;
     /// use hypervisor::mshv::MshvHypervisor;
     /// use hypervisor::mshv::MshvVm;
     /// use hypervisor::HypervisorVmConfig;
@@ -350,7 +303,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             {
                 // Modify create_args based on user configuration
                 // For now we only handle nested virtualization, but more features can be added here
-                if _config.nested_enabled {
+                if _config.nested {
                     create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
                     disable_proc_features
                         .__bindgen_anon_1
@@ -381,20 +334,17 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                         // ioctl has been interrupted, we have to retry as
                         // this can't be considered as a regular error.
                         continue;
-                    } else {
-                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
                     }
+                    return Err(hypervisor::HypervisorError::VmCreate(e.into()));
                 }
             }
             break;
         }
-
         fd.set_partition_property(
             hv_partition_property_code_HV_PARTITION_PROPERTY_SYNTHETIC_PROC_FEATURES,
             synthetic_features_mask,
         )
         .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
         let vm_fd = Arc::new(fd);
 
         #[cfg(target_arch = "x86_64")]
@@ -654,7 +604,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[allow(non_upper_case_globals)]
-    fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
@@ -755,7 +705,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
 
-                    debug!("Unmapped GPA exit: GVA {:x} GPA {:x}", gva, gpa);
+                    debug!("Unmapped GPA exit: GVA {gva:x} GPA {gpa:x}");
 
                     let context = MshvEmulatorContext {
                         vcpu: self,
@@ -789,27 +739,32 @@ impl cpu::Vcpu for MshvVcpu {
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
 
-                    debug!("Exit ({:?}) GVA {:x} GPA {:x}", msg_type, gva, gpa);
+                    debug!("Exit ({msg_type:?}) GVA {gva:x} GPA {gpa:x}");
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
                         map: (gva, gpa),
                     };
 
+                    let old_state = context
+                        .cpu_state(self.vp_index as usize)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
                     // Create a new emulator.
                     let mut emul = Emulator::new(&mut context);
 
                     // Emulate the trapped instruction, and only the first one.
                     let new_state = emul
-                        .emulate_first_insn(
-                            self.vp_index as usize,
+                        .emulate_insn_stream(
+                            &old_state,
                             &info.instruction_bytes[..insn_len],
+                            Some(1),
                         )
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     // Set CPU state back.
                     context
-                        .set_cpu_state(self.vp_index as usize, new_state)
+                        .update_cpu_state(self.vp_index as usize, old_state, new_state)
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     Ok(cpu::VmExit::Ignore)
@@ -827,8 +782,7 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(num_ranges >= 1);
                     if num_ranges > 1 {
                         return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                            "Unhandled VCPU exit(GPA_ATTRIBUTE_INTERCEPT): Expected num_ranges to be 1 but found num_ranges {:?}",
-                            num_ranges
+                            "Unhandled VCPU exit(GPA_ATTRIBUTE_INTERCEPT): Expected num_ranges to be 1 but found num_ranges {num_ranges:?}"
                         )));
                     }
 
@@ -836,16 +790,15 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+
+                    // Update the bitmap(cache) to mark the pages as host inaccessible
                     self.host_access_pages.rcu(|bitmap| {
                         let bm = bitmap.clone();
                         bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
                         bm
                     });
 
-                    debug!(
-                        "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
-                        gfn_start, gfn_count
-                    );
+                    debug!("Releasing pages: gfn_start: {gfn_start:x?}, gfn_count: {gfn_count:?}");
                     let gpa_start = gfn_start * HV_PAGE_SIZE as u64;
                     for i in 0..gfn_count {
                         gpas.push(gpa_start + i * HV_PAGE_SIZE as u64);
@@ -874,7 +827,7 @@ impl cpu::Vcpu for MshvVcpu {
                     self.vm_fd
                         .modify_gpa_host_access(&gpa_list[0])
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
+                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access {e}"
                         )))?;
                     // Guest is revoking the shared access, so we need to update the bitmap
                     self.host_access_pages.rcu(|_bitmap| {
@@ -891,9 +844,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let gpa = info.guest_physical_address;
 
                     Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                        "Unhandled VCPU exit: Unaccepted GPA({:x}) found at GVA({:x})",
-                        gpa,
-                        gva,
+                        "Unhandled VCPU exit: Unaccepted GPA({gpa:x}) found at GVA({gva:x})",
                     )))
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -949,7 +900,19 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
 
                     match ghcb_op {
-                        GHCB_INFO_SPECIAL_DBGPRINT => {}
+                        GHCB_INFO_SPECIAL_DBGPRINT => {
+                            // Handle debug print from guest
+                            // The guest sends a character to print via GHCB data
+                            // Sample debug print implementation that only prints ASCII characters and ignores the rest
+                            // let char_to_print = (ghcb_data & 0xFF) as u8;
+                            // if char_to_print.is_ascii() {
+                            // debug!("'{}'", char_to_print as char);
+                            // }
+                            // Not printing the character to slow down the guest a bit,
+                            // as these debug prints can be very frequent.
+                            // In real implementation, we might want to buffer these characters and
+                            // print them out together or implement some rate limiting.]
+                        }
                         GHCB_INFO_HYP_FEATURE_REQUEST => {
                             // Pre-condition: GHCB data must be zero
                             assert!(ghcb_data == 0);
@@ -962,8 +925,7 @@ impl cpu::Vcpu for MshvVcpu {
                                 << GHCB_INFO_BIT_WIDTH)
                                 as u64;
                             debug!(
-                                "GHCB_INFO_HYP_FEATURE_REQUEST: Supported features: {:0x}",
-                                ghcb_response
+                                "GHCB_INFO_HYP_FEATURE_REQUEST: Supported features: {ghcb_response:0x}"
                             );
                             let arr_reg_name_value =
                                 [(hv_register_name_HV_X64_REGISTER_GHCB, ghcb_response)];
@@ -1239,8 +1201,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                                     debug!(
-                                        "SNP guest request: req_gpa {:0x} rsp_gpa {:0x}",
-                                        req_gpa, rsp_gpa
+                                        "SNP guest request: req_gpa {req_gpa:0x} rsp_gpa {rsp_gpa:0x}"
                                     );
 
                                     set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
@@ -1251,8 +1212,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     let apic_id =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 >> 32;
                                     debug!(
-                                        "SNP AP CREATE REQUEST with VMSA GPA {:0x}, and APIC ID {:?}",
-                                        vmsa_gpa, apic_id
+                                        "SNP AP CREATE REQUEST with VMSA GPA {vmsa_gpa:0x}, and APIC ID {apic_id:?}"
                                     );
 
                                     let mshv_ap_create_req = mshv_sev_snp_ap_create {
@@ -1277,16 +1237,14 @@ impl cpu::Vcpu for MshvVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "Unhandled VCPU exit {:?}",
-                    exit
+                    "Unhandled VCPU exit {exit:?}"
                 ))),
             },
 
             Err(e) => match e.errno() {
                 libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
                 _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "VCPU error {:?}",
-                    e
+                    "VCPU error {e:?}"
                 ))),
             },
         }
@@ -1363,7 +1321,7 @@ impl cpu::Vcpu for MshvVcpu {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_set_processor_features(
         &self,
-        _vm: &Arc<dyn crate::Vm>,
+        _vm: &dyn crate::Vm,
         _kvi: &mut crate::VcpuInit,
         _id: u32,
     ) -> cpu::Result<()> {
@@ -1467,7 +1425,7 @@ impl cpu::Vcpu for MshvVcpu {
         if self.vp_index == 0 {
             self.fd
                 .set_misc_regs(&state.misc)
-                .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?
+                .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?;
         }
         self.fd
             .set_debug_regs(&state.dbg)
@@ -1554,10 +1512,10 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
+    fn boot_msr_entries(&self) -> &'static [MsrEntry] {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
-        [
+        &[
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -1568,7 +1526,6 @@ impl cpu::Vcpu for MshvVcpu {
             msr!(msr_index::MSR_SYSCALL_MASK),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
         ]
-        .to_vec()
     }
 
     ///
@@ -1637,7 +1594,7 @@ impl MshvVcpu {
         // SAFETY: Accessing a union element from bindgen generated bindings.
         let prev_ghcb_gpa = unsafe { reg_assocs[0].value.reg64 };
 
-        debug!("Prev GHCB GPA is {:x}", prev_ghcb_gpa);
+        debug!("Prev GHCB GPA is {prev_ghcb_gpa:x}");
 
         let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
 
@@ -1851,7 +1808,6 @@ impl MshvVm {
 /// # Examples
 ///
 /// ```
-/// extern crate hypervisor;
 /// use hypervisor::mshv::MshvHypervisor;
 /// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
@@ -1916,7 +1872,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
-    ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+    ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
             .fd
@@ -1966,7 +1922,7 @@ impl vm::Vm for MshvVm {
             #[cfg(target_arch = "aarch64")]
             use_hyp_fixed_gic: self.use_hyp_fixed_gic,
         };
-        Ok(Arc::new(vcpu))
+        Ok(Box::new(vcpu))
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2026,8 +1982,36 @@ impl vm::Vm for MshvVm {
     }
 
     /// Creates a guest physical memory region.
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
+    ///
+    /// # Safety
+    ///
+    /// `userspace_addr` must point to `memory_size` bytes of memory
+    /// that will stay mapped until a successful call to
+    /// `remove_user_memory_region().`  Freeing them with `munmap()`
+    /// before then will cause undefined guest behavior but at least
+    /// should not cause undefined behavior in the host.  In theory,
+    /// at least.
+    unsafe fn create_user_memory_region(
+        &self,
+        _slot: u32,
+        guest_phys_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
+        readonly: bool,
+        _log_dirty_pages: bool,
+    ) -> vm::Result<()> {
+        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
+        if !readonly {
+            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
+        }
+
+        let user_memory_region = mshv_user_mem_region {
+            flags,
+            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
+            size: memory_size.try_into().unwrap(),
+            userspace_addr: (userspace_addr as usize).try_into().unwrap(),
+            ..Default::default()
+        };
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
         // but a VM exit happens before setting the dirty bits
@@ -2046,8 +2030,32 @@ impl vm::Vm for MshvVm {
     }
 
     /// Removes a guest physical memory region.
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
+    ///
+    /// # Safety
+    ///
+    /// `userspace_addr` must point to `memory_size` bytes of memory,
+    /// and `add_user_memory_region()` must have been successfully called.
+    unsafe fn remove_user_memory_region(
+        &self,
+        _slot: u32,
+        guest_phys_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
+        readonly: bool,
+        _log_dirty_pages: bool,
+    ) -> vm::Result<()> {
+        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
+        if !readonly {
+            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
+        }
+
+        let user_memory_region = mshv_user_mem_region {
+            flags,
+            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
+            size: memory_size.try_into().unwrap(),
+            userspace_addr: (userspace_addr as usize).try_into().unwrap(),
+            ..Default::default()
+        };
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
             .write()
@@ -2058,30 +2066,6 @@ impl vm::Vm for MshvVm {
             .unmap_user_memory(user_memory_region)
             .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         Ok(())
-    }
-
-    fn make_user_memory_region(
-        &self,
-        _slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-        readonly: bool,
-        _log_dirty_pages: bool,
-    ) -> UserMemoryRegion {
-        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
-        if !readonly {
-            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
-        }
-
-        mshv_user_mem_region {
-            flags,
-            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
-            ..Default::default()
-        }
-        .into()
     }
 
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {
@@ -2319,9 +2303,9 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+    fn create_vgic(&self, config: &VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         let gic_device = MshvGicV2M::new(self, config)
-            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {e:?}")))?;
 
         if self.use_hyp_fixed_gic {
             return Ok(Arc::new(Mutex::new(gic_device)));
@@ -2334,7 +2318,7 @@ impl vm::Vm for MshvVm {
                 gic_device.dist_addr,
             )
             .map_err(|e| {
-                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {e}"))
             })?;
 
         // Register GITS address with the hypervisor
@@ -2345,7 +2329,7 @@ impl vm::Vm for MshvVm {
                 gic_device.gits_addr,
             )
             .map_err(|e| {
-                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {e}"))
             })?;
 
         Ok(Arc::new(Mutex::new(gic_device)))
@@ -2366,8 +2350,7 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| {
                 vm::HypervisorVmError::SetVmProperty(anyhow!(
-                    "Failed to set partition property: {}",
-                    e
+                    "Failed to set partition property: {e}"
                 ))
             })
     }
@@ -2382,8 +2365,7 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| {
                 vm::HypervisorVmError::SetVmProperty(anyhow!(
-                    "Failed to set partition property: {}",
-                    e
+                    "Failed to set partition property: {e}"
                 ))
             })
     }
@@ -2464,8 +2446,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set GIC LPI support: {}",
-                        e
+                        "Failed to set GIC LPI support: {e}",
                     ))
                 })?;
         }
@@ -2479,8 +2460,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set arch timer interrupt ID: {}",
-                        e
+                        "Failed to set arch timer interrupt ID: {e}",
                     ))
                 })?;
         }
@@ -2494,8 +2474,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set PMU interrupt ID: {}",
-                        e
+                        "Failed to set PMU interrupt ID: {e}",
                     ))
                 })?;
         }

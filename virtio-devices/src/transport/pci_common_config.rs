@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
@@ -81,6 +82,8 @@ pub struct VirtioPciCommonConfigState {
 const VRING_DESC_ELEMENT_SIZE: usize = 16;
 const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 const VRING_USED_ELEMENT_SIZE: usize = 8;
+
+#[derive(Copy, Clone)]
 pub enum VringType {
     Desc,
     Avail,
@@ -190,6 +193,7 @@ impl VirtioPciCommonConfig {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn write(
         &mut self,
         offset: u64,
@@ -203,7 +207,12 @@ impl VirtioPciCommonConfig {
             1 => self.write_common_config_byte(offset, data[0]),
             2 => self.write_common_config_word(offset, LittleEndian::read_u16(data), queues),
             4 => {
-                self.write_common_config_dword(offset, LittleEndian::read_u32(data), queues, device)
+                self.write_common_config_dword(
+                    offset,
+                    LittleEndian::read_u32(data),
+                    queues,
+                    device,
+                );
             }
             8 => self.write_common_config_qword(offset, LittleEndian::read_u64(data), queues),
             _ => error!("invalid data length for virtio write: len {}", data.len()),
@@ -211,30 +220,30 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_byte(&self, offset: u64) -> u8 {
-        debug!("read_common_config_byte: offset 0x{:x}", offset);
+        debug!("read_common_config_byte: offset 0x{offset:x}");
         // The driver is only allowed to do aligned, properly sized access.
         match offset {
             0x14 => self.driver_status,
             0x15 => self.config_generation,
             _ => {
-                warn!("invalid virtio config byte read: 0x{:x}", offset);
+                warn!("invalid virtio config byte read: 0x{offset:x}");
                 0
             }
         }
     }
 
     fn write_common_config_byte(&mut self, offset: u64, value: u8) {
-        debug!("write_common_config_byte: offset 0x{:x}", offset);
+        debug!("write_common_config_byte: offset 0x{offset:x}");
         match offset {
             0x14 => self.driver_status = value,
             _ => {
-                warn!("invalid virtio config byte write: 0x{:x}", offset);
+                warn!("invalid virtio config byte write: 0x{offset:x}");
             }
         }
     }
 
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
-        debug!("read_common_config_word: offset 0x{:x}", offset);
+        debug!("read_common_config_word: offset 0x{offset:x}");
         match offset {
             0x10 => self.msix_config.load(Ordering::Acquire),
             0x12 => queues.len() as u16, // num_queues
@@ -244,14 +253,14 @@ impl VirtioPciCommonConfig {
             0x1c => u16::from(self.with_queue(queues, |q| q.ready()).unwrap_or(false)),
             0x1e => self.queue_select, // notify_off
             _ => {
-                warn!("invalid virtio register word read: 0x{:x}", offset);
+                warn!("invalid virtio register word read: 0x{offset:x}");
                 0
             }
         }
     }
 
     fn write_common_config_word(&mut self, offset: u64, value: u16, queues: &mut [Queue]) {
-        debug!("write_common_config_word: offset 0x{:x}", offset);
+        debug!("write_common_config_word: offset 0x{offset:x}");
         match offset {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
@@ -286,13 +295,14 @@ impl VirtioPciCommonConfig {
                 }
             }),
             _ => {
-                warn!("invalid virtio register word write: 0x{:x}", offset);
+                warn!("invalid virtio register word write: 0x{offset:x}");
             }
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn read_common_config_dword(&self, offset: u64, device: Arc<Mutex<dyn VirtioDevice>>) -> u32 {
-        debug!("read_common_config_dword: offset 0x{:x}", offset);
+        debug!("read_common_config_dword: offset 0x{offset:x}");
         match offset {
             0x00 => self.device_feature_select,
             0x04 => {
@@ -307,12 +317,13 @@ impl VirtioPciCommonConfig {
             }
             0x08 => self.driver_feature_select,
             _ => {
-                warn!("invalid virtio register dword read: 0x{:x}", offset);
+                warn!("invalid virtio register dword read: 0x{offset:x}");
                 0
             }
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn write_common_config_dword(
         &mut self,
         offset: u64,
@@ -320,7 +331,7 @@ impl VirtioPciCommonConfig {
         queues: &mut [Queue],
         device: Arc<Mutex<dyn VirtioDevice>>,
     ) {
-        debug!("write_common_config_dword: offset 0x{:x}", offset);
+        debug!("write_common_config_dword: offset 0x{offset:x}");
 
         match offset {
             0x00 => self.device_feature_select = value,
@@ -330,11 +341,6 @@ impl VirtioPciCommonConfig {
                     let mut locked_device = device.lock().unwrap();
                     locked_device
                         .ack_features(u64::from(value) << (self.driver_feature_select * 32));
-                } else {
-                    warn!(
-                        "invalid ack_features (page {}, value 0x{:x})",
-                        self.driver_feature_select, value
-                    );
                 }
             }
             0x20 => self.with_queue_mut(queues, |q| q.set_desc_table_address(Some(value), None)),
@@ -344,18 +350,18 @@ impl VirtioPciCommonConfig {
             0x30 => self.with_queue_mut(queues, |q| q.set_used_ring_address(Some(value), None)),
             0x34 => self.with_queue_mut(queues, |q| q.set_used_ring_address(None, Some(value))),
             _ => {
-                warn!("invalid virtio register dword write: 0x{:x}", offset);
+                warn!("invalid virtio register dword write: 0x{offset:x}");
             }
         }
     }
 
     fn read_common_config_qword(&self, _offset: u64) -> u64 {
-        debug!("read_common_config_qword: offset 0x{:x}", _offset);
+        debug!("read_common_config_qword: offset 0x{_offset:x}");
         0 // Assume the guest has no reason to read write-only registers.
     }
 
     fn write_common_config_qword(&mut self, offset: u64, value: u64, queues: &mut [Queue]) {
-        debug!("write_common_config_qword: offset 0x{:x}", offset);
+        debug!("write_common_config_qword: offset 0x{offset:x}");
 
         let low = Some((value & 0xffff_ffff) as u32);
         let high = Some((value >> 32) as u32);
@@ -365,7 +371,7 @@ impl VirtioPciCommonConfig {
             0x28 => self.with_queue_mut(queues, |q| q.set_avail_ring_address(low, high)),
             0x30 => self.with_queue_mut(queues, |q| q.set_used_ring_address(low, high)),
             _ => {
-                warn!("invalid virtio register qword write: 0x{:x}", offset);
+                warn!("invalid virtio register qword write: 0x{offset:x}");
             }
         }
     }
@@ -397,7 +403,7 @@ impl Snapshottable for VirtioPciCommonConfig {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
 

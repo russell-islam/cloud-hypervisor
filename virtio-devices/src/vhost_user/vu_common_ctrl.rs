@@ -10,6 +10,7 @@ use std::sync::atomic::Ordering;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use log::{error, info};
 use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -155,8 +156,8 @@ impl VhostUserHandle {
     pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<(usize, Queue, EventFd)>,
-        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+        queues: &[(usize, Queue, EventFd)],
+        virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
@@ -339,8 +340,8 @@ impl VhostUserHandle {
     pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<(usize, Queue, EventFd)>,
-        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+        queues: &[(usize, Queue, EventFd)],
+        virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         acked_protocol_features: u64,
         backend_req_handler: &Option<FrontendReqHandler<S>>,
@@ -409,10 +410,7 @@ impl VhostUserHandle {
                 }
             };
 
-            error!(
-                "Failed connecting the backend after trying for 1 minute: {:?}",
-                err
-            );
+            error!("Failed connecting the backend after trying for 1 minute: {err:?}");
             Err(Error::VhostUserConnect)
         }
     }
@@ -573,12 +571,16 @@ impl VhostUserHandle {
             // divide it by 8.
             let len = region.size() / 8;
             // SAFETY: region is of size len
-            let bitmap = unsafe {
+            let bitmap: &[u64] = unsafe {
                 // Cast the pointer to u64
                 let ptr = region.as_ptr() as *const u64;
-                std::slice::from_raw_parts(ptr, len).to_vec()
+                std::slice::from_raw_parts(ptr, len)
             };
-            Ok(MemoryRangeTable::from_bitmap(bitmap, 0, 4096))
+            Ok(MemoryRangeTable::from_dirty_bitmap(
+                bitmap.iter().copied(),
+                0,
+                4096,
+            ))
         } else {
             Err(Error::MissingShmLogRegion)
         }

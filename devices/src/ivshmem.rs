@@ -11,6 +11,7 @@ use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, warn};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
@@ -33,7 +34,7 @@ const IVSHMEM_DEVICE_ID: u16 = 0x1110;
 
 const IVSHMEM_REG_BAR_SIZE: u64 = 0x100;
 
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 #[derive(Debug, Error)]
 pub enum IvshmemError {
@@ -68,7 +69,7 @@ pub trait IvshmemOps: Send + Sync {
         start_addr: u64,
         size: usize,
         backing_file: Option<PathBuf>,
-    ) -> Result<(Arc<GuestRegionMmap>, UserspaceMapping), IvshmemError>;
+    ) -> Result<(Arc<MmapRegion>, UserspaceMapping), IvshmemError>;
 
     fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError>;
 }
@@ -95,7 +96,7 @@ pub struct IvshmemDevice {
     region_size: u64,
     ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
     backend_file: Option<PathBuf>,
-    region: Option<Arc<GuestRegionMmap>>,
+    region: Option<Arc<MmapRegion>>,
     userspace_mapping: Option<UserspaceMapping>,
 }
 
@@ -113,14 +114,14 @@ impl IvshmemDevice {
         region_size: u64,
         backend_file: Option<PathBuf>,
         ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self, IvshmemError> {
-        let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
-                IvshmemError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {e}",
-                ))
-            })?;
+        let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
+            .map_err(|e| {
+            IvshmemError::RetrievePciConfigurationState(anyhow!(
+                "Failed to get PciConfigurationState from Snapshot: {e}",
+            ))
+        })?;
 
         let state: Option<IvshmemDeviceState> = snapshot
             .as_ref()
@@ -180,11 +181,7 @@ impl IvshmemDevice {
         Ok(device)
     }
 
-    pub fn set_region(
-        &mut self,
-        region: Arc<GuestRegionMmap>,
-        userspace_mapping: UserspaceMapping,
-    ) {
+    pub fn set_region(&mut self, region: Arc<MmapRegion>, userspace_mapping: UserspaceMapping) {
         self.region = Some(region);
         self.userspace_mapping = Some(userspace_mapping);
     }
@@ -209,7 +206,7 @@ impl IvshmemDevice {
 
 impl BusDevice for IvshmemDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -233,20 +230,18 @@ impl PciDevice for IvshmemDevice {
         if let Some(resources) = resources {
             for resource in resources {
                 match resource {
-                    Resource::PciBar { index, base, .. } => {
-                        match index {
-                            IVSHMEM_BAR0_IDX => {
-                                bar0_addr = Some(GuestAddress(base));
-                            }
-                            IVSHMEM_BAR1_IDX => {}
-                            IVSHMEM_BAR2_IDX => {
-                                bar2_addr = Some(GuestAddress(base));
-                            }
-                            _ => {
-                                error!("Unexpected pci bar index {index}");
-                            }
-                        };
-                    }
+                    Resource::PciBar { index, base, .. } => match index {
+                        IVSHMEM_BAR0_IDX => {
+                            bar0_addr = Some(GuestAddress(base));
+                        }
+                        IVSHMEM_BAR1_IDX => {}
+                        IVSHMEM_BAR2_IDX => {
+                            bar2_addr = Some(GuestAddress(base));
+                        }
+                        _ => {
+                            error!("Unexpected pci bar index {index}");
+                        }
+                    },
                     _ => {
                         error!("Unexpected resource {resource:?}");
                     }
@@ -348,7 +343,7 @@ impl PciDevice for IvshmemDevice {
             _ => {
                 warn!("Invalid bar_idx: {bar_idx}");
             }
-        };
+        }
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {

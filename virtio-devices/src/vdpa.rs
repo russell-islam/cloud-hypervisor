@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
@@ -19,7 +21,7 @@ use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -27,7 +29,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioInterrupt, VirtioInterruptType,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 #[derive(Error, Debug)]
@@ -132,7 +134,7 @@ impl Vdpa {
             backend_features,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vDPA {}", id);
+            info!("Restoring vDPA {id}");
 
             vhost.set_backend_features_acked(state.backend_features);
             vhost
@@ -216,8 +218,8 @@ impl Vdpa {
     fn activate_vdpa(
         &mut self,
         mem: &GuestMemoryMmap,
-        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue, EventFd)>,
+        virtio_interrupt: &dyn VirtioInterrupt,
+        queues: &[(usize, Queue, EventFd)],
     ) -> Result<()> {
         assert!(self.vhost.is_some());
         self.vhost
@@ -245,15 +247,15 @@ impl Vdpa {
                 queue_size,
                 flags: 0u32,
                 desc_table_addr: queue.desc_table().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     queue_size as usize * std::mem::size_of::<RawDescriptor>(),
                 ),
                 used_ring_addr: queue.used_ring().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     4 + queue_size as usize * 8,
                 ),
                 avail_ring_addr: queue.avail_ring().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     4 + queue_size as usize * 2,
                 ),
                 log_addr: None,
@@ -326,15 +328,26 @@ impl Vdpa {
             .map_err(Error::SetStatus)
     }
 
-    fn dma_map(
+    /// # SAFETY
+    ///
+    /// `host_vaddr` must point to `size` bytes of valid memory.
+    unsafe fn dma_map(
         &mut self,
         iova: u64,
         size: u64,
         host_vaddr: *const u8,
         readonly: bool,
     ) -> Result<()> {
-        let iova_last = iova + size - 1;
+        let Some(iova_last) = iova.checked_add(size) else {
+            return Err(Error::InvalidIovaRange(iova, u64::MAX));
+        };
+        let Some(iova_last) = iova_last.checked_sub(1) else {
+            return Err(Error::InvalidIovaRange(0, 0));
+        };
         if iova < self.iova_range.first || iova_last > self.iova_range.last {
+            return Err(Error::InvalidIovaRange(iova, iova_last));
+        }
+        if isize::try_from(size).is_err() {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
@@ -398,20 +411,20 @@ impl VirtioDevice for Vdpa {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         assert!(self.vhost.is_some());
         if let Err(e) = self.vhost.as_ref().unwrap().get_config(offset as u32, data) {
-            error!("Failed reading virtio config: {}", e);
+            error!("Failed reading virtio config: {e}");
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         assert!(self.vhost.is_some());
         if let Err(e) = self.vhost.as_ref().unwrap().set_config(offset as u32, data) {
-            error!("Failed writing virtio config: {}", e);
+            error!("Failed writing virtio config: {e}");
         }
     }
 
@@ -421,7 +434,7 @@ impl VirtioDevice for Vdpa {
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues)
+        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         // Store the virtio interrupt handler as we need to return it on reset
@@ -433,7 +446,7 @@ impl VirtioDevice for Vdpa {
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         if let Err(e) = self.reset_vdpa() {
-            error!("Failed to reset vhost-vdpa: {:?}", e);
+            error!("Failed to reset vhost-vdpa: {e:?}");
             return None;
         }
 
@@ -444,18 +457,18 @@ impl VirtioDevice for Vdpa {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 
 impl Pausable for Vdpa {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Pause(anyhow!(
                 "Can't pause a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 
@@ -464,12 +477,12 @@ impl Pausable for Vdpa {
             return Ok(());
         }
 
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Resume(anyhow!(
                 "Can't resume a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 }
@@ -487,7 +500,7 @@ impl Snapshottable for Vdpa {
         }
 
         let snapshot = Snapshot::new_from_state(&self.state().map_err(|e| {
-            MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {:?}", e))
+            MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {e:?}"))
         })?)?;
 
         // Force the vhost handler to be dropped in order to close the vDPA
@@ -509,7 +522,7 @@ impl Migratable for Vdpa {
         if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) != 0 {
             assert!(self.vhost.is_some());
             self.vhost.as_ref().unwrap().suspend().map_err(|e| {
-                MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {:?}", e))
+                MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {e:?}"))
             })
         } else {
             Err(MigratableError::StartMigration(anyhow!(
@@ -537,11 +550,10 @@ impl<M: GuestAddressSpace> VdpaDmaMapping<M> {
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M> {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+        let usize_size = size.try_into().unwrap();
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr = if mem.check_range(guest_addr, size as usize) {
-            mem.get_host_address(guest_addr).unwrap() as *const u8
-        } else {
+        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, usize_size) else {
             return Err(io::Error::other(format!(
                 "failed to convert guest address 0x{gpa:x} into \
                      host user virtual address"
@@ -552,20 +564,24 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
             iova, gpa, size, user_addr as u64
         );
-        self.device
-            .lock()
-            .unwrap()
-            .dma_map(iova, size, user_addr, false)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to map memory for vDPA device, \
+        // SAFETY: get_host_address_range() guarantees that
+        // user_addr points to `size` bytes of memory.
+        unsafe {
+            self.device
+                .lock()
+                .unwrap()
+                .dma_map(iova, size, user_addr, false)
+                .map_err(|e| {
+                    io::Error::other(format!(
+                        "failed to map memory for vDPA device, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                ))
-            })
+                    ))
+                })
+        }
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
-        debug!("DMA unmap iova 0x{:x} size 0x{:x}", iova, size);
+        debug!("DMA unmap iova 0x{iova:x} size 0x{size:x}");
         self.device
             .lock()
             .unwrap()
