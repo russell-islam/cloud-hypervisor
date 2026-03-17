@@ -38,7 +38,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Instant;
-use std::{cmp, result};
+use std::{cmp, mem, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
@@ -436,6 +436,7 @@ impl Request {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
+        let alignment = disk_image.alignment();
 
         let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
@@ -466,14 +467,15 @@ impl Request {
             assert!(origin_ptr.len() >= data_len);
             let origin_ptr = origin_ptr.ptr_guard();
 
-            // Verify the buffer alignment.
-            // In case it's not properly aligned, an intermediate buffer is
-            // created with the correct alignment, and a copy from/to the
-            // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+            // O_DIRECT requires buffer addresses to be aligned to the
+            // backend device's logical block size. In case it's not properly
+            // aligned, an intermediate buffer is created with the correct
+            // alignment, and a copy from/to the origin buffer is performed,
+            // depending on the type of operation.
+            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(alignment) {
                 origin_ptr.as_ptr() as *mut libc::c_void
             } else {
-                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
+                let layout = Layout::from_size_align(data_len, alignment as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {
@@ -846,34 +848,19 @@ fn probe_file_sparse_support(fd: libc::c_int) -> bool {
     supported
 }
 
-/// Probe sparse support for a block device using ioctls.
-fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
-    ioctl_io_nr!(BLKDISCARD, 0x12, 119);
-    ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
-
-    let range: [u64; 2] = [0, 0];
-
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let punch_hole = unsafe { ioctl(fd, BLKDISCARD() as _, &range) } == 0;
-
-    if !punch_hole {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKDISCARD probe returned: {err}");
-    }
-
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let zero_range = unsafe { ioctl(fd, BLKZEROOUT() as _, &range) } == 0;
-
-    if !zero_range {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKZEROOUT probe returned: {err}");
-    }
-
-    let supported = punch_hole || zero_range;
-    info!(
-        "Probed block device sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
-    );
-    supported
+/// Probe sparse support for a block device.
+///
+/// Block devices always report sparse support. `BLKZEROOUT` is guaranteed to
+/// succeed as the kernel provides a software fallback writing explicit zeros
+/// when the hardware lacks a native write zeroes command. `BLKDISCARD` may fail
+/// at runtime with `EOPNOTSUPP` on devices without trim or discard support, but
+/// Linux guests handle this gracefully by ceasing discard requests.
+///
+/// There is no non destructive read only ioctl to query block device discard
+/// or write zeroes capabilities.
+fn probe_block_device_sparse_support(_fd: libc::c_int) -> bool {
+    info!("Block device: assuming sparse support");
+    true
 }
 
 /// Preallocate disk space for a disk image file.
@@ -1174,8 +1161,73 @@ impl DiskTopology {
         Ok(block_size)
     }
 
+    /// Query the O_DIRECT alignment requirement for a regular file.
+    ///
+    /// Uses `statx(STATX_DIOALIGN)` (Linux >= 6.1) to obtain the exact
+    /// memory and offset alignment the kernel requires for direct I/O on
+    /// this specific file. Unlike `fstatvfs().f_bsize`, which only returns
+    /// the filesystem's preferred I/O block size, `STATX_DIOALIGN` reports
+    /// the true per-file DIO constraints accounting for the filesystem,
+    /// underlying block device, and any stacking (loop, dm, etc.).
+    fn query_file_alignment(f: &File) -> u64 {
+        // The libc crate does not expose statx / STATX_DIOALIGN on all
+        // targets (e.g. musl), so define the constant and a minimal repr(C)
+        // struct locally and invoke the syscall directly.
+        const STATX_DIOALIGN: u32 = 0x2000;
+
+        // Minimal statx layout, only the needed fields,
+        // everything else is padding.
+        #[repr(C)]
+        struct Statx {
+            stx_mask: u32,
+            _pad: [u8; 148],
+            stx_dio_mem_align: u32,
+            stx_dio_offset_align: u32,
+            _pad2: [u8; 96],
+        }
+
+        let mut stx = mem::MaybeUninit::<Statx>::zeroed();
+        // SAFETY: FFI syscall with valid fd and correctly sized buffer.
+        let ret = unsafe {
+            libc::syscall(
+                libc::SYS_statx,
+                f.as_raw_fd(),
+                c"".as_ptr(),
+                libc::AT_EMPTY_PATH,
+                STATX_DIOALIGN,
+                stx.as_mut_ptr(),
+            )
+        };
+        if ret == 0 {
+            // SAFETY: statx succeeded, the struct is fully initialized.
+            let stx = unsafe { stx.assume_init() };
+            if stx.stx_mask & STATX_DIOALIGN != 0 && stx.stx_dio_mem_align > 0 {
+                let align = cmp::max(stx.stx_dio_mem_align, stx.stx_dio_offset_align) as u64;
+                debug!("statx(STATX_DIOALIGN) returned alignment {align}");
+                return align;
+            }
+        }
+
+        debug!("O_DIRECT alignment query failed, falling back to default {SECTOR_SIZE}");
+        SECTOR_SIZE
+    }
+
     pub fn probe(f: &File) -> std::io::Result<Self> {
         if !Self::is_block_device(f)? {
+            // For regular files opened with O_DIRECT, the logical block size
+            // must reflect the filesystem DIO alignment so the guest issues
+            // correctly sized I/O.
+            // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
+            let flags = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETFL) };
+            if flags >= 0 && (flags & libc::O_DIRECT) != 0 {
+                let alignment = Self::query_file_alignment(f);
+                return Ok(DiskTopology {
+                    logical_block_size: alignment,
+                    physical_block_size: alignment,
+                    minimum_io_size: alignment,
+                    optimal_io_size: 0,
+                });
+            }
             return Ok(DiskTopology::default());
         }
 
@@ -1185,5 +1237,131 @@ impl DiskTopology {
             minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
             optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::alloc::{Layout, alloc_zeroed, dealloc};
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::{ptr, slice};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn test_probe_regular_file_returns_valid_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let mut f = temp_file.into_file();
+        f.write_all(&[0u8; 4096]).unwrap();
+        f.sync_all().unwrap();
+
+        let topo = DiskTopology::probe(&f).unwrap();
+
+        assert_eq!(
+            topo.logical_block_size, SECTOR_SIZE,
+            "probe() should return {SECTOR_SIZE} for regular files without O_DIRECT, got {}",
+            topo.logical_block_size
+        );
+    }
+
+    #[test]
+    fn test_probe_regular_file_with_direct_returns_dio_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let path = temp_file.as_path().to_owned();
+        {
+            let f = temp_file.as_file();
+            f.set_len(1 << 20).unwrap(); // 1 MiB
+            f.sync_all().unwrap();
+        }
+
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(&path)
+            .unwrap();
+        let topo = DiskTopology::probe(&f).unwrap();
+
+        assert!(
+            topo.logical_block_size.is_power_of_two(),
+            "logical_block_size {} is not a power of two",
+            topo.logical_block_size
+        );
+        assert!(
+            topo.logical_block_size >= SECTOR_SIZE,
+            "logical_block_size {} is less than SECTOR_SIZE ({SECTOR_SIZE})",
+            topo.logical_block_size
+        );
+
+        let alignment = topo.logical_block_size as usize;
+        let layout = Layout::from_size_align(4096, alignment);
+        assert!(
+            layout.is_ok(),
+            "Layout::from_size_align(4096, {alignment}) failed: {:?}",
+            layout.err()
+        );
+    }
+
+    #[test]
+    fn test_dio_write_read_with_probed_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let path = temp_file.as_path().to_owned();
+        {
+            let f = temp_file.as_file();
+            f.set_len(1 << 20).unwrap(); // 1 MiB
+            f.sync_all().unwrap();
+        }
+
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(&path)
+            .unwrap();
+        let topo = DiskTopology::probe(&f).unwrap();
+        let alignment = topo.logical_block_size as usize;
+
+        let layout = Layout::from_size_align(alignment, alignment).unwrap();
+        // SAFETY: layout is valid (non-zero, power-of-two alignment).
+        let buf = unsafe { alloc_zeroed(layout) };
+        assert!(!buf.is_null());
+
+        // SAFETY: buf is valid for `alignment` bytes.
+        unsafe { ptr::write_bytes(buf, 0xAB, alignment) };
+
+        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
+        let written =
+            unsafe { libc::pwrite(f.as_raw_fd(), buf as *const libc::c_void, alignment, 0) };
+        assert_eq!(
+            written as usize,
+            alignment,
+            "O_DIRECT pwrite failed: {}",
+            io::Error::last_os_error()
+        );
+
+        // SAFETY: buf is valid for `alignment` bytes.
+        unsafe { ptr::write_bytes(buf, 0x00, alignment) };
+        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
+        let read = unsafe { libc::pread(f.as_raw_fd(), buf as *mut libc::c_void, alignment, 0) };
+        assert_eq!(
+            read as usize,
+            alignment,
+            "O_DIRECT pread failed: {}",
+            io::Error::last_os_error()
+        );
+
+        // SAFETY: buf is valid for `alignment` bytes after successful pread.
+        let slice = unsafe { slice::from_raw_parts(buf, alignment) };
+        assert!(
+            slice.iter().all(|&b| b == 0xAB),
+            "Data mismatch after O_DIRECT roundtrip"
+        );
+
+        // SAFETY: buf was allocated with this layout via alloc_zeroed.
+        unsafe { dealloc(buf, layout) };
     }
 }
