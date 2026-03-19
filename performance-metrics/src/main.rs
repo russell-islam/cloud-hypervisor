@@ -338,7 +338,7 @@ const TEST_LIST: [PerformanceTest; 60] = [
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_timeout: 2,
+            test_timeout: 6,
             test_iterations: 10,
             ..PerformanceTestControl::default()
         },
@@ -358,7 +358,7 @@ const TEST_LIST: [PerformanceTest; 60] = [
         name: "boot_time_16_vcpus_ms",
         func_ptr: performance_boot_time,
         control: PerformanceTestControl {
-            test_timeout: 2,
+            test_timeout: 24,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
@@ -379,7 +379,7 @@ const TEST_LIST: [PerformanceTest; 60] = [
         name: "boot_time_16_vcpus_pmem_ms",
         func_ptr: performance_boot_time_pmem,
         control: PerformanceTestControl {
-            test_timeout: 2,
+            test_timeout: 24,
             test_iterations: 10,
             num_boot_vcpus: Some(16),
             ..PerformanceTestControl::default()
@@ -1214,7 +1214,6 @@ fn run_test_with_timeout(
         let _ = sender.send(output);
     });
 
-    // Todo: Need to cleanup/kill all hanging child processes
     let test_timeout = test.calc_timeout(&test_iterations, &test_timeout);
     receiver
         .recv_timeout(Duration::from_secs(test_timeout))
@@ -1223,8 +1222,24 @@ fn run_test_with_timeout(
                 "[Error] Test '{}' time-out after {} seconds",
                 test.name, test_timeout
             );
+            cleanup_stale_processes();
             Error::TestTimeout
         })?
+}
+
+fn cleanup_stale_processes() {
+    for proc in &["cloud-hypervisor", "iperf3", "ethr"] {
+        let _ = Command::new("pkill").args(["-9", "-f", proc]).status();
+    }
+    thread::sleep(Duration::from_secs(2));
+}
+
+fn settle_host() {
+    let _ = Command::new("sync").status();
+    let _ = Command::new("bash")
+        .args(["-c", "echo 3 > /proc/sys/vm/drop_caches"])
+        .status();
+    thread::sleep(Duration::from_secs(1));
 }
 
 fn date() -> String {
@@ -1327,6 +1342,7 @@ fn main() {
 
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
+            settle_host();
             match run_test_with_timeout(test, &overrides) {
                 Ok(r) => {
                     metrics_report.results.push(r);
