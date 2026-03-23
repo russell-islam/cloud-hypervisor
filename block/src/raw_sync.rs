@@ -4,18 +4,16 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
-use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
-use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd};
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support};
 
+#[derive(Debug)]
 pub struct RawFileDiskSync {
     file: File,
 }
@@ -26,42 +24,64 @@ impl RawFileDiskSync {
     }
 }
 
-impl DiskFile for RawFileDiskSync {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
-        self.file
-            .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)
-    }
-
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
+impl disk_file::DiskSize for RawFileDiskSync {
+    fn logical_size(&self) -> BlockResult<u64> {
         self.file
             .metadata()
             .map(|m| m.len())
-            .map_err(DiskFileError::Size)
+            .map_err(BlockError::from)
+    }
+}
+
+impl disk_file::PhysicalSize for RawFileDiskSync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
+            .map_err(BlockError::from)
+    }
+}
+
+impl disk_file::DiskFd for RawFileDiskSync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
+    }
+}
+
+impl disk_file::Geometry for RawFileDiskSync {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(&self.file).unwrap_or_default()
+    }
+}
+
+impl disk_file::SparseCapable for RawFileDiskSync {
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
+    }
+}
+
+impl disk_file::Resizable for RawFileDiskSync {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        self.file.set_len(size).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, e)
+                .with_op(ErrorOp::Resize)
+        })
+    }
+}
+
+impl disk_file::DiskFile for RawFileDiskSync {}
+
+impl disk_file::AsyncDiskFile for RawFileDiskSync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        let cloned = self.file.try_clone().map_err(BlockError::from)?;
+        Ok(Box::new(RawFileDiskSync::new(cloned)))
     }
 
-    fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
+    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         let mut raw = RawFileSync::new(self.file.as_raw_fd());
         raw.alignment =
             DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
-    }
-
-    fn topology(&mut self) -> DiskTopology {
-        if let Ok(topology) = DiskTopology::probe(&self.file) {
-            topology
-        } else {
-            warn!("Unable to get device topology. Using default topology");
-            DiskTopology::default()
-        }
-    }
-
-    fn supports_sparse_operations(&self) -> bool {
-        probe_sparse_support(&self.file)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }
 
