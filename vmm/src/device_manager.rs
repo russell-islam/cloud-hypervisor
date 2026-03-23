@@ -2760,7 +2760,7 @@ impl DeviceManager {
                         }
                     } else if !disk_cfg.disable_aio && self.aio_is_supported() {
                         info!("Using asynchronous RAW disk file (aio)");
-                        DiskBackend::Legacy(Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>)
+                        DiskBackend::Next(Box::new(RawFileDiskAio::new(file)))
                     } else {
                         info!("Using synchronous RAW disk file");
                         DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))
