@@ -10494,6 +10494,7 @@ mod dbus_api {
     // to create a VM, boot it, and verify that it can be shut down and then
     // booted again.
     #[test]
+    #[cfg(not(feature = "sev_snp"))]
     #[cfg_attr(
         all(feature = "mshv", target_arch = "aarch64"),
         ignore = "disabled for mshv arm64, see ADO #60239414"
@@ -10588,6 +10589,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg(not(feature = "sev_snp"))]
     #[cfg_attr(
         all(feature = "mshv", target_arch = "aarch64"),
         ignore = "disabled for mshv arm64, see ADO #60239414"
@@ -10601,6 +10603,7 @@ mod dbus_api {
     }
 
     #[test]
+    #[cfg(not(feature = "sev_snp"))]
     #[cfg_attr(
         all(feature = "mshv", target_arch = "aarch64"),
         ignore = "disabled for mshv arm64, see ADO #60239414"
