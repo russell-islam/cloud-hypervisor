@@ -11,6 +11,7 @@ use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
 use crate::arch::x86::Exception;
 use crate::arch::x86::emulator::CpuStateManager;
 
+pub mod and;
 pub mod cmp;
 pub mod mov;
 pub mod movs;
