@@ -526,6 +526,18 @@ impl<T: CpuStateManager> Emulator<'_, T> {
             (movs, Movsd_m32_m32),
             (movs, Movsw_m16_m16),
             (movs, Movsb_m8_m8),
+            // AND
+            (and, And_rm8_r8),
+            (and, And_rm16_r16),
+            (and, And_rm32_r32),
+            (and, And_rm64_r64),
+            (and, And_rm8_imm8),
+            (and, And_rm16_imm16),
+            (and, And_rm32_imm32),
+            (and, And_rm64_imm32),
+            (and, And_rm16_imm8),
+            (and, And_rm32_imm8),
+            (and, And_rm64_imm8),
             // OR
             (or, Or_rm8_r8),
             // STOS
