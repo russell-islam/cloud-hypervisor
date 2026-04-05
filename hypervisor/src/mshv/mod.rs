@@ -381,16 +381,14 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// Get the supported CpuID
     ///
     fn get_supported_cpuid(&self) -> hypervisor::Result<Vec<CpuIdEntry>> {
-        let mut cpuid = Vec::new();
-        let functions: [u32; 2] = [0x1, 0xb];
+        let cpuid = self
+            .mshv
+            .get_supported_cpuid(HV_MAX_CPUID_ENTRIES)
+            .map_err(|e| hypervisor::HypervisorError::GetCpuId(e.into()))?;
 
-        for function in functions {
-            cpuid.push(CpuIdEntry {
-                function,
-                ..Default::default()
-            });
-        }
-        Ok(cpuid)
+        let v = cpuid.as_slice().iter().map(|e| (*e).into()).collect();
+
+        Ok(v)
     }
 
     /// Get maximum number of vCPUs
