@@ -150,6 +150,13 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             Eq,
             MSHV_GET_HOST_PARTITION_PROPERTY()
         )?],
+        #[cfg(target_arch = "x86_64")]
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            MSHV_GET_SUPPORTED_CPUID()
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_CREATE_VP())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IRQFD())?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_IOEVENTFD())?],
