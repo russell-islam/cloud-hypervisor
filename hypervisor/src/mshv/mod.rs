@@ -450,7 +450,7 @@ pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
     #[cfg(target_arch = "x86_64")]
-    cpuid: Vec<CpuIdEntry>,
+    cpuid: RwLock<Vec<CpuIdEntry>>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
@@ -1420,13 +1420,20 @@ impl cpu::Vcpu for MshvVcpu {
     /// X86 specific call to setup the CPUID registers.
     ///
     fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> cpu::Result<()> {
-        let cpuid: Vec<mshv_bindings::hv_cpuid_entry> = cpuid.iter().map(|e| (*e).into()).collect();
-        let mshv_cpuid = <CpuId>::from_entries(&cpuid)
+        let hv_entries: Vec<mshv_bindings::hv_cpuid_entry> =
+            cpuid.iter().map(|e| (*e).into()).collect();
+        let mshv_cpuid = <CpuId>::from_entries(&hv_entries)
             .map_err(|_| cpu::HypervisorCpuError::SetCpuid(anyhow!("failed to create CpuId")))?;
 
         self.fd
             .register_intercept_result_cpuid(&mshv_cpuid)
-            .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))
+            .map_err(|e| cpu::HypervisorCpuError::SetCpuid(e.into()))?;
+
+        // Cache the CPUID entries locally so they can be retrieved via
+        // get_cpuid2 and included in snapshots. The MSHV hypervisor has
+        // no bulk retrieval API for registered intercept results.
+        *self.cpuid.write().unwrap() = cpuid.to_vec();
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1434,7 +1441,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// X86 specific call to retrieve the CPUID registers.
     ///
     fn get_cpuid2(&self, _num_entries: usize) -> cpu::Result<Vec<CpuIdEntry>> {
-        Ok(self.cpuid.clone())
+        Ok(self.cpuid.read().unwrap().clone())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1496,6 +1503,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
         let mut state: VcpuMshvState = state.clone().into();
+        self.set_cpuid2(&state.cpuid)?;
         self.set_msrs(&state.msrs)?;
         self.set_vcpu_events(&state.vcpu_events)?;
         self.set_regs(&state.regs.into())?;
@@ -1551,7 +1559,10 @@ impl cpu::Vcpu for MshvVcpu {
             .get_all_vp_state_components()
             .map_err(|e| cpu::HypervisorCpuError::GetAllVpStateComponents(e.into()))?;
 
+        let cpuid = self.cpuid.read().unwrap().clone();
+
         Ok(VcpuMshvState {
+            cpuid,
             msrs,
             vcpu_events,
             regs: regs.into(),
@@ -1964,7 +1975,7 @@ impl vm::Vm for MshvVm {
             fd: vcpu_fd,
             vp_index: id,
             #[cfg(target_arch = "x86_64")]
-            cpuid: Vec::new(),
+            cpuid: RwLock::new(Vec::new()),
             #[cfg(target_arch = "x86_64")]
             msrs: self.msrs.load().as_ref().clone(),
             vm_ops,

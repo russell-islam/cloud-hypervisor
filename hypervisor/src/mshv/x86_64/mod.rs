@@ -35,6 +35,8 @@ pub use {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VcpuMshvState {
+    #[serde(default)]
+    pub cpuid: Vec<CpuIdEntry>,
     pub msrs: Vec<MsrEntry>,
     pub vcpu_events: VcpuEvents,
     pub regs: MshvStandardRegisters,
@@ -62,7 +64,8 @@ impl fmt::Display for VcpuMshvState {
         }
         write!(
             f,
-            "Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- DBG: {:?} --- VP States: {:?}",
+            "CPUID entries: {} -- Number of MSRs: {}: MSRs: {:#010X?}, -- VCPU Events: {:?} -- Standard registers: {:?} Special Registers: {:?} ---- Floating Point Unit: {:?} --- Extended Control Register: {:?} --- DBG: {:?} --- VP States: {:?}",
+            self.cpuid.len(),
             msr_entries.len(),
             msr_entries,
             self.vcpu_events,
