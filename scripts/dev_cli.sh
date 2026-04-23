@@ -483,6 +483,13 @@ cmd_tests() {
         ${exported_volumes:+$exported_volumes}
     )
 
+    # Common base environment variables shared by all test container runs.
+    common_env_args=(
+        --env BUILD_TARGET="$target"
+        --env RUSTFLAGS="$rustflags"
+        --env TARGET_CC="$target_cc"
+    )
+
     if [[ "$unit" = true ]]; then
         say "Running unit tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
@@ -490,9 +497,7 @@ cmd_tests() {
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
@@ -508,15 +513,17 @@ cmd_tests() {
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS"
     )
 
+    # Extend common_env_args with integration-specific settings.
+    common_env_args+=(
+        --env USER="root"
+        --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN"
+    )
+
     if [ "$integration" = true ]; then
         say "Running integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
@@ -529,11 +536,7 @@ cmd_tests() {
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
@@ -543,11 +546,7 @@ cmd_tests() {
         say "Running VFIO integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -556,11 +555,7 @@ cmd_tests() {
         say "Running Windows integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -569,11 +564,7 @@ cmd_tests() {
         say "Running 'live migration' integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
             "$CTR_IMAGE" \
@@ -584,11 +575,7 @@ cmd_tests() {
         say "Running 'rate limiter' integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_rate_limiter.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -597,12 +584,8 @@ cmd_tests() {
         say "Generating performance metrics for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_env_args[@]}" \
             --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -611,11 +594,7 @@ cmd_tests() {
         say "Generating code coverage information for $target..."
         run_container "$DOCKER_RUNTIME" run \
             "${common_args[@]}" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_coverage.sh "$@" || fix_dir_perms $? || exit $?
     fi
