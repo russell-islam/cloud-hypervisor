@@ -411,7 +411,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
-        skip: SkipTest::DontSkip,
+        skip: SkipTest::SkipForConfidentialVm,
     },
     PerformanceTest {
         name: "boot_time_16_vcpus_ms",
@@ -434,7 +434,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
-        skip: SkipTest::DontSkip,
+        skip: SkipTest::SkipForConfidentialVm,
     },
     PerformanceTest {
         name: "boot_time_16_vcpus_pmem_ms",
