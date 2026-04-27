@@ -263,6 +263,16 @@ impl PerformanceTestControl {
     }
 }
 
+/// Indicates whether a performance test should be skipped for a given VM type.
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum SkipTest {
+    #[default]
+    DontSkip,
+    SkipForConfidentialVm,
+    SkipForRegularVm,
+}
+
 /// A performance test should finish within the a certain time-out and
 /// return a performance metrics number (including the average number and
 /// standard deviation)
@@ -271,6 +281,8 @@ struct PerformanceTest {
     pub func_ptr: fn(&PerformanceTestControl) -> f64,
     pub control: PerformanceTestControl,
     unit_adjuster: fn(f64) -> f64,
+    #[allow(dead_code)]
+    skip: SkipTest,
 }
 
 impl PerformanceTest {
@@ -388,6 +400,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "boot_time_pmem_ms",
@@ -398,6 +411,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "boot_time_16_vcpus_ms",
@@ -409,6 +423,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "restore_latency_time_ms",
@@ -419,6 +434,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "boot_time_16_vcpus_pmem_ms",
@@ -430,6 +446,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_latency_us",
@@ -440,6 +457,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_single_queue_rx_gbps",
@@ -451,6 +469,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_single_queue_tx_gbps",
@@ -462,6 +481,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_multi_queue_rx_gbps",
@@ -473,6 +493,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_multi_queue_tx_gbps",
@@ -484,6 +505,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::bps_to_gbps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_single_queue_rx_pps",
@@ -495,6 +517,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_single_queue_tx_pps",
@@ -506,6 +529,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_multi_queue_rx_pps",
@@ -517,6 +541,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "virtio_net_throughput_multi_queue_tx_pps",
@@ -528,6 +553,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_read_MiBps",
@@ -543,6 +569,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_write_MiBps",
@@ -558,6 +585,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_random_read_MiBps",
@@ -573,6 +601,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_random_write_MiBps",
@@ -588,6 +617,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_read_MiBps",
@@ -603,6 +633,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_write_MiBps",
@@ -618,6 +649,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_random_read_MiBps",
@@ -633,6 +665,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_random_write_MiBps",
@@ -648,6 +681,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_read_IOPS",
@@ -663,6 +697,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_write_IOPS",
@@ -678,6 +713,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_random_read_IOPS",
@@ -693,6 +729,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_random_write_IOPS",
@@ -708,6 +745,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_read_IOPS",
@@ -723,6 +761,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_write_IOPS",
@@ -738,6 +777,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_random_read_IOPS",
@@ -753,6 +793,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_multi_queue_random_write_IOPS",
@@ -768,6 +809,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_read_MiBps",
@@ -783,6 +825,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_random_read_MiBps",
@@ -798,6 +841,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_read_warm_MiBps",
@@ -814,6 +858,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_read_MiBps",
@@ -829,6 +874,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_random_read_MiBps",
@@ -844,6 +890,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_read_warm_MiBps",
@@ -860,6 +907,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_read_MiBps",
@@ -875,6 +923,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_random_read_MiBps",
@@ -890,6 +939,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_read_warm_MiBps",
@@ -906,6 +956,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_multi_queue_read_MiBps",
@@ -921,6 +972,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_multi_queue_random_read_MiBps",
@@ -936,6 +988,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zlib_multi_queue_read_warm_MiBps",
@@ -952,6 +1005,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_read_MiBps",
@@ -967,6 +1021,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_random_read_MiBps",
@@ -982,6 +1037,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_read_warm_MiBps",
@@ -998,6 +1054,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_multi_queue_read_MiBps",
@@ -1013,6 +1070,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_multi_queue_random_read_MiBps",
@@ -1028,6 +1086,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_zstd_multi_queue_read_warm_MiBps",
@@ -1044,6 +1103,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_qcow2_read_MiBps",
@@ -1059,6 +1119,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_qcow2_random_read_MiBps",
@@ -1074,6 +1135,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_raw_read_MiBps",
@@ -1089,6 +1151,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_raw_random_read_MiBps",
@@ -1104,6 +1167,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_qcow2_read_warm_MiBps",
@@ -1120,6 +1184,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_backing_raw_read_warm_MiBps",
@@ -1136,6 +1201,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_qcow2_read_MiBps",
@@ -1151,6 +1217,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_qcow2_random_read_MiBps",
@@ -1166,6 +1233,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_raw_read_MiBps",
@@ -1181,6 +1249,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_raw_random_read_MiBps",
@@ -1196,6 +1265,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_qcow2_read_warm_MiBps",
@@ -1212,6 +1282,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "block_qcow2_multi_queue_backing_raw_read_warm_MiBps",
@@ -1228,6 +1299,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_raw_aio_drain_128_us",
@@ -1240,6 +1312,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_raw_aio_drain_256_us",
@@ -1252,6 +1325,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_read_128_us",
@@ -1264,6 +1338,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_read_256_us",
@@ -1276,6 +1351,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_random_read_128_us",
@@ -1288,6 +1364,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_random_read_256_us",
@@ -1300,6 +1377,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_write_128_us",
@@ -1312,6 +1390,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_write_256_us",
@@ -1324,6 +1403,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_punch_hole_128_us",
@@ -1336,6 +1416,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_punch_hole_256_us",
@@ -1348,6 +1429,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_fsync_128_us",
@@ -1360,6 +1442,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_fsync_256_us",
@@ -1372,6 +1455,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_backing_read_128_us",
@@ -1384,6 +1468,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_backing_read_256_us",
@@ -1396,6 +1481,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_cow_write_128_us",
@@ -1408,6 +1494,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_cow_write_256_us",
@@ -1420,6 +1507,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_compressed_read_128_us",
@@ -1432,6 +1520,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_compressed_read_256_us",
@@ -1444,6 +1533,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_multi_cluster_read_128_us",
@@ -1456,6 +1546,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_multi_cluster_read_256_us",
@@ -1468,6 +1559,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_l2_cache_miss_128_us",
@@ -1480,6 +1572,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_l2_cache_miss_256_us",
@@ -1492,6 +1585,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_read_128_us",
@@ -1504,6 +1598,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_read_256_us",
@@ -1516,6 +1611,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_batch_read_128_us",
@@ -1528,6 +1624,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_batch_read_256_us",
@@ -1540,6 +1637,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_random_read_128_us",
@@ -1552,6 +1650,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_random_read_256_us",
@@ -1564,6 +1663,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_multi_cluster_read_128_us",
@@ -1576,6 +1676,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_multi_cluster_read_256_us",
@@ -1588,6 +1689,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_backing_read_128_us",
@@ -1600,6 +1702,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_backing_read_256_us",
@@ -1612,6 +1715,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_compressed_read_128_us",
@@ -1624,6 +1728,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_compressed_read_256_us",
@@ -1636,6 +1741,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_write_128_us",
@@ -1648,6 +1754,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_write_256_us",
@@ -1660,6 +1767,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_l2_cache_miss_128_us",
@@ -1672,6 +1780,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_async_l2_cache_miss_256_us",
@@ -1684,6 +1793,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_batch_write_128_us",
@@ -1696,6 +1806,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
     PerformanceTest {
         name: "micro_block_qcow_batch_write_256_us",
@@ -1708,6 +1819,7 @@ const TEST_LIST: [PerformanceTest; 100] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_us,
+        skip: SkipTest::DontSkip,
     },
 ];
 
@@ -1854,7 +1966,8 @@ fn main() {
         None => Vec::new(),
     };
 
-    // Determine which tests will actually run.
+    // Determine which tests will actually run.let tests_to_run: Vec<&PerformanceTest> = test_list
+
     let tests_to_run: Vec<&PerformanceTest> = test_list
         .into_iter()
         .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
