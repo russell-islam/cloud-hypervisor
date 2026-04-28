@@ -656,8 +656,12 @@ pub fn load_igvm(
                 .collect();
             #[cfg(feature = "kvm")]
             let page_type = group[0].page_type;
+            #[cfg(feature = "kvm")]
             let mut new_cp = SnpCpuidInfo::new_zeroed();
-            let _ = guest_memory.read(new_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
+            #[cfg(feature = "kvm")]
+            if hypervisor_type == HypervisorType::Kvm {
+                let _ = guest_memory.read(new_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
+            }
             let import_result = memory_manager
                 .lock()
                 .unwrap()
