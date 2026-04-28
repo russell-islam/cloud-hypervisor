@@ -2840,10 +2840,15 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         #[cfg(not(target_arch = "riscv64"))]
-        // Configure shared state based on loaded kernel
-        entry_point
-            .map(|entry_point| self.configure_system(rsdp_addr, entry_point))
-            .transpose()?;
+        // Configure shared state based on loaded kernel.
+        // Skip for SEV-SNP guests: their memory layout is established
+        // by the IGVM loader, so writing EBDA/SMBIOS/mptable/boot
+        // params into guest memory would corrupt encrypted pages.
+        if rsdp_addr.is_some() {
+            entry_point
+                .map(|entry_point| self.configure_system(rsdp_addr, entry_point))
+                .transpose()?;
+        }
 
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
