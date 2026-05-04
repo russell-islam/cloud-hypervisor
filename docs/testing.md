@@ -383,21 +383,24 @@ coverage data.
 
 ## CI workflows
 
-The following GitHub Actions workflows exercise the test
-infrastructure on every pull request or merge-group event:
+The test-related GitHub Actions workflows currently are:
 
-| Workflow                        | Tests run                                           |
-|---------------------------------|-----------------------------------------------------|
-| `build.yaml`                    | Cargo build with multiple feature/toolchain combos. |
-| `quality.yaml`                  | Clippy (stable + beta), bisectability check.        |
-| `integration-x86-64.yaml`       | `--unit` + `--integration` (gnu, musl).             |
-| `integration-arm64.yaml`        | `--unit` + `--integration` + `--integration-windows` (musl). |
-| `integration-vfio.yaml`         | `--integration-vfio`.                               |
-| `integration-windows.yaml`      | `--integration-windows` (gnu, musl).                |
-| `integration-rate-limiter.yaml` | `--integration-rate-limiter`.                        |
-| `mshv-integration.yaml`         | `--hypervisor mshv --integration` on Azure VM.      |
-| `integration-metrics.yaml`      | `--metrics` (runs on push to `main` only).          |
+| Workflow file | Trigger(s) | Tests/checks run |
+|---------------|------------|------------------|
+| `ci.yaml` | `pull_request`, `merge_group` | Main CI pipeline. Includes formatting (`cargo fmt`), linting (`clippy` matrix + bisectability check on PRs), build matrix, and integration jobs listed below. |
+| `mshv-integration.yaml` | `pull_request_target`, `merge_group` | Provisions Azure infrastructure through reusable `mshv-infra.yaml`, then runs `scripts/dev_cli.sh tests --hypervisor mshv --integration` on x86_64. |
+| `integration-metrics.yaml` | `push` to `main` | Runs `scripts/dev_cli.sh tests --metrics -- --test-exclude micro_ -- --report-file /root/workloads/metrics.json` and uploads the report. |
 
-Most integration workflows run tests only on `merge_group` events.
-The `integration-x86-64.yaml` workflow also runs on `pull_request`
-events (limited to the `garm-jammy` + `gnu` combination).
+`ci.yaml` integration jobs and coverage:
+
+| Job | Trigger(s) | Tests run |
+|-----|------------|-----------|
+| `integration-x86-64-pr` | `pull_request`, `merge_group` (when preflight classifies changes as full CI) | `scripts/dev_cli.sh tests --unit --libc gnu` and `scripts/dev_cli.sh tests --integration --libc gnu`. |
+| `integration-x86-64-mq` | `merge_group` only | Remaining x86_64 combinations: (`garm-jammy`, `musl`), (`garm-jammy-amd`, `gnu`), (`garm-jammy-amd`, `musl`) each running `--unit` + `--integration`. |
+| `integration-arm64` | `merge_group` only | ARM64 `--unit --libc musl`, `--integration --libc musl`, and `--integration-windows --libc musl`. |
+| `integration-vfio` | `merge_group` only | `scripts/dev_cli.sh tests --integration-vfio` (musl variant currently disabled in workflow comments). |
+| `integration-windows` | `merge_group` only | x86_64 Windows tests for both `gnu` and `musl` via `scripts/dev_cli.sh tests --integration-windows` and `--libc musl`. |
+| `integration-rate-limiter` | `merge_group` only | `scripts/dev_cli.sh tests --integration-rate-limiter`. |
+
+Note: `mshv-infra.yaml` is a reusable infrastructure workflow called by
+`mshv-integration.yaml`; it does not run tests by itself.
