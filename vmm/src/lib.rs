@@ -1108,6 +1108,7 @@ impl Vmm {
             false,
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
+            0,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(

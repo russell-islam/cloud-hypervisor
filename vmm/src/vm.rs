@@ -1398,17 +1398,28 @@ impl Vm {
                 )
                 .map_err(Error::MemoryManager)?
             } else {
-                MemoryManager::new(
-                    vm.clone(),
-                    &vm_config.lock().unwrap().memory.clone(),
-                    None,
-                    phys_bits,
-                    #[cfg(feature = "tdx")]
-                    tdx_enabled,
-                    None,
-                    Default::default(),
-                )
-                .map_err(Error::MemoryManager)?
+                {
+                    let config = vm_config.lock().unwrap();
+                    let pmem_device_sizes: u64 = config
+                        .pmem
+                        .as_deref()
+                        .unwrap_or(&[])
+                        .iter()
+                        .filter_map(|p| p.size)
+                        .sum();
+                    MemoryManager::new(
+                        vm.clone(),
+                        &config.memory.clone(),
+                        None,
+                        phys_bits,
+                        #[cfg(feature = "tdx")]
+                        tdx_enabled,
+                        None,
+                        Default::default(),
+                        pmem_device_sizes,
+                    )
+                    .map_err(Error::MemoryManager)?
+                }
             };
 
         Vm::new_from_memory_manager(
