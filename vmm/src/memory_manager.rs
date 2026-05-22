@@ -257,6 +257,68 @@ struct ArchMemRegion {
     r_type: RegionType,
 }
 
+/// Dedicated guest-physical address region that hosts memory-device GPAs
+/// (virtio-pmem, virtio-mem zones, future pc-dimm-equivalents).
+///
+/// The region is anchored at a 1 GiB-aligned GPA immediately above guest
+/// RAM and sized either explicitly via `MemoryConfig::device_memory_size`
+/// or implicitly from the sum of declared `hotplug_size`/`pmem` headroom.
+/// This mirrors QEMU's `MachineState::device_memory` (see
+/// `hw/i386/pc.c::pc_get_device_memory_range`) and replaces the prior
+/// behaviour where pmem regions were placed at the top of the per-PCI-
+/// segment 64-bit MMIO window — that placement collided with guest
+/// kernel MAXMEM ceilings on hosts that advertise large `phys_bits`
+/// (e.g. 48 on bare-metal MSHV).
+///
+/// PCI64 BAR allocation continues to use the per-segment `mem64_allocator`
+/// and is unaffected by this region; the two windows are disjoint.
+pub(crate) struct DeviceMemoryRegion {
+    /// Inclusive base GPA of the region.
+    base: GuestAddress,
+    /// Size of the region in bytes.
+    size: u64,
+    /// Bottom-up first-fit allocator scoped to `[base, base+size)`.
+    allocator: Arc<Mutex<AddressAllocator>>,
+}
+
+#[allow(dead_code)] // TODO: top()/end() accessors used by later commits in this series.
+impl DeviceMemoryRegion {
+    /// Construct a new region. `base` is expected to already be aligned to
+    /// `DEVICE_MEMORY_ALIGN`; callers should round up before invoking.
+    pub(crate) fn new(base: GuestAddress, size: u64) -> Result<Self, Error> {
+        let allocator =
+            AddressAllocator::new(base, size).ok_or(Error::CreateDeviceMemoryAllocator)?;
+        Ok(Self {
+            base,
+            size,
+            allocator: Arc::new(Mutex::new(allocator)),
+        })
+    }
+
+    pub(crate) fn base(&self) -> GuestAddress {
+        self.base
+    }
+
+    pub(crate) fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Inclusive last GPA of the region.
+    pub(crate) fn end(&self) -> GuestAddress {
+        self.base.unchecked_add(self.size.saturating_sub(1))
+    }
+
+    /// First GPA *above* the region (exclusive). Suitable as the base for
+    /// the next downstream window (e.g. PCI64 mem64 allocator).
+    pub(crate) fn top(&self) -> GuestAddress {
+        self.base.unchecked_add(self.size)
+    }
+
+    pub(crate) fn allocator(&self) -> Arc<Mutex<AddressAllocator>> {
+        Arc::clone(&self.allocator)
+    }
+}
+
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -286,6 +348,12 @@ pub struct MemoryManager {
     arch_mem_regions: Vec<ArchMemRegion>,
     ram_allocator: AddressAllocator,
     dynamic: bool,
+
+    /// Dedicated guest-physical region for memory devices (virtio-pmem,
+    /// virtio-mem, future pc-dimm-equivalents), mirroring QEMU's
+    /// machine `device_memory` region. `None` until the constructor in a
+    /// subsequent commit starts populating it.
+    device_memory: Option<DeviceMemoryRegion>,
 
     // Keep track of calls to create_userspace_mapping() for guest RAM.
     // This is useful for getting the dirty pages as we need to know the
@@ -367,6 +435,10 @@ pub enum Error {
     /// Cannot create the system allocator
     #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
+
+    /// Cannot create the device-memory region allocator
+    #[error("Cannot create the device-memory region allocator")]
+    CreateDeviceMemoryAllocator,
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
@@ -1642,6 +1714,7 @@ impl MemoryManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: HashMap<u32, File>,
+        pmem_device_sizes: u64,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1671,6 +1744,7 @@ impl MemoryManager {
             next_memory_slot,
             selected_slot,
             next_hotplug_slot,
+            device_memory,
         ) = if let Some(data) = restore_data {
             let (regions, memory_zones) = Self::restore_memory_regions_and_zones(
                 &data.guest_ram_mappings,
@@ -1682,6 +1756,36 @@ impl MemoryManager {
             let guest_memory =
                 GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             let boot_guest_memory = guest_memory.clone();
+            // Rebuild the dedicated device-memory region from the
+            // saved (base, size) when present. Re-reserve every
+            // virtio-mem zone at its saved GPA so subsequent
+            // memory-device allocations (e.g. virtio-pmem hot-add)
+            // don't hand out overlapping addresses. Snapshots
+            // produced before this field was added carry `None` and
+            // fall back to the legacy bump-pointer layout via the
+            // saved `start_of_device_area`.
+            let device_memory = if let Some((base, size)) = data.device_memory {
+                let region = DeviceMemoryRegion::new(GuestAddress(base), size)?;
+                for zone in memory_zones.values() {
+                    if let Some(virtio_mem_zone) = zone.virtio_mem_zone() {
+                        let mem_region = virtio_mem_zone.region();
+                        region
+                            .allocator()
+                            .lock()
+                            .unwrap()
+                            .allocate(
+                                Some(mem_region.start_addr()),
+                                mem_region.len(),
+                                Some(virtio_devices::VIRTIO_MEM_ALIGN_SIZE),
+                            )
+                            .ok_or(Error::MemoryRangeAllocation)?;
+                    }
+                }
+                Some(region)
+            } else {
+                None
+            };
+
             (
                 GuestAddress(data.start_of_device_area),
                 data.boot_ram,
@@ -1694,6 +1798,7 @@ impl MemoryManager {
                 data.next_memory_slot,
                 data.selected_slot,
                 data.next_hotplug_slot,
+                device_memory,
             )
         } else {
             // Init guest memory
@@ -1722,8 +1827,54 @@ impl MemoryManager {
 
             let boot_guest_memory = guest_memory.clone();
 
-            let mut start_of_device_area =
+            let top_of_ram =
                 MemoryManager::start_addr(guest_memory.last_addr(), allow_mem_hotplug)?;
+
+            // Total hotplug capacity plus pmem device sizes declared
+            // across all zones. For the default-zone case
+            // (`!user_provided_zones`) the hotplug part is exactly
+            // `config.hotplug_size`; for user-provided zones it is the
+            // sum of per-zone `hotplug_size`. Adding pmem sizes ensures
+            // the region is large enough for all memory devices.
+            let default_device_memory_size: u64 =
+                zones.iter().filter_map(|z| z.hotplug_size).sum::<u64>() + pmem_device_sizes;
+            let device_memory_size = config
+                .device_memory_size
+                .unwrap_or(default_device_memory_size);
+
+            // Build the dedicated device-memory region 1 GiB-aligned
+            // above the top of guest RAM, mirroring QEMU's
+            // `pc_get_device_memory_range()`. The region hosts
+            // virtio-mem zones (and, in later commits, virtio-pmem and
+            // future pc-dimm-equivalents). When the resulting size is
+            // zero the region is skipped entirely so plain VMs without
+            // memory devices preserve their current layout bit-for-bit.
+            let device_memory = if device_memory_size > 0 {
+                let device_memory_base = GuestAddress(
+                    top_of_ram.0.div_ceil(arch::DEVICE_MEMORY_ALIGN) * arch::DEVICE_MEMORY_ALIGN,
+                );
+                let device_memory_top = device_memory_base
+                    .0
+                    .checked_add(device_memory_size)
+                    .ok_or(Error::GuestAddressOverFlow)?;
+                if device_memory_top > end_of_device_area.0.saturating_add(1) {
+                    error!(
+                        "device-memory region [{:#x}, {:#x}) exceeds available device area \
+                         end {:#x}; reduce `device_memory_size`/`hotplug_size` or raise \
+                         `phys_bits`",
+                        device_memory_base.0, device_memory_top, end_of_device_area.0
+                    );
+                    return Err(Error::InsufficientHotplugRam);
+                }
+                Some(DeviceMemoryRegion::new(
+                    device_memory_base,
+                    device_memory_size,
+                )?)
+            } else {
+                None
+            };
+
+            let mut start_of_device_area = top_of_ram;
 
             // Update list of memory zones for resize.
             for zone in zones.iter() {
@@ -1735,17 +1886,51 @@ impl MemoryManager {
                         }
 
                         if !user_provided_zones && config.hotplug_method == HotplugMethod::Acpi {
-                            start_of_device_area = start_of_device_area
-                                .checked_add(hotplug_size)
-                                .ok_or(Error::GuestAddressOverFlow)?;
+                            // ACPI RAM hotplug: reserve the requested
+                            // capacity at the bottom of the
+                            // device-memory region so it sits in the
+                            // same address window as future memory
+                            // devices. With no region present, fall
+                            // back to the legacy bump above
+                            // `start_of_device_area`.
+                            if let Some(region) = device_memory.as_ref() {
+                                region
+                                    .allocator()
+                                    .lock()
+                                    .unwrap()
+                                    .allocate_first_fit(None, hotplug_size, Some(128 << 20))
+                                    .ok_or(Error::InsufficientHotplugRam)?;
+                            } else {
+                                start_of_device_area = start_of_device_area
+                                    .checked_add(hotplug_size)
+                                    .ok_or(Error::GuestAddressOverFlow)?;
+                            }
                         } else {
-                            // Alignment must be "natural" i.e. same as size of block
-                            let start_addr = GuestAddress(
-                                start_of_device_area
-                                    .0
-                                    .div_ceil(virtio_devices::VIRTIO_MEM_ALIGN_SIZE)
-                                    * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
-                            );
+                            // virtio-mem zone: place inside the
+                            // device-memory region when present
+                            // (bottom-up first-fit, matching QEMU's
+                            // memory-device allocator). Fall back to
+                            // the legacy "just above RAM, naturally
+                            // aligned" bump when the region is absent.
+                            let start_addr = if let Some(region) = device_memory.as_ref() {
+                                region
+                                    .allocator()
+                                    .lock()
+                                    .unwrap()
+                                    .allocate_first_fit(
+                                        None,
+                                        hotplug_size,
+                                        Some(virtio_devices::VIRTIO_MEM_ALIGN_SIZE),
+                                    )
+                                    .ok_or(Error::InsufficientHotplugRam)?
+                            } else {
+                                GuestAddress(
+                                    start_of_device_area
+                                        .0
+                                        .div_ceil(virtio_devices::VIRTIO_MEM_ALIGN_SIZE)
+                                        * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
+                                )
+                            };
 
                             // When `prefault` is set by vm_restore, memory manager
                             // will create ram region with `prefault` option in
@@ -1778,14 +1963,23 @@ impl MemoryManager {
                                 blocks_state: Arc::new(Mutex::new(BlocksState::new(region_size))),
                             });
 
-                            start_of_device_area = start_addr
-                                .checked_add(hotplug_size)
-                                .ok_or(Error::GuestAddressOverFlow)?;
+                            if device_memory.is_none() {
+                                start_of_device_area = start_addr
+                                    .checked_add(hotplug_size)
+                                    .ok_or(Error::GuestAddressOverFlow)?;
+                            }
                         }
                     }
                 } else {
                     return Err(Error::MissingZoneIdentifier);
                 }
+            }
+
+            // Anchor PCI64 BAR window above the device-memory region
+            // when present, otherwise keep the legacy boundary that
+            // was bumped by the per-zone loop above.
+            if let Some(region) = device_memory.as_ref() {
+                start_of_device_area = region.top();
             }
 
             let mut hotplug_slots = Vec::with_capacity(HOTPLUG_COUNT);
@@ -1803,6 +1997,7 @@ impl MemoryManager {
                 0,
                 0,
                 0,
+                device_memory,
             )
         };
 
@@ -1879,6 +2074,7 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
+            device_memory,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             uefi_flash: None,
             thp: config.thp,
@@ -1914,6 +2110,7 @@ impl MemoryManager {
                 false,
                 Some(&mem_snapshot),
                 Default::default(),
+                0,
             )?;
 
             if memory_restore_mode == MemoryRestoreMode::OnDemand {
@@ -2404,6 +2601,16 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
+    /// Dedicated GPA region for memory devices (virtio-pmem, virtio-mem,
+    /// future pc-dimm-equivalents). Currently `None`; the constructor in a
+    /// subsequent commit in this series will populate it when either
+    /// `MemoryConfig::device_memory_size` is set or memory-device hotplug
+    /// requirements imply a non-empty default size.
+    #[allow(dead_code)] // TODO: callers added by subsequent commits in this series.
+    pub(crate) fn device_memory(&self) -> Option<&DeviceMemoryRegion> {
+        self.device_memory.as_ref()
+    }
+
     pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
         let memory_slot_free_list = Arc::clone(&self.memory_slot_free_list);
         let next_memory_slot = Arc::clone(&self.next_memory_slot);
@@ -2722,6 +2929,10 @@ impl MemoryManager {
             next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
+            device_memory: self
+                .device_memory
+                .as_ref()
+                .map(|r| (r.base().raw_value(), r.size())),
         }
     }
 
@@ -3180,6 +3391,13 @@ pub struct MemoryManagerSnapshotData {
     next_memory_slot: u32,
     selected_slot: usize,
     next_hotplug_slot: usize,
+    /// (base, size) of the dedicated device-memory region, when one was
+    /// in use at snapshot time. `None` for snapshots produced before the
+    /// region was introduced; the restore path falls back to the legacy
+    /// `start_of_device_area` layout in that case so older snapshots
+    /// continue to map at their original GPAs.
+    #[serde(default)]
+    device_memory: Option<(u64, u64)>,
 }
 
 impl Snapshottable for MemoryManager {
