@@ -87,12 +87,12 @@ iommufd-ioctls = "0.4.0"
 kvm-bindings = "0.14.2"
 kvm-ioctls = "0.25.1"
 linux-loader = { version = "0.14.0", default-features = false }
-mshv-bindings = "0.7.1"
-mshv-ioctls = "0.7.1"
+mshv-bindings = { path = "../mshv/mshv-bindings" }
+mshv-ioctls = { path = "../mshv/mshv-ioctls" }
 seccompiler = "0.5.0"
-vfio-bindings = { version = "0.7.0", default-features = false }
-vfio-ioctls = { version = "0.10.0", default-features = false }
-vfio_user = { version = "0.1.7", default-features = false }
+vfio-bindings = { path = "../vfio/vfio-bindings" , default-features = false }
+vfio-ioctls = { path = "../vfio/vfio-ioctls", default-features = false }
+vfio_user = { path = "../vfio/vfio-user", default-features = false }
 vhost = { version = "0.18.1", default-features = false }
 vhost-user-backend = { version = "0.24.1", default-features = false }
 virtio-bindings = "0.2.6"
