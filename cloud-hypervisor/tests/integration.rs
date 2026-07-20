@@ -6553,7 +6553,6 @@ mod common_parallel {
     // 4. The destination VM is functional (including various virtio-devices are working properly) after
     //    live migration;
     // Note: This test does not use vsock as we can't create two identical vsock on the same host.
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration(upgrade_test: bool, local: bool, paused: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7529,13 +7528,11 @@ mod common_parallel {
     // TODO: Add test of live upgrade paused vm after cloud-hypervisor-static
     // version is updated.
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_basic() {
         _test_live_migration(true, false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_local() {
         _test_live_migration(true, true, false);
     }
@@ -7854,7 +7851,6 @@ mod dbus_api {
 }
 
 mod ivshmem {
-    #[cfg(not(feature = "mshv"))]
     use std::fs::remove_dir_all;
     use std::process::Command;
 
@@ -8106,7 +8102,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_ivshmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8271,7 +8266,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8282,7 +8276,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest::default(),
@@ -8290,7 +8283,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_with_resume() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8301,7 +8293,6 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_check_guest_time() {
         snapshot_restore_common::_test_snapshot_restore(
             snapshot_restore_common::SnapshotRestoreTest {
@@ -8385,26 +8376,22 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
         snapshot_restore_common::_test_snapshot_restore_devices(true);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload() {
         snapshot_restore_common::_test_snapshot_restore_offload(false, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_virtio_mem() {
         snapshot_restore_common::_test_snapshot_restore_offload(true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_offload_ondemand() {
         snapshot_restore_common::_test_snapshot_restore_offload(false, true);
     }
@@ -8415,7 +8402,6 @@ mod ivshmem {
     }
 }
 
-#[cfg(not(feature = "mshv"))]
 mod snapshot_restore_common {
     use std::fs::remove_dir_all;
     use std::process::Command;
@@ -8827,6 +8813,7 @@ mod snapshot_restore_common {
         handle_child_output(r, &output);
     }
 
+    #[cfg(not(feature = "mshv"))]
     pub(crate) fn _test_snapshot_restore_uffd(
         memory_config: &str,
         memory_zone_config: &[&str],
@@ -9401,9 +9388,7 @@ mod snapshot_restore_common {
 }
 
 mod common_sequential {
-    #[cfg(not(feature = "mshv"))]
     use std::fs::remove_dir_all;
-    #[cfg(not(feature = "mshv"))]
     use std::net::{IpAddr, Ipv4Addr};
 
     use crate::*;
@@ -9441,7 +9426,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -9675,7 +9659,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_virtio_fs() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -9836,7 +9819,6 @@ mod common_sequential {
         let _ = fs::remove_file(shared_dir.join("post_restore_file"));
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_balloon(upgrade_test: bool, local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10040,7 +10022,6 @@ mod common_sequential {
         handle_child_output(r, &dest_output);
     }
 
-    #[cfg(not(feature = "mshv"))]
     fn _test_live_migration_numa(upgrade_test: bool, local: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -10418,13 +10399,11 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon() {
         _test_live_migration_balloon(true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_balloon_local() {
         _test_live_migration_balloon(true, true);
     }
@@ -10442,13 +10421,11 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa() {
         _test_live_migration_numa(true, false);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_upgrade_numa_local() {
         _test_live_migration_numa(true, true);
     }
@@ -11322,7 +11299,6 @@ mod windows {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #4327")]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
