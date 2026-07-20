@@ -5,9 +5,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-#[cfg(not(feature = "mshv"))]
-use std::process::Stdio;
-use std::process::{Child, Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::string::String;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
@@ -17,7 +15,6 @@ use std::{cmp, fs, io, panic, thread};
 use block::formats::qcow::ImageType as QcowImageType;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
-#[cfg(not(feature = "mshv"))]
 use wait_timeout::ChildExt;
 
 const QCOW2_INCOMPATIBLE_FEATURES_OFFSET: u64 = 72;
@@ -1112,7 +1109,50 @@ pub(crate) fn bdf_from_hotplug_response(
     (segment_id, bus_id, device_id, function_id)
 }
 
-#[cfg(not(feature = "mshv"))]
+#[cfg(target_arch = "x86_64")]
+/// Create a 16 MiB raw backing file at `disk_path`, hot-add it as `test0` on
+/// the source VM, and wait for `/dev/vdc` to appear in the guest. Used by
+/// live-migration tests to exercise the hotplug path across a migration.
+pub(crate) fn hotplug_probe_disk_add(guest: &Guest, api_socket: &str, disk_path: &str) {
+    assert!(
+        exec_host_command_status(&format!(
+            "dd if=/dev/zero of={disk_path} bs=1M count=16 status=none"
+        ))
+        .success()
+    );
+    assert!(remote_command(
+        api_socket,
+        "add-disk",
+        Some(&format!("path={disk_path},id=test0")),
+    ));
+    assert!(wait_until(Duration::from_secs(10), || {
+        guest
+            .ssh_command("lsblk | grep -c vdc || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == 1))
+    }));
+}
+
+#[cfg(target_arch = "x86_64")]
+/// Verify the probe disk added by `hotplug_probe_disk_add` still exists in
+/// the guest and hot-remove it via the given API socket.
+pub(crate) fn hotplug_probe_disk_remove(guest: &Guest, api_socket: &str) {
+    assert_eq!(
+        guest
+            .ssh_command("lsblk | grep -c vdc")
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap_or_default(),
+        1
+    );
+    assert!(remote_command(api_socket, "remove-device", Some("test0")));
+    assert!(wait_until(Duration::from_secs(10), || {
+        guest
+            .ssh_command("lsblk | grep -c vdc || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().is_ok_and(|c| c == 0))
+    }));
+}
+
 pub(crate) fn start_live_migration(
     migration_socket: &str,
     src_api_socket: &str,
@@ -1230,7 +1270,6 @@ pub(crate) fn start_live_migration(
     send_success && receive_success
 }
 
-#[cfg(not(feature = "mshv"))]
 pub(crate) fn print_and_panic(
     src_vm: Child,
     dest_vm: Child,
