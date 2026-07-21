@@ -12,6 +12,16 @@ SHA-1 checksums.  Uses only the Python 3 standard library.
 Usage:
     fetch_workloads.py [--arch ARCH] [--test TEST] [--workloads-dir DIR]
                        [--verify-only] [--asset-file FILE] [-j JOBS]
+
+Environment variables:
+    MIGRATABLE_VERSION    Override the release tag used for the previous
+                          ``cloud-hypervisor-static`` binary that drives
+                          the live-upgrade tests.  Must match ``vXX.Y``
+                          (e.g. ``v47.0``).  When set, the pinned SHA-1
+                          for that asset is skipped because it belongs
+                          to the default release.
+    AUTH_DOWNLOAD_TOKEN   GitHub token used when downloading release
+                          assets from github.com.
 """
 
 from __future__ import annotations
@@ -31,6 +41,54 @@ import urllib.request
 from pathlib import Path
 
 _print_lock = threading.Lock()
+
+# Assets whose URL and pinned SHA-1 point at a specific Cloud Hypervisor
+# release binary.  Users can retarget these to a newer release via the
+# ``MIGRATABLE_VERSION`` environment variable (see module docstring).
+MIGRATABLE_ASSETS = {"cloud-hypervisor-static", "cloud-hypervisor-static-aarch64"}
+MIGRATABLE_VERSION_RE = re.compile(r"^v[0-9]{2,}\.[0-9]+$")
+_RELEASE_URL_VERSION_RE = re.compile(
+    r"(?P<prefix>/cloud-hypervisor/releases/download/)v[0-9]+\.[0-9]+/"
+)
+
+
+def apply_migratable_version(
+    assets: list[dict], version: str, workloads: Path, verify_only: bool
+) -> None:
+    """Rewrite the URL of :data:`MIGRATABLE_ASSETS` entries to *version*.
+
+    The pinned SHA-1 is cleared for the rewritten entries because it
+    belongs to the default release, not the override.  Any cached copy
+    of the default binary is removed so the requested version is
+    fetched fresh, unless ``verify_only`` is set: in verify-only mode we
+    must not delete the file we are about to check.  A warning is
+    printed for each rewritten asset.
+    """
+    for asset in assets:
+        if asset.get("filename") not in MIGRATABLE_ASSETS:
+            continue
+        url = asset.get("url")
+        if not url:
+            continue
+        new_url, n = _RELEASE_URL_VERSION_RE.subn(
+            rf"\g<prefix>{version}/", url, count=1
+        )
+        if n == 0:
+            _log_err(
+                f"WARN     {asset['filename']}: URL does not match the "
+                "expected release pattern; MIGRATABLE_VERSION ignored"
+            )
+            continue
+        asset["url"] = new_url
+        asset["sha1"] = None
+        if not verify_only:
+            cached = workloads / asset["filename"]
+            if cached.exists():
+                cached.unlink()
+        _log(
+            f"OVERRIDE {asset['filename']}: using {version} "
+            "(SHA-1 verification skipped)"
+        )
 
 
 def parse_yaml(path: Path) -> list[dict]:
@@ -250,6 +308,15 @@ def main() -> int:
     assets = parse_yaml(asset_file)
     auth_token = os.environ.get("AUTH_DOWNLOAD_TOKEN")
 
+    migratable_version = os.environ.get("MIGRATABLE_VERSION")
+    if migratable_version and not MIGRATABLE_VERSION_RE.match(migratable_version):
+        print(
+            f"Error: MIGRATABLE_VERSION={migratable_version!r} must match "
+            "vXX.Y (e.g. v47.0)",
+            file=sys.stderr,
+        )
+        return 1
+
     filtered = []
     for asset in assets:
         arch_list = asset.get("arch") or []
@@ -260,6 +327,11 @@ def main() -> int:
             if test_list and args.test_filter not in test_list:
                 continue
         filtered.append(asset)
+
+    if migratable_version:
+        apply_migratable_version(
+            filtered, migratable_version, workloads, args.verify_only
+        )
 
     if not filtered:
         print(f"No assets match arch={args.arch}"

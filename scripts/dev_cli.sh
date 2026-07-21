@@ -585,6 +585,7 @@ cmd_tests() {
     common_env_args+=(
         --env USER="root"
         --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN"
+        --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION"
         --env CH_CUSTOM_KERNEL="$CH_CUSTOM_KERNEL"
         --env CH_CUSTOM_BZIMAGE="$CH_CUSTOM_BZIMAGE"
         --env CH_CUSTOM_FIRMWARE="$CH_CUSTOM_FIRMWARE"
