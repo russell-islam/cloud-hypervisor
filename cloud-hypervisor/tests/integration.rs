@@ -7491,7 +7491,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_tcp_postcopy() {
         _test_live_migration_tcp_postcopy();
     }
@@ -8338,13 +8337,11 @@ mod ivshmem {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd() {
         snapshot_restore_common::_test_snapshot_restore_uffd("size=2G", &[], 1_920_000);
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd_shared_memory() {
         snapshot_restore_common::_test_snapshot_restore_uffd("size=512M,shared=on", &[], 480_000);
     }
@@ -8787,7 +8784,6 @@ mod snapshot_restore_common {
         handle_child_output(r, &output);
     }
 
-    #[cfg(not(feature = "mshv"))]
     pub(crate) fn _test_snapshot_restore_uffd(
         memory_config: &str,
         memory_zone_config: &[&str],
@@ -9374,7 +9370,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_uffd_hugepage_zone() {
         if !exec_host_command_status(
             "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
