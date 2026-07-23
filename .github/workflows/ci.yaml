@@ -783,6 +783,8 @@ jobs:
       - name: Run integration tests
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration
+        env:
+          MIGRATABLE_VERSION: v50.2
   # Rate-limiter host is not available
   # integration-rate-limiter:
   #   name: integration-rate-limiter
