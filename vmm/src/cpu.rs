@@ -3396,11 +3396,24 @@ impl BusDevice for AcpiCpuHotplugController {
                     {
                         state.removing = false;
                     }
-                    // Trigger removal of vCPU:
-                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
-                        && let Err(e) = Self::remove_vcpu(self.selected_cpu, state)
-                    {
-                        error!("Error removing vCPU: {e:?}");
+                    // Only allow the guest to eject vCPUs the VMM asked to remove
+                    // (and never the boot vCPU). We gate on `pending_removal`, not
+                    // `state.removing`: the latter mirrors the CRMV bit and is
+                    // cleared by the AML CSCN scan before the guest runs `_EJ0`.
+                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG {
+                        if self.selected_cpu == 0 {
+                            warn!("Ignoring guest request to eject the boot vCPU (CPU 0)");
+                        } else if state.pending_removal.load(Ordering::SeqCst) {
+                            if let Err(e) = Self::remove_vcpu(self.selected_cpu, state) {
+                                error!("Error removing vCPU: {e:?}");
+                            }
+                        } else {
+                            warn!(
+                                "Ignoring guest request to eject vCPU {} not marked for \
+                                 removal by the VMM",
+                                self.selected_cpu
+                            );
+                        }
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);
