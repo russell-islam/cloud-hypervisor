@@ -37,7 +37,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::{X86_64CoreRegs as CoreRegs, X86SegmentRegs};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuVendor;
-#[cfg(feature = "kvm")]
+#[cfg(any(feature = "kvm", feature = "mshv"))]
 use hypervisor::HypervisorType;
 #[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
@@ -1198,7 +1198,7 @@ impl CpuManager {
     ) -> Result<()> {
         let reset_evt = self.reset_evt.try_clone().unwrap();
         let exit_evt = self.exit_evt.try_clone().unwrap();
-        #[cfg(feature = "kvm")]
+        #[cfg(any(feature = "kvm", feature = "mshv"))]
         let hypervisor_type = self.hypervisor.hypervisor_type();
         #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
@@ -1346,6 +1346,27 @@ impl CpuManager {
                     // This uses an async signal safe handler to kill the vcpu handles.
                     register_signal_handler(SIGRTMIN(), handle_signal)
                         .expect("Failed to register vcpu signal handler");
+
+                    // On MSHV, install an empty signal mask that is active only
+                    // for the duration of MSHV_RUN_VP. Signals delivered while
+                    // the vCPU is inside the ioctl (including SIGRTMIN kicks
+                    // from pause/kick/unplug paths) can then interrupt the
+                    // wait_event_interruptible calls in mshv_run_vp_*_scheduler
+                    // and return EINTR promptly. Mirrors KVM's KVM_SET_SIGNAL_MASK.
+                    #[cfg(feature = "mshv")]
+                    if matches!(hypervisor_type, HypervisorType::Mshv) {
+                        // SAFETY: sigset_t is a POD C type; zero-initialisation
+                        // is a valid empty set that we then normalise via
+                        // sigemptyset for portability.
+                        let mut empty: libc::sigset_t = unsafe { zeroed() };
+                        // SAFETY: FFI call on a valid sigset_t.
+                        unsafe { libc::sigemptyset(&mut empty); }
+                        if let Err(e) = vcpu.lock().unwrap().vcpu.set_signal_mask(Some(&empty)) {
+                            error!("Failed to install MSHV vCPU signal mask: {e:?}");
+                            return;
+                        }
+                    }
+
                     // Block until all CPUs are ready.
                     vcpu_thread_barrier.wait();
 

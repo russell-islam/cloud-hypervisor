@@ -370,6 +370,8 @@ pub enum HypervisorCpuError {
     GetNestedState(#[source] anyhow::Error),
     #[error("Failed to set nested guest state")]
     SetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set signal mask")]
+    SetSignalMask(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -601,6 +603,15 @@ pub trait Vcpu: Send + Sync {
     /// Set the "immediate_exit" state
     ///
     fn set_immediate_exit(&mut self, _exit: bool) {}
+    ///
+    /// Install a signal mask that is active only for the duration of
+    /// [`Self::run`]. Signals not present in the mask can interrupt the
+    /// underlying `RUN` ioctl with EINTR. Mirrors KVM's
+    /// `KVM_SET_SIGNAL_MASK`. Default: no-op.
+    ///
+    fn set_signal_mask(&self, _mask: Option<&libc::sigset_t>) -> Result<()> {
+        Ok(())
+    }
     #[cfg(feature = "tdx")]
     ///
     /// Returns the details about TDX exit reason
