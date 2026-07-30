@@ -6689,29 +6689,6 @@ mod common_parallel {
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
-            // x86_64: Following what's done in the `test_snapshot_restore`, we need
-            // to make sure that removing and adding back the virtio-net device does
-            // not break the live-migration support for virtio-pci.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), || {
-                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
-                }));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
-            }
-
             // Start the live-migration
             let migration_socket = String::from(
                 guest
@@ -7134,22 +7111,6 @@ mod common_parallel {
             // using direct kernel boot, where ACPI support is missing.
             #[cfg(target_arch = "x86_64")]
             {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), || {
-                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
-                }));
-                // Re-add the virtio-net device
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
-
                 assert!(hotplug_disk_absent());
                 assert!(remote_command(
                     &src_api_socket,
@@ -7993,26 +7954,6 @@ mod ivshmem {
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-            // x86_64: Following what's done in the `test_snapshot_restore`, we need
-            // to make sure that removing and adding back the virtio-net device does
-            // not break the live-migration support for virtio-pci.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                thread::sleep(Duration::new(10, 0));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                thread::sleep(Duration::new(10, 0));
-            }
 
             // Check ivshmem device in src guest.
             _test_ivshmem(&guest, &ivshmem_file_path, file_size);
@@ -8621,39 +8562,6 @@ mod snapshot_restore_common {
             }
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
-
-            // x86_64: We check that removing and adding back the virtio-net device
-            // does not break the snapshot/restore support for virtio-pci.
-            // This is an important thing to test as the hotplug will
-            // trigger a PCI BAR reprogramming, which is a good way of
-            // checking if the stored resources are correctly restored.
-            // Unplug the virtio-net device
-            // AArch64: Device hotplug is currently not supported, skipping here.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &api_socket_source,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                let latest_events = [&MetaEvent {
-                    event: "device-removed".to_string(),
-                    device_id: Some(net_id.to_string()),
-                }];
-                assert!(wait_for_latest_events_exact(
-                    Duration::from_secs(30),
-                    &latest_events,
-                    &event_path
-                ));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &api_socket_source,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                thread::sleep(Duration::new(10, 0));
-            }
 
             snapshot_restore_common::snapshot_and_check_events(
                 &api_socket_source,
@@ -10166,29 +10074,6 @@ mod common_sequential {
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
-            // x86_64: Following what's done in the `test_snapshot_restore`, we need
-            // to make sure that removing and adding back the virtio-net device does
-            // not break the live-migration support for virtio-pci.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), || {
-                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
-                }));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
-            }
-
             // Start the live-migration
             let migration_socket = String::from(
                 guest
@@ -10391,29 +10276,6 @@ mod common_sequential {
 
                     guest.check_numa_common(Some(&[1_920_000, 1_920_000, 1_920_000]), None, None);
                 }
-            }
-
-            // x86_64: Following what's done in the `test_snapshot_restore`, we need
-            // to make sure that removing and adding back the virtio-net device does
-            // not break the live-migration support for virtio-pci.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), || {
-                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
-                }));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
 
             // Start the live-migration
@@ -10779,28 +10641,6 @@ mod common_sequential {
             assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
-            // x86_64: Following what's done in the `test_snapshot_restore`, we need
-            // to make sure that removing and adding back the virtio-net device does
-            // not break the live-migration support for virtio-pci.
-            #[cfg(target_arch = "x86_64")]
-            {
-                assert!(remote_command(
-                    &src_api_socket,
-                    "remove-device",
-                    Some(net_id),
-                ));
-                assert!(wait_until(Duration::from_secs(10), || {
-                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
-                }));
-
-                // Plug the virtio-net device again
-                assert!(remote_command(
-                    &src_api_socket,
-                    "add-net",
-                    Some(net_params.as_str()),
-                ));
-                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
-            }
 
             // Enable watchdog and ensure its functional
             let expected_reboot_count = 1;
