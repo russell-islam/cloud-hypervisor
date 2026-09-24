@@ -1208,12 +1208,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd7de3a04f6fd55f171a6682852f7aa360bb848a85e0c610513349e006b3c139"
 
 [[package]]
+name = "iommufd-bindings"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccb1839dadf7e92244d8ae02a6b60f8d120c5674341dc18d401b715809641667"
+
+[[package]]
 name = "iommufd-ioctls"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8050f03ef0c6979597140b6d20da076931fb7a06389b8b0eb971b8f65b271748"
 dependencies = [
- "iommufd-bindings",
+ "iommufd-bindings 0.1.0",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "iommufd-ioctls"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1554a76cd851e90d53dadf754044a0d7c99797d7b9375fdb04e9cd60064320bb"
+dependencies = [
+ "iommufd-bindings 0.2.0",
+ "libc",
+ "log",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -2616,8 +2635,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e811560df37de4b473137c849f7b1f00a66d94ffb6abc3b03e6e3f555a56d79b"
 dependencies = [
  "byteorder",
- "iommufd-bindings",
- "iommufd-ioctls",
+ "iommufd-bindings 0.1.0",
+ "iommufd-ioctls 0.2.0",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
@@ -2857,7 +2876,7 @@ dependencies = [
  "hypervisor",
  "igvm",
  "igvm_defs",
- "iommufd-ioctls",
+ "iommufd-ioctls 0.3.1",
  "landlock",
  "libc",
  "linux-loader",
